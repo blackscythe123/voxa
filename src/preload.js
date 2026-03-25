@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld("voiceBridge", {
   },
   finalizeRecording: (audioBytes, mimeType) => ipcRenderer.invoke("finalize-recording", audioBytes, mimeType),
   getPreferences: () => ipcRenderer.invoke("get-preferences"),
-  savePreferences: (payload) => ipcRenderer.invoke("save-preferences", payload)
+  savePreferences: (payload) => ipcRenderer.invoke("save-preferences", payload),
+  loginChatGPT: () => ipcRenderer.invoke("login-chatgpt"),
+  openSettings: () => ipcRenderer.invoke("open-settings")
 });

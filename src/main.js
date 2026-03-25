@@ -1,13 +1,39 @@
 const path = require("node:path");
-const { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, nativeImage, shell } = require("electron");
-const { getPreferences, savePreferences } = require("./services/configStore");
-const { hasStorageState, loginWithPlaywright, transcribeAudio } = require("./services/chatgptAuth");
-const { insertTranscript } = require("./services/textInserter");
+const { app, BrowserWindow, globalShortcut, ipcMain, Menu, dialog } = require("electron");
 
+let mainWindow;
 let overlayWindow;
 let preferencesWindow;
-let tray;
 let isRecording = false;
+
+// Lazy load services to avoid startup issues
+let configStore, chatgptAuth, textInserter;
+function loadServices() {
+  if (!configStore) configStore = require("./services/configStore");
+  if (!chatgptAuth) chatgptAuth = require("./services/chatgptAuth");
+  if (!textInserter) textInserter = require("./services/textInserter");
+}
+
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    icon: path.join(__dirname, "..", "assets", "icon.png"),
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  return mainWindow;
+}
 
 function createOverlayWindow() {
   overlayWindow = new BrowserWindow({
@@ -75,8 +101,12 @@ function placeOverlay(position) {
 }
 
 function notifyRenderer(status, detail = "") {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.webContents.send("recording-status", { status, detail });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("recording-status", { status, detail });
+  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("recording-status", { status, detail });
+  }
 }
 
 function setRecordingState(nextState) {
@@ -86,7 +116,9 @@ function setRecordingState(nextState) {
 
 function stopRecording() {
   if (!isRecording) return;
-  overlayWindow.webContents.send("stop-recording");
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("stop-recording");
+  }
 }
 
 function startRecording() {
@@ -95,7 +127,8 @@ function startRecording() {
     return;
   }
 
-  const preferences = getPreferences();
+  loadServices();
+  const preferences = configStore.getPreferences();
   placeOverlay(preferences.overlayPosition);
   overlayWindow.showInactive();
   overlayWindow.webContents.send("start-recording", {
@@ -105,8 +138,9 @@ function startRecording() {
 }
 
 function registerHotkeys() {
+  loadServices();
   globalShortcut.unregisterAll();
-  const preferences = getPreferences();
+  const preferences = configStore.getPreferences();
 
   const startRegistered = globalShortcut.register(preferences.startHotkey, () => {
     startRecording();
@@ -121,69 +155,28 @@ function registerHotkeys() {
   }
 }
 
-function createTray() {
-  tray = new Tray(nativeImage.createEmpty());
-  const menu = Menu.buildFromTemplate([
-    {
-      label: "Start / Stop Recording",
-      click: () => {
-        if (isRecording) {
-          stopRecording();
-        } else {
-          startRecording();
-        }
-      }
-    },
-    {
-      label: "Login to ChatGPT",
-      click: async () => {
-        notifyRenderer("working", "Waiting for ChatGPT login in browser...");
-        const ok = await loginWithPlaywright();
-        notifyRenderer(ok ? "success" : "error", ok ? "ChatGPT login saved." : "ChatGPT login timed out.");
-      }
-    },
-    {
-      label: "Preferences",
-      click: () => createPreferencesWindow()
-    },
-    {
-      label: "Open App Data Folder",
-      click: () => {
-        shell.openPath(app.getPath("userData"));
-      }
-    },
-    { type: "separator" },
-    {
-      label: "Quit",
-      click: () => {
-        app.quit();
-      }
-    }
-  ]);
-
-  tray.setToolTip("budgetWhisper");
-  tray.setContextMenu(menu);
-}
-
 ipcMain.handle("finalize-recording", async (_event, audioBytes, mimeType) => {
   try {
+    loadServices();
     notifyRenderer("working", "Transcribing audio...");
 
-    if (!hasStorageState()) {
-      throw new Error("Login required. Use tray menu: Login to ChatGPT.");
+    if (!chatgptAuth.hasStorageState()) {
+      throw new Error("Login required. Click 'Login to ChatGPT' in the app menu.");
     }
 
-    const transcript = await transcribeAudio(Buffer.from(audioBytes), mimeType);
+    const transcript = await chatgptAuth.transcribeAudio(Buffer.from(audioBytes), mimeType);
     if (!transcript) {
       throw new Error("Empty transcript returned.");
     }
 
     notifyRenderer("working", "Inserting transcript...");
-    await insertTranscript(transcript);
+    await textInserter.insertTranscript(transcript);
 
     notifyRenderer("success", "Transcript inserted.");
     setRecordingState(false);
-    overlayWindow.hide();
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.hide();
+    }
 
     return { ok: true, transcript };
   } catch (error) {
@@ -193,21 +186,43 @@ ipcMain.handle("finalize-recording", async (_event, audioBytes, mimeType) => {
   }
 });
 
-ipcMain.handle("get-preferences", () => getPreferences());
+ipcMain.handle("get-preferences", () => {
+  loadServices();
+  return configStore.getPreferences();
+});
+
 ipcMain.handle("save-preferences", (_event, payload) => {
-  const next = savePreferences(payload || {});
+  loadServices();
+  const next = configStore.savePreferences(payload || {});
   registerHotkeys();
   return next;
 });
 
+ipcMain.handle("login-chatgpt", async () => {
+  loadServices();
+  notifyRenderer("working", "Opening ChatGPT login in your browser...");
+  const ok = await chatgptAuth.loginWithPlaywright();
+  if (ok) {
+    notifyRenderer("success", "ChatGPT login saved successfully!");
+  } else {
+    notifyRenderer("error", "ChatGPT login timed out or was cancelled.");
+  }
+  return ok;
+});
+
+ipcMain.handle("open-settings", () => {
+  createPreferencesWindow();
+});
+
 app.whenReady().then(() => {
+  createMainWindow();
   createOverlayWindow();
-  createTray();
   registerHotkeys();
 
-  const preferences = getPreferences();
-  if (preferences.autoLoginOnStart && !hasStorageState()) {
-    loginWithPlaywright().catch(() => {
+  loadServices();
+  const preferences = configStore.getPreferences();
+  if (preferences.autoLoginOnStart && !chatgptAuth.hasStorageState()) {
+    chatgptAuth.loginWithPlaywright().catch(() => {
       notifyRenderer("error", "Auto-login failed.");
     });
   }
