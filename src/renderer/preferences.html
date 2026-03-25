@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>budgetWhisper Preferences</title>
+    <style>
+      body {
+        margin: 0;
+        background: #0f1218;
+        color: #f4f6fb;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+      main {
+        padding: 20px;
+        max-width: 460px;
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: 22px;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: #d3daea;
+      }
+      input, select {
+        width: 100%;
+        margin-bottom: 14px;
+        border-radius: 8px;
+        border: 1px solid #394259;
+        background: #161d2c;
+        color: #f4f6fb;
+        padding: 10px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .row input {
+        width: auto;
+        margin: 0;
+      }
+      button {
+        border: none;
+        background: #6fdb8f;
+        color: #0d2014;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      #message {
+        margin-top: 12px;
+        min-height: 18px;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Preferences</h1>
+
+      <label for="startHotkey">Start hotkey</label>
+      <input id="startHotkey" placeholder="CommandOrControl+Shift+R" />
+
+      <label for="stopHotkey">Stop hotkey</label>
+      <input id="stopHotkey" placeholder="Escape" />
+
+      <label for="overlayPosition">Overlay position</label>
+      <select id="overlayPosition">
+        <option value="top-left">Top left</option>
+        <option value="top-right">Top right</option>
+        <option value="bottom-left">Bottom left</option>
+        <option value="bottom-right">Bottom right</option>
+      </select>
+
+      <label for="maxRecordingSeconds">Max recording seconds</label>
+      <input id="maxRecordingSeconds" type="number" min="10" max="600" />
+
+      <div class="row">
+        <input id="autoLoginOnStart" type="checkbox" />
+        <label for="autoLoginOnStart">Try ChatGPT auto-login on app start</label>
+      </div>
+
+      <button id="saveButton">Save</button>
+      <p id="message"></p>
+    </main>
+
+    <script>
+      const startHotkey = document.getElementById("startHotkey");
+      const stopHotkey = document.getElementById("stopHotkey");
+      const overlayPosition = document.getElementById("overlayPosition");
+      const autoLoginOnStart = document.getElementById("autoLoginOnStart");
+      const maxRecordingSeconds = document.getElementById("maxRecordingSeconds");
+      const saveButton = document.getElementById("saveButton");
+      const message = document.getElementById("message");
+
+      async function load() {
+        const prefs = await window.voiceBridge.getPreferences();
+        startHotkey.value = prefs.startHotkey;
+        stopHotkey.value = prefs.stopHotkey;
+        overlayPosition.value = prefs.overlayPosition;
+        autoLoginOnStart.checked = prefs.autoLoginOnStart;
+        maxRecordingSeconds.value = prefs.maxRecordingSeconds;
+      }
+
+      saveButton.addEventListener("click", async () => {
+        const payload = {
+          startHotkey: startHotkey.value.trim(),
+          stopHotkey: stopHotkey.value.trim(),
+          overlayPosition: overlayPosition.value,
+          autoLoginOnStart: autoLoginOnStart.checked,
+          maxRecordingSeconds: Number(maxRecordingSeconds.value || 120)
+        };
+
+        const saved = await window.voiceBridge.savePreferences(payload);
+        message.textContent = `Saved. Start: ${saved.startHotkey}, Stop: ${saved.stopHotkey}`;
+      });
+
+      load().catch((error) => {
+        message.textContent = error.message || "Failed to load preferences.";
+      });
+    </script>
+  </body>
+</html>
