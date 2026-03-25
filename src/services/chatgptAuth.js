@@ -13,37 +13,66 @@ function hasStorageState() {
   return fs.existsSync(getStorageStatePath());
 }
 
+async function verifyAuthenticatedSession(context) {
+  try {
+    const response = await context.request.get("https://chatgpt.com/backend-api/models", {
+      timeout: 10000,
+      failOnStatusCode: false
+    });
+
+    return response.status() === 200;
+  } catch {
+    return false;
+  }
+}
+
 async function loginWithPlaywright() {
   const browser = await chromium.launch({
     headless: false,
     channel: "chrome"
   });
 
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto("https://chatgpt.com/auth/login", { waitUntil: "domcontentloaded" });
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    
+    // Open ChatGPT and wait until backend session is truly authenticated.
+    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded" });
+    
+    console.log("Waiting for ChatGPT login...");
+    const startedAt = Date.now();
+    const timeoutMs = 10 * 60 * 1000; // 10 minutes to allow user to complete login
 
-  const startedAt = Date.now();
-  const timeoutMs = 5 * 60 * 1000;
+    // Poll for successful authentication.
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const isAuthenticated = await verifyAuthenticatedSession(context);
+        if (isAuthenticated) {
+          console.log("ChatGPT login detected (backend session verified).");
+          await context.storageState({ path: getStorageStatePath() });
+          await browser.close();
+          return true;
+        }
+      } catch (e) {
+        // Page might have changed during check, retry
+      }
 
-  while (Date.now() - startedAt < timeoutMs) {
-    const cookies = await context.cookies("https://chatgpt.com");
-    const hasSessionCookie = cookies.some((cookie) =>
-      cookie.name.toLowerCase().includes("session") ||
-      cookie.name.toLowerCase().includes("auth")
-    );
-
-    if (hasSessionCookie) {
-      await context.storageState({ path: getStorageStatePath() });
-      await browser.close();
-      return true;
+      // Check every 2 seconds
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    console.log("ChatGPT login timed out.");
+    await browser.close();
+    return false;
+  } catch (error) {
+    console.error("Login error:", error.message);
+    try {
+      await browser.close();
+    } catch (e) {
+      // Ignore close errors
+    }
+    return false;
   }
-
-  await browser.close();
-  return false;
 }
 
 async function transcribeAudio(audioBuffer, mimeType = "audio/webm") {
