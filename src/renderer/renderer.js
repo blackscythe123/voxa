@@ -1,7 +1,10 @@
 const statusEl = document.getElementById("status");
 const detailEl = document.getElementById("detail");
+const loginBtn = document.getElementById("loginButton");
+const settingsBtn = document.getElementById("settingsButton");
 const timerEl = document.getElementById("timer");
 const stopButton = document.getElementById("stopButton");
+const recordingOverlay = document.getElementById("recordingOverlay");
 
 let mediaRecorder;
 let chunks = [];
@@ -43,20 +46,25 @@ async function startRecording(payload) {
   maxRecordingSeconds = payload?.maxRecordingSeconds ?? 120;
   resetTimer();
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-  chunks = [];
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    chunks = [];
 
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
-      chunks.push(event.data);
-    }
-  };
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+      }
+    };
 
-  mediaRecorder.start();
-  stopButton.disabled = false;
-  setStatus("Recording", "Speak now. Press stop key or button to finish.");
-  startTimer();
+    mediaRecorder.start();
+    stopButton.disabled = false;
+    recordingOverlay.classList.remove("hidden");
+    setStatus("Recording", "Speak now. Press Escape or click Stop to finish.");
+    startTimer();
+  } catch (error) {
+    setStatus("Error", error.message || "Microphone unavailable.");
+  }
 }
 
 async function stopRecording() {
@@ -84,11 +92,29 @@ async function stopRecording() {
 
   if (!result.ok) {
     setStatus("Error", result.error || "Transcription failed.");
+    recordingOverlay.classList.add("hidden");
     return;
   }
 
-  setStatus("Done", "Transcript inserted into focused field.");
+  setStatus("Ready", "Transcript inserted!");
+  recordingOverlay.classList.add("hidden");
 }
+
+loginBtn.addEventListener("click", async () => {
+  loginBtn.disabled = true;
+  setStatus("Working", "Opening ChatGPT login in your browser (this stays open until you log in)...");
+  const ok = await window.voiceBridge.loginChatGPT();
+  loginBtn.disabled = false;
+  if (ok) {
+    setStatus("Ready", "ChatGPT authenticated! You can now use the app.");
+  } else {
+    setStatus("Error", "Login failed or timed out.");
+  }
+});
+
+settingsBtn.addEventListener("click", () => {
+  window.voiceBridge.openSettings();
+});
 
 stopButton.addEventListener("click", () => {
   stopRecording().catch((error) => {
@@ -98,7 +124,7 @@ stopButton.addEventListener("click", () => {
 
 window.voiceBridge.onStartRecording((_event, payload) => {
   startRecording(payload).catch((error) => {
-    setStatus("Error", error.message || "Microphone unavailable.");
+    setStatus("Error", error.message || "Failed to start recording.");
   });
 });
 
@@ -114,7 +140,8 @@ window.voiceBridge.onRecordingStatus((payload) => {
   if (payload.status === "idle") {
     stopButton.disabled = true;
     resetTimer();
-    setStatus("Idle", "Press your start hotkey to record.");
+    recordingOverlay.classList.add("hidden");
+    setStatus("Ready", "Press Ctrl+Shift+R in any text field to record.");
   }
 
   if (payload.status === "working") {
@@ -123,11 +150,13 @@ window.voiceBridge.onRecordingStatus((payload) => {
 
   if (payload.status === "error") {
     setStatus("Error", payload.detail || "Unknown error.");
+    recordingOverlay.classList.add("hidden");
   }
 
   if (payload.status === "success") {
-    setStatus("Done", payload.detail || "Completed.");
+    setStatus("Success", payload.detail || "Completed.");
+    recordingOverlay.classList.add("hidden");
   }
 });
 
-setStatus("Idle", "Press your start hotkey to record.");
+setStatus("Ready", "Click 'Login to ChatGPT' to get started.");

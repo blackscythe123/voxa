@@ -3,19 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>budgetWhisper Recorder</title>
+    <title>budgetWhisper</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="widget">
-      <h1>budgetWhisper</h1>
-      <p id="status">Idle</p>
-      <p id="timer">00:00</p>
-      <div class="row">
-        <button id="stopButton" disabled>Stop</button>
-      </div>
-      <p id="detail"></p>
+    <main class="app-container">
+      <header>
+        <h1>🎙️ budgetWhisper</h1>
+        <p>Voice-to-text for any app</p>
+      </header>
+
+      <section class="status-card">
+        <h2>Status</h2>
+        <p id="status">Ready</p>
+        <p id="detail"></p>
+      </section>
+
+      <section class="setup">
+        <h2>Setup</h2>
+        <button id="loginButton" class="primary-btn">Login to ChatGPT</button>
+        <button id="settingsButton" class="secondary-btn">Preferences</button>
+      </section>
+
+      <section class="instructions">
+        <h2>How to Use</h2>
+        <ol>
+          <li>Click "Login to ChatGPT" above</li>
+          <li>Complete your ChatGPT login in the browser that opens</li>
+          <li>Click into any text field in any app</li>
+          <li>Press <kbd>Ctrl+Shift+R</kbd> to start recording</li>
+          <li>Speak naturally, then press <kbd>Escape</kbd> to stop</li>
+          <li>Your transcript will be typed automatically</li>
+        </ol>
+      </section>
+
+      <footer>
+        <p>Recording widget appears in the corner when active</p>
+      </footer>
     </main>
+
+    <div id="recordingOverlay" class="recording-overlay hidden">
+      <h3>Recording...</h3>
+      <p id="timer">00:00</p>
+      <button id="stopButton">Stop</button>
+    </div>
+
     <script src="./renderer.js"></script>
   </body>
 </html>

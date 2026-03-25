@@ -1,65 +1,202 @@
 * {
   box-sizing: border-box;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 body {
   margin: 0;
-  background: transparent;
-  color: #f8f8f8;
+  background: linear-gradient(135deg, #0f1218 0%, #1a2332 100%);
+  color: #f4f6fb;
 }
 
-.widget {
+.app-container {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+header p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #a0afc0;
+}
+
+.status-card {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 32px;
+}
+
+.status-card h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #d3daea;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#status {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #6fdb8f;
+}
+
+#detail {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #a0afc0;
+  min-height: 18px;
+}
+
+.setup {
+  margin-bottom: 32px;
+}
+
+.setup h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #d3daea;
+}
+
+.primary-btn, .secondary-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+}
+
+.primary-btn {
+  background: #6fdb8f;
+  color: #0d2014;
+}
+
+.primary-btn:hover {
+  background: #5ec97d;
+  transform: translateY(-1px);
+}
+
+.secondary-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f4f6fb;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.instructions {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 32px;
+}
+
+.instructions h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #d3daea;
+}
+
+.instructions ol {
+  margin: 0;
+  padding-left: 24px;
+  color: #a0afc0;
+}
+
+.instructions li {
+  line-height: 1.8;
+  margin-bottom: 8px;
+}
+
+kbd {
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  color: #6fdb8f;
+}
+
+footer {
+  text-align: center;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+footer p {
+  margin: 0;
+  font-size: 12px;
+  color: #6a7684;
+}
+
+/* Recording Overlay */
+.recording-overlay {
+  position: fixed;
+  width: 360px;
   background: linear-gradient(155deg, #163126 0%, #0d1d19 100%);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 14px;
   padding: 14px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 10000;
 }
 
-h1 {
-  margin: 0;
+.recording-overlay.hidden {
+  display: none;
+}
+
+.recording-overlay h3 {
+  margin: 0 0 12px;
   font-size: 16px;
   font-weight: 700;
-}
-
-#status {
-  margin-top: 8px;
-  margin-bottom: 4px;
-  font-size: 13px;
   color: #d6efe0;
 }
 
-#timer {
-  margin: 0;
+.recording-overlay #timer {
+  margin: 0 0 14px;
   font-size: 28px;
   font-weight: 700;
+  color: #6fdb8f;
 }
 
-.row {
-  margin-top: 10px;
-}
-
-button {
+.recording-overlay #stopButton {
+  width: 100%;
   border: none;
-  border-radius: 10px;
   background: #f1c84f;
   color: #111;
-  padding: 8px 12px;
-  font-size: 13px;
+  border-radius: 8px;
+  padding: 10px;
   font-weight: 700;
   cursor: pointer;
+  font-size: 13px;
 }
 
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-#detail {
-  min-height: 18px;
-  margin-top: 8px;
-  margin-bottom: 0;
-  font-size: 12px;
-  color: #d2d2d2;
+.recording-overlay #stopButton:hover {
+  background: #e5b83d;
 }
