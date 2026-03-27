@@ -1,6 +1,9 @@
 const statusEl = document.getElementById("status");
 const detailEl = document.getElementById("detail");
 const loginBtn = document.getElementById("loginButton");
+const openLoginPageBtn = document.getElementById("openLoginPageButton");
+const saveSessionBtn = document.getElementById("saveSessionButton");
+const sessionJsonInput = document.getElementById("sessionJsonInput");
 const settingsBtn = document.getElementById("settingsButton");
 const timerEl = document.getElementById("timer");
 const stopButton = document.getElementById("stopButton");
@@ -102,13 +105,40 @@ async function stopRecording() {
 
 loginBtn.addEventListener("click", async () => {
   loginBtn.disabled = true;
-  setStatus("Working", "Opening ChatGPT login in your browser (this stays open until you log in)...");
+  setStatus("Working", "Opening /api/auth/session in your browser...");
   const ok = await window.voiceBridge.loginChatGPT();
   loginBtn.disabled = false;
   if (ok) {
-    setStatus("Ready", "ChatGPT authenticated! You can now use the app.");
+    setStatus("Ready", "Auth already available.");
   } else {
-    setStatus("Error", "Login failed or timed out.");
+    setStatus("Ready", "If only WARNING_BANNER appears, open login page and sign in first.");
+  }
+});
+
+openLoginPageBtn.addEventListener("click", async () => {
+  openLoginPageBtn.disabled = true;
+  setStatus("Working", "Opening ChatGPT login page in your browser...");
+  await window.voiceBridge.openChatGPTLoginPage();
+  openLoginPageBtn.disabled = false;
+  setStatus("Ready", "After login, open /api/auth/session and paste full JSON here.");
+});
+
+saveSessionBtn.addEventListener("click", async () => {
+  const sessionText = sessionJsonInput.value.trim();
+  if (!sessionText) {
+    setStatus("Error", "Paste full /api/auth/session JSON first.");
+    return;
+  }
+
+  saveSessionBtn.disabled = true;
+  try {
+    await window.voiceBridge.saveChatGPTSessionText(sessionText);
+    setStatus("Success", "Session data saved. You can now transcribe.");
+    sessionJsonInput.value = "";
+  } catch (error) {
+    setStatus("Error", error?.message || "Failed to parse/save session JSON.");
+  } finally {
+    saveSessionBtn.disabled = false;
   }
 });
 
@@ -159,4 +189,4 @@ window.voiceBridge.onRecordingStatus((payload) => {
   }
 });
 
-setStatus("Ready", "Click 'Login to ChatGPT' to get started.");
+setStatus("Ready", "Open /api/auth/session and import session JSON to get started.");

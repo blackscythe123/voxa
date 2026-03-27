@@ -160,8 +160,8 @@ ipcMain.handle("finalize-recording", async (_event, audioBytes, mimeType) => {
     loadServices();
     notifyRenderer("working", "Transcribing audio...");
 
-    if (!chatgptAuth.hasStorageState()) {
-      throw new Error("Login required. Click 'Login to ChatGPT' in the app menu.");
+    if (!chatgptAuth.hasUsableAuth()) {
+      throw new Error("Login required. Open /api/auth/session and paste JSON into app.");
     }
 
     const transcript = await chatgptAuth.transcribeAudio(Buffer.from(audioBytes), mimeType);
@@ -200,14 +200,25 @@ ipcMain.handle("save-preferences", (_event, payload) => {
 
 ipcMain.handle("login-chatgpt", async () => {
   loadServices();
-  notifyRenderer("working", "Opening ChatGPT login in your browser...");
+  notifyRenderer("working", "Opening /api/auth/session in your system browser...");
   const ok = await chatgptAuth.loginWithPlaywright();
   if (ok) {
-    notifyRenderer("success", "ChatGPT login saved successfully!");
+    notifyRenderer("success", "Auth already available.");
   } else {
-    notifyRenderer("error", "ChatGPT login timed out or was cancelled.");
+    notifyRenderer("error", "If page shows WARNING_BANNER only, open login page, then return and copy full session JSON.");
   }
   return ok;
+});
+
+ipcMain.handle("open-chatgpt-login-page", async () => {
+  loadServices();
+  await chatgptAuth.openLoginPage();
+  return true;
+});
+
+ipcMain.handle("save-chatgpt-session-text", async (_event, sessionText) => {
+  loadServices();
+  return chatgptAuth.saveManualSessionFromText(sessionText);
 });
 
 ipcMain.handle("open-settings", () => {

@@ -14,5 +14,7 @@ contextBridge.exposeInMainWorld("voiceBridge", {
   getPreferences: () => ipcRenderer.invoke("get-preferences"),
   savePreferences: (payload) => ipcRenderer.invoke("save-preferences", payload),
   loginChatGPT: () => ipcRenderer.invoke("login-chatgpt"),
+  openChatGPTLoginPage: () => ipcRenderer.invoke("open-chatgpt-login-page"),
+  saveChatGPTSessionText: (sessionText) => ipcRenderer.invoke("save-chatgpt-session-text", sessionText),
   openSettings: () => ipcRenderer.invoke("open-settings")
 });

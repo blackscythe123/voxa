@@ -21,15 +21,22 @@
 
       <section class="setup">
         <h2>Setup</h2>
-        <button id="loginButton" class="primary-btn">Login to ChatGPT</button>
+        <button id="loginButton" class="primary-btn">Open /api/auth/session</button>
+        <button id="openLoginPageButton" class="secondary-btn">Open ChatGPT Login Page</button>
         <button id="settingsButton" class="secondary-btn">Preferences</button>
+
+        <label for="sessionJsonInput">Paste /api/auth/session JSON</label>
+        <textarea id="sessionJsonInput" rows="6" placeholder="Paste full JSON response from https://chatgpt.com/api/auth/session"></textarea>
+        <button id="saveSessionButton" class="primary-btn">Use This Session Data</button>
       </section>
 
       <section class="instructions">
         <h2>How to Use</h2>
         <ol>
-          <li>Click "Login to ChatGPT" above</li>
-          <li>Complete your ChatGPT login in the browser that opens</li>
+          <li>Click "Open /api/auth/session"</li>
+          <li>If you only see WARNING_BANNER, click "Open ChatGPT Login Page" and log in</li>
+          <li>Open /api/auth/session again and copy the full JSON</li>
+          <li>Paste JSON in the app and click "Use This Session Data"</li>
           <li>Click into any text field in any app</li>
           <li>Press <kbd>Ctrl+Shift+R</kbd> to start recording</li>
           <li>Speak naturally, then press <kbd>Escape</kbd> to stop</li>

@@ -1,92 +1,145 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { app } = require("electron");
-const { chromium, request } = require("playwright");
+const { app, shell } = require("electron");
+const { request } = require("playwright");
 
 const STORAGE_STATE_NAME = "chatgpt-storage-state.json";
+const MANUAL_SESSION_NAME = "chatgpt-manual-session.json";
+const CHATGPT_LOGIN_URL = "https://chatgpt.com/auth/login";
+const CHATGPT_SESSION_URL = "https://chatgpt.com/api/auth/session";
 
 function getStorageStatePath() {
   return path.join(app.getPath("userData"), STORAGE_STATE_NAME);
+}
+
+function getManualSessionPath() {
+  return path.join(app.getPath("userData"), MANUAL_SESSION_NAME);
 }
 
 function hasStorageState() {
   return fs.existsSync(getStorageStatePath());
 }
 
-async function verifyAuthenticatedSession(context) {
-  try {
-    const response = await context.request.get("https://chatgpt.com/backend-api/models", {
-      timeout: 10000,
-      failOnStatusCode: false
-    });
+function hasManualSession() {
+  return fs.existsSync(getManualSessionPath());
+}
 
-    return response.status() === 200;
+function parseSessionText(rawText) {
+  const text = String(rawText || "").trim();
+  const jsonStart = text.indexOf("{");
+  const jsonEnd = text.lastIndexOf("}");
+
+  if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+    throw new Error("Session text must contain JSON from /api/auth/session.");
+  }
+
+  const jsonText = text.slice(jsonStart, jsonEnd + 1);
+  return JSON.parse(jsonText);
+}
+
+function saveManualSessionFromText(rawText) {
+  const payload = parseSessionText(rawText);
+  const accessToken = payload?.accessToken;
+
+  if (!accessToken || typeof accessToken !== "string") {
+    throw new Error("No accessToken found. If only WARNING_BANNER is visible, login first.");
+  }
+
+  const expires = payload?.expires || null;
+  const record = {
+    savedAt: new Date().toISOString(),
+    accessToken,
+    expires,
+    user: payload?.user || null
+  };
+
+  fs.writeFileSync(getManualSessionPath(), JSON.stringify(record, null, 2), "utf8");
+  return { ok: true, hasUser: Boolean(record.user), expires: record.expires };
+}
+
+function readManualSession() {
+  if (!hasManualSession()) {
+    return null;
+  }
+
+  try {
+    const raw = fs.readFileSync(getManualSessionPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed?.accessToken) {
+      return null;
+    }
+    return parsed;
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function loginWithPlaywright() {
-  const browser = await chromium.launch({
-    headless: false,
-    channel: "chrome"
-  });
-
-  try {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    
-    // Open ChatGPT and wait until backend session is truly authenticated.
-    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded" });
-    
-    console.log("Waiting for ChatGPT login...");
-    const startedAt = Date.now();
-    const timeoutMs = 10 * 60 * 1000; // 10 minutes to allow user to complete login
-
-    // Poll for successful authentication.
-    while (Date.now() - startedAt < timeoutMs) {
-      try {
-        const isAuthenticated = await verifyAuthenticatedSession(context);
-        if (isAuthenticated) {
-          console.log("ChatGPT login detected (backend session verified).");
-          await context.storageState({ path: getStorageStatePath() });
-          await browser.close();
-          return true;
-        }
-      } catch (e) {
-        // Page might have changed during check, retry
-      }
-
-      // Check every 2 seconds
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-
-    console.log("ChatGPT login timed out.");
-    await browser.close();
+function isManualSessionValid(record) {
+  if (!record?.accessToken) {
     return false;
+  }
+
+  if (!record.expires) {
+    return true;
+  }
+
+  const expiryMs = Date.parse(record.expires);
+  if (Number.isNaN(expiryMs)) {
+    return true;
+  }
+
+  return expiryMs > Date.now() + 30_000;
+}
+
+function hasUsableAuth() {
+  const manual = readManualSession();
+  return hasStorageState() || isManualSessionValid(manual);
+}
+
+async function openSessionEndpoint() {
+  await shell.openExternal(CHATGPT_SESSION_URL);
+}
+
+async function openLoginPage() {
+  await shell.openExternal(CHATGPT_LOGIN_URL);
+}
+
+async function loginWithPlaywright() {
+  try {
+    // Step 1: open /api/auth/session directly in the real browser.
+    await openSessionEndpoint();
+    return hasUsableAuth();
   } catch (error) {
-    console.error("Login error:", error.message);
-    try {
-      await browser.close();
-    } catch (e) {
-      // Ignore close errors
-    }
+    console.error("System browser login launch failed:", error.message);
     return false;
   }
 }
 
 async function transcribeAudio(audioBuffer, mimeType = "audio/webm") {
-  if (!hasStorageState()) {
-    throw new Error("Not logged in to ChatGPT yet. Please run login first.");
+  const manual = readManualSession();
+  const useManualToken = isManualSessionValid(manual);
+
+  if (!hasStorageState() && !useManualToken) {
+    throw new Error("Not logged in. Open /api/auth/session, then paste full JSON into the app.");
   }
 
-  const api = await request.newContext({
-    storageState: getStorageStatePath(),
-    extraHTTPHeaders: {
-      origin: "https://chatgpt.com",
-      referer: "https://chatgpt.com/"
-    }
-  });
+  const api = await request.newContext(
+    useManualToken
+      ? {
+          extraHTTPHeaders: {
+            authorization: `Bearer ${manual.accessToken}`,
+            origin: "https://chatgpt.com",
+            referer: "https://chatgpt.com/"
+          }
+        }
+      : {
+          storageState: getStorageStatePath(),
+          extraHTTPHeaders: {
+            origin: "https://chatgpt.com",
+            referer: "https://chatgpt.com/"
+          }
+        }
+  );
 
   try {
     const formData = new FormData();
@@ -119,6 +172,10 @@ async function transcribeAudio(audioBuffer, mimeType = "audio/webm") {
 
 module.exports = {
   hasStorageState,
+  hasUsableAuth,
+  saveManualSessionFromText,
+  openSessionEndpoint,
+  openLoginPage,
   loginWithPlaywright,
   transcribeAudio
 };
