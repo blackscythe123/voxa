@@ -114,21 +114,16 @@
         font-variation-settings: "opsz" 24, "SOFT" 100;
       }
 
-      /* The writing quill — a tiny pen that wavy-glides L→R inside the strip,
-         leaving a fading ink line behind. Loops infinitely while the
-         recording strip is visible. */
+      /* The writing quill — glides L→R, nib traces the sine wave tip-on-tip. */
       .writing {
         position: absolute;
-        left: 64px;          /* clear of dot + "rec." */
-        right: 80px;         /* clear of timer + stop */
+        left: 64px;
+        right: 80px;
         bottom: 8px;
-        height: 14px;
+        height: 18px;
         pointer-events: none;
         overflow: visible;
       }
-      /* The ink trail itself is now a sine-wave SVG path, drawn left-to-right
-         via animated stroke-dashoffset. The pen bobs in lockstep so it looks
-         like it's making the curve, not just hovering above a straight line. */
       .ink-svg {
         position: absolute;
         left: 0; right: 0;
@@ -156,25 +151,26 @@
         position: absolute;
         bottom: 0;
         left: 0;
-        width: 14px;
-        height: 14px;
+        width: 16px;
+        height: 18px;
+        /* transform-origin at the nib tip (lower-left of feather SVG) */
+        transform-origin: 19% 94%;
         animation: quill-glide 4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
-        transform-origin: 78% 92%;
         will-change: left, transform;
       }
-      /* Pen tracks the sine path — peaks at 12.5%, 62.5%; troughs at 37.5%, 87.5%.
-         translateY(-3px) at peaks (path goes up), +3px at troughs (path goes down).
-         Tilt also flexes a few degrees to feel like a real wrist following the curve. */
+      /* Wave centerline at y=15 (18px box) — nib sits at ~94% = 16.9px from top.
+         Amplitude ±3px: translateY(-3) → y=13.9 matches wave peak y=12, close enough
+         at this size. Peaks 12.5%/62.5%, troughs 37.5%/87.5%. */
       @keyframes quill-glide {
         0%    { left: 0%;    transform: translateY(0px)  rotate(-12deg); opacity: 0; }
         4%    { left: 1%;    transform: translateY(0px)  rotate(-12deg); opacity: 1; }
         12.5% { left: 12.5%; transform: translateY(-3px) rotate(-15deg); }
         25%   { left: 25%;   transform: translateY(0px)  rotate(-12deg); }
-        37.5% { left: 37.5%; transform: translateY(3px)  rotate(-9deg); }
+        37.5% { left: 37.5%; transform: translateY(3px)  rotate(-9deg);  }
         50%   { left: 50%;   transform: translateY(0px)  rotate(-12deg); }
         62.5% { left: 62.5%; transform: translateY(-3px) rotate(-15deg); }
         75%   { left: 75%;   transform: translateY(0px)  rotate(-12deg); }
-        87.5% { left: 87.5%; transform: translateY(3px)  rotate(-9deg); }
+        87.5% { left: 87.5%; transform: translateY(3px)  rotate(-9deg);  }
         94%   { left: 97%;   transform: translateY(0px)  rotate(-12deg); opacity: 1; }
         100%  { left: 100%;  transform: translateY(0px)  rotate(-12deg); opacity: 0; }
       }
@@ -228,9 +224,9 @@
       <!-- A tiny quill writing across the strip while recording. The trail is
            a sine-wave SVG path drawn left-to-right via stroke-dashoffset. -->
       <div class="writing" aria-hidden="true">
-        <svg class="ink-svg" viewBox="0 0 200 14" preserveAspectRatio="none">
+        <svg class="ink-svg" viewBox="0 0 200 18" preserveAspectRatio="none">
           <path class="ink-stroke"
-                d="M 0 7 Q 25 2 50 7 T 100 7 T 150 7 T 200 7" />
+                d="M 0 15 Q 25 12 50 15 T 100 15 T 150 15 T 200 15" />
         </svg>
         <span class="quill-pen">
           <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
@@ -253,8 +249,9 @@
       const timerEl = document.getElementById("timer");
       const stopBtn = document.getElementById("stopBtn");
 
-      const SAMPLE_RATE = 16000; // 16 kHz mono PCM is what Whisper prefers
-      let recState = null;       // { stream, audioCtx, processor, pcmChunks }
+      let mediaRecorder = null;
+      let recordingChunks = [];
+      let recordingStartTime = 0;
       let timerHandle;
       let seconds = 0;
       let maxSecs = 120;
@@ -263,47 +260,46 @@
         return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
       }
 
+      // Patches the Duration field inside the WebM SegmentInformation block so
+      // Whisper gets an accurate duration (MediaRecorder leaves it as 0 / missing).
+      // Scans for EBML element 0x4489 (Duration) with 8-byte float size marker 0x88.
+      function injectWebMDuration(buffer, durationMs) {
+        const arr = new Uint8Array(buffer);
+        for (let i = 0; i < arr.length - 12; i++) {
+          if (arr[i] === 0x44 && arr[i + 1] === 0x89 && arr[i + 2] === 0x88) {
+            new DataView(buffer).setFloat64(i + 3, durationMs, false);
+            break;
+          }
+        }
+        return buffer;
+      }
+
       async function startRecording(payload) {
         maxSecs = payload?.maxRecordingSeconds ?? 120;
         const deviceId = payload?.inputDeviceId || "default";
         seconds = 0;
+        recordingChunks = [];
         timerEl.textContent = "00:00";
 
         const audioConstraints = {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: true,
-          channelCount: 1,
-          sampleRate: SAMPLE_RATE
+          channelCount: 1
         };
         if (deviceId !== "default") audioConstraints.deviceId = { exact: deviceId };
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        console.log("[overlay] mic track:", stream.getAudioTracks()[0]?.label);
 
-        const tracks = stream.getAudioTracks();
-        console.log("[overlay] mic track:", tracks[0]?.label, "settings:", tracks[0]?.getSettings());
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
 
-        const audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-        const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        const pcmChunks = [];
-        let peakAbs = 0;
-
-        processor.onaudioprocess = (e) => {
-          const input = e.inputBuffer.getChannelData(0);
-          for (let i = 0; i < input.length; i++) {
-            const a = Math.abs(input[i]);
-            if (a > peakAbs) peakAbs = a;
-          }
-          pcmChunks.push(new Float32Array(input));
-        };
-
-        source.connect(processor);
-        // do NOT connect to destination — that creates a speaker feedback loop and
-        // some browsers mute capture if the graph is "playing" the same stream
-        processor.connect(audioCtx.destination);
-
-        recState = { stream, audioCtx, processor, pcmChunks, getPeak: () => peakAbs };
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordingChunks.push(e.data); };
+        mediaRecorder.start(250);
+        recordingStartTime = Date.now();
         stopBtn.disabled = false;
 
         clearInterval(timerHandle);
@@ -314,55 +310,28 @@
         }, 1000);
       }
 
-      function encodeWav(chunks, sampleRate) {
-        const totalSamples = chunks.reduce((a, c) => a + c.length, 0);
-        const dataSize = totalSamples * 2;
-        const buf = new ArrayBuffer(44 + dataSize);
-        const view = new DataView(buf);
-        const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
-
-        writeStr(0, "RIFF");
-        view.setUint32(4, 36 + dataSize, true);
-        writeStr(8, "WAVE");
-        writeStr(12, "fmt ");
-        view.setUint32(16, 16, true);
-        view.setUint16(20, 1, true);   // PCM
-        view.setUint16(22, 1, true);   // mono
-        view.setUint32(24, sampleRate, true);
-        view.setUint32(28, sampleRate * 2, true);
-        view.setUint16(32, 2, true);
-        view.setUint16(34, 16, true);
-        writeStr(36, "data");
-        view.setUint32(40, dataSize, true);
-
-        let off = 44;
-        for (const chunk of chunks) {
-          for (let i = 0; i < chunk.length; i++) {
-            const s = Math.max(-1, Math.min(1, chunk[i]));
-            view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-            off += 2;
-          }
-        }
-        return buf;
-      }
-
       async function stopRecording() {
-        if (!recState) return;
-
+        if (!mediaRecorder || mediaRecorder.state === "inactive") return;
         clearInterval(timerHandle);
         stopBtn.disabled = true;
 
-        const { stream, audioCtx, processor, pcmChunks, getPeak } = recState;
-        recState = null;
+        const durationMs = Date.now() - recordingStartTime;
 
-        processor.disconnect();
-        try { await audioCtx.close(); } catch {}
-        stream.getTracks().forEach((t) => t.stop());
+        await new Promise((resolve) => {
+          mediaRecorder.onstop = resolve;
+          mediaRecorder.stop();
+        });
+        mediaRecorder.stream.getTracks().forEach((t) => t.stop());
 
-        console.log(`[overlay] captured ${pcmChunks.length} chunks  peak amplitude: ${getPeak().toFixed(4)} (1.0 = full scale)`);
+        console.log(`[overlay] webm/opus recorded ${recordingChunks.length} chunks  duration: ${durationMs}ms`);
 
-        const wavBuf = encodeWav(pcmChunks, SAMPLE_RATE);
-        await window.voiceBridge.finalizeRecording(Array.from(new Uint8Array(wavBuf)), "audio/wav");
+        let buffer = await new Blob(recordingChunks, { type: "audio/webm" }).arrayBuffer();
+        buffer = injectWebMDuration(buffer, durationMs);
+
+        mediaRecorder = null;
+        recordingChunks = [];
+
+        await window.voiceBridge.finalizeRecording(Array.from(new Uint8Array(buffer)), "audio/webm");
       }
 
       window.voiceBridge.onStartRecording((payload) => {

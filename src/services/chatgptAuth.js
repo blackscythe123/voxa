@@ -3,6 +3,8 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { app, BrowserWindow, session, net } = require("electron");
 
+const ICON_PATH = path.join(__dirname, "..", "..", "assets", "icon.png");
+
 const COOKIES_FILE = "chatgpt-cookies.json";
 const DEVICE_ID_FILE = "chatgpt-device-id.txt";
 const SESSION_HOSTNAME = "chatgpt.com";
@@ -111,6 +113,7 @@ function loginWithBrowserWindow() {
       width: 1024,
       height: 768,
       title: "Log in to ChatGPT (this window closes automatically when done)",
+      icon: ICON_PATH,
       webPreferences: {
         session: loginSession,
         nodeIntegration: false,
