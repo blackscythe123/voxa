@@ -1,12 +1,16 @@
 const path = require("node:path");
-const { app, BrowserWindow, globalShortcut, ipcMain, Menu, dialog } = require("electron");
+const { app, BrowserWindow, globalShortcut, ipcMain, shell, Tray, Menu, nativeImage, Notification } = require("electron");
 
 let mainWindow;
 let overlayWindow;
 let preferencesWindow;
+let tray;
 let isRecording = false;
+let isQuitting = false;
 
-// Lazy load services to avoid startup issues
+const ICON_PATH = path.join(__dirname, "..", "assets", "icon.png");
+const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "tray.png");
+
 let configStore, chatgptAuth, textInserter;
 function loadServices() {
   if (!configStore) configStore = require("./services/configStore");
@@ -14,11 +18,35 @@ function loadServices() {
   if (!textInserter) textInserter = require("./services/textInserter");
 }
 
+// Tells Windows which app is firing notifications — without it, toasts read
+// as "Electron" instead of "Voxa." Must match the build.appId in package.json.
+if (process.platform === "win32") app.setAppUserModelId("com.Voxa.app");
+
+// ── Single-instance lock — second launch focuses the running instance ──────
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    showMainWindow();
+  });
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
-    icon: path.join(__dirname, "..", "assets", "icon.png"),
+    width: 1100,
+    height: 760,
+    minWidth: 380,
+    minHeight: 520,
+    icon: ICON_PATH,
+    backgroundColor: "#faf6f0",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    titleBarOverlay: process.platform === "win32" ? {
+      color:        "#faf6f0",  // cream — matches the page background
+      symbolColor:  "#2d2418",  // warm brown ink for min/max/close glyphs
+      height:       40
+    } : undefined,
+    show: !app.commandLine.hasSwitch("hidden"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -28,23 +56,35 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 
-  mainWindow.on("closed", () => {
-    mainWindow = null;
+  mainWindow.on("close", (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
   });
+}
 
-  return mainWindow;
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 function createOverlayWindow() {
   overlayWindow = new BrowserWindow({
-    width: 360,
-    height: 180,
+    width: 240,
+    height: 84,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
     focusable: false,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -52,20 +92,31 @@ function createOverlayWindow() {
     }
   });
 
-  overlayWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  overlayWindow.loadFile(path.join(__dirname, "renderer", "overlay.html"));
   overlayWindow.hide();
 }
 
 function createPreferencesWindow() {
   if (preferencesWindow && !preferencesWindow.isDestroyed()) {
     preferencesWindow.show();
+    preferencesWindow.focus();
     return;
   }
 
   preferencesWindow = new BrowserWindow({
-    width: 480,
-    height: 520,
-    title: "budgetWhisper Preferences",
+    width: 580,
+    height: 720,
+    minWidth: 380,
+    minHeight: 480,
+    title: "Voxa Preferences",
+    icon: ICON_PATH,
+    backgroundColor: "#faf6f0",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    titleBarOverlay: process.platform === "win32" ? {
+      color:       "#faf6f0",
+      symbolColor: "#2d2418",
+      height:      40
+    } : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -76,42 +127,114 @@ function createPreferencesWindow() {
   preferencesWindow.loadFile(path.join(__dirname, "renderer", "preferences.html"));
 }
 
+// ── System tray — keeps app alive in background ────────────────────────────
+function createTray() {
+  const trayImage = nativeImage.createFromPath(TRAY_ICON_PATH);
+  tray = new Tray(trayImage);
+  tray.setToolTip("Voxa, voice to text");
+  rebuildTrayMenu();
+
+  // Single click: pop the menu right at the cursor (the small popup the user
+  // expected — Windows defaults to "nothing happens" on left-click otherwise).
+  tray.on("click", () => tray.popUpContextMenu());
+  // Double-click jumps straight to opening the window.
+  tray.on("double-click", () => showMainWindow());
+}
+
+function rebuildTrayMenu() {
+  if (!tray) return;
+  loadServices();
+  const prefs = configStore.getPreferences();
+  const startKey = prefs.startHotkey?.replace(/CommandOrControl/g, "Ctrl") || "F9";
+
+  const menu = Menu.buildFromTemplate([
+    { label: `Start recording  (${startKey})`, click: () => startRecording() },
+    { type: "separator" },
+    { label: "Show window",   click: () => showMainWindow() },
+    { label: "Preferences…",  click: () => createPreferencesWindow() },
+    { type: "separator" },
+    {
+      label: "Launch on system startup",
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => setAutoLaunch(item.checked)
+    },
+    { type: "separator" },
+    { label: "Quit Voxa", click: () => { isQuitting = true; app.quit(); } }
+  ]);
+  tray.setContextMenu(menu);
+}
+
+function setAutoLaunch(enabled) {
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    openAsHidden: true,            // start minimized to tray on macOS
+    args: enabled ? ["--hidden"] : [] // pass flag on Windows so window stays hidden
+  });
+  rebuildTrayMenu();
+}
+
+// ── Recording flow ─────────────────────────────────────────────────────────
 function placeOverlay(position) {
   if (!overlayWindow) return;
-  const display = require("electron").screen.getPrimaryDisplay();
-  const bounds = display.workArea;
+  const { screen } = require("electron");
+  const bounds = screen.getPrimaryDisplay().workArea;
   const [width, height] = overlayWindow.getSize();
   const margin = 16;
 
   let x = bounds.x + bounds.width - width - margin;
   let y = bounds.y + bounds.height - height - margin;
 
-  if (position === "top-right") {
-    y = bounds.y + margin;
-  }
-  if (position === "top-left") {
-    x = bounds.x + margin;
-    y = bounds.y + margin;
-  }
-  if (position === "bottom-left") {
-    x = bounds.x + margin;
-  }
+  if (position === "top-right") y = bounds.y + margin;
+  if (position === "top-left") { x = bounds.x + margin; y = bounds.y + margin; }
+  if (position === "bottom-left") x = bounds.x + margin;
 
   overlayWindow.setPosition(x, y);
 }
 
-function notifyRenderer(status, detail = "") {
+function notifyMain(status, detail = "") {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("recording-status", { status, detail });
   }
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.webContents.send("recording-status", { status, detail });
+}
+
+// ── OS notifications for things the user must see even when the window is hidden
+function notifyOS(title, body, { onClick } = {}) {
+  if (!Notification.isSupported()) return null;
+  const n = new Notification({
+    title,
+    body,
+    icon: ICON_PATH,
+    silent: false
+  });
+  n.on("click", () => {
+    showMainWindow();
+    if (onClick) onClick();
+  });
+  n.show();
+  return n;
+}
+
+// Choose a notification message based on what kind of error happened.
+// We classify the message text so the toast feels intentional, not generic.
+function notifyExternalError(message) {
+  const m = (message || "").toLowerCase();
+  if (m.includes("microphone") || m.includes("silence") || m.includes("silent")) {
+    notifyOS("Voxa couldn't hear you", "The microphone captured silence. Click here, then open Windows mic settings.", {
+      onClick: () => shell.openExternal("ms-settings:privacy-microphone")
+    });
+  } else if (m.includes("session") || m.includes("login") || m.includes("403") || m.includes("401") || m.includes("not logged in")) {
+    notifyOS("Voxa needs you to sign in again", "Your ChatGPT session expired. Click to open Voxa and sign in.");
+  } else if (m.includes("transcription failed")) {
+    notifyOS("Voxa couldn't transcribe that", "Something went wrong sending your audio to ChatGPT. Click to open Voxa.");
+  } else {
+    notifyOS("Voxa hit an error", message || "Click to open Voxa for details.");
   }
 }
 
-function setRecordingState(nextState) {
-  isRecording = nextState;
-  notifyRenderer(isRecording ? "recording" : "idle");
+function setRecordingState(next) {
+  isRecording = next;
+  notifyMain(isRecording ? "recording" : "idle");
 }
 
 function stopRecording() {
@@ -128,11 +251,12 @@ function startRecording() {
   }
 
   loadServices();
-  const preferences = configStore.getPreferences();
-  placeOverlay(preferences.overlayPosition);
+  const prefs = configStore.getPreferences();
+  placeOverlay(prefs.overlayPosition);
   overlayWindow.showInactive();
   overlayWindow.webContents.send("start-recording", {
-    maxRecordingSeconds: preferences.maxRecordingSeconds
+    maxRecordingSeconds: prefs.maxRecordingSeconds,
+    inputDeviceId: prefs.inputDeviceId
   });
   setRecordingState(true);
 }
@@ -140,50 +264,76 @@ function startRecording() {
 function registerHotkeys() {
   loadServices();
   globalShortcut.unregisterAll();
-  const preferences = configStore.getPreferences();
+  const prefs = configStore.getPreferences();
 
-  const startRegistered = globalShortcut.register(preferences.startHotkey, () => {
-    startRecording();
-  });
+  const startKey = prefs.startHotkey;
+  const stopKey  = prefs.stopHotkey;
 
-  const stopRegistered = globalShortcut.register(preferences.stopHotkey, () => {
-    stopRecording();
-  });
+  let startOk = true, stopOk = true;
+  if (startKey) {
+    startOk = globalShortcut.register(startKey, startRecording);
+  }
+  // Only register the stop hotkey if it's different from start.
+  // If they match, startRecording() already toggles (re-press stops).
+  if (stopKey && stopKey !== startKey) {
+    stopOk = globalShortcut.register(stopKey, stopRecording);
+  }
 
-  if (!startRegistered || !stopRegistered) {
-    notifyRenderer("error", "Unable to register one or more shortcuts. Update preferences.");
+  if (!startOk || !stopOk) {
+    notifyMain("error", "Could not register shortcuts. Check Preferences.");
   }
 }
 
+// ── IPC handlers ───────────────────────────────────────────────────────────
 ipcMain.handle("finalize-recording", async (_event, audioBytes, mimeType) => {
   try {
     loadServices();
-    notifyRenderer("working", "Transcribing audio...");
-
-    if (!chatgptAuth.hasUsableAuth()) {
-      throw new Error("Login required. Open /api/auth/session and paste JSON into app.");
-    }
+    notifyMain("working", "Transcribing...");
 
     const transcript = await chatgptAuth.transcribeAudio(Buffer.from(audioBytes), mimeType);
-    if (!transcript) {
-      throw new Error("Empty transcript returned.");
-    }
+    if (!transcript) throw new Error("Empty transcript returned.");
 
-    notifyRenderer("working", "Inserting transcript...");
+    notifyMain("working", "Pasting transcript...");
     await textInserter.insertTranscript(transcript);
 
-    notifyRenderer("success", "Transcript inserted.");
     setRecordingState(false);
-    if (overlayWindow && !overlayWindow.isDestroyed()) {
-      overlayWindow.hide();
-    }
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+    notifyMain("success", transcript.length > 80 ? transcript.slice(0, 80) + "…" : transcript);
 
     return { ok: true, transcript };
   } catch (error) {
     setRecordingState(false);
-    notifyRenderer("error", error.message || "Unknown error while transcribing.");
-    return { ok: false, error: error.message || "Unknown error" };
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+    const msg = error.message || "Unknown error.";
+    notifyMain("error", msg);
+    // Surface to the OS too — the main window may be hidden in the tray
+    if (!mainWindow || !mainWindow.isVisible()) notifyExternalError(msg);
+    return { ok: false, error: msg };
   }
+});
+
+ipcMain.handle("login-chatgpt", async () => {
+  loadServices();
+  notifyMain("working", "Opening ChatGPT login...");
+  try {
+    const ok = await chatgptAuth.loginWithBrowserWindow();
+    if (ok) {
+      notifyMain("success", "Logged in. Cookies saved.");
+      notifyOS("Voxa is signed in", "Press your hotkey in any text field and start speaking.");
+    } else {
+      notifyMain("error", "Login window closed without completing login.");
+    }
+    return ok;
+  } catch (err) {
+    notifyMain("error", err.message || "Login failed.");
+    notifyExternalError(err.message || "Login failed");
+    return false;
+  }
+});
+
+ipcMain.handle("get-auth-status", async () => {
+  loadServices();
+  return chatgptAuth.validateSession();
 });
 
 ipcMain.handle("get-preferences", () => {
@@ -195,50 +345,58 @@ ipcMain.handle("save-preferences", (_event, payload) => {
   loadServices();
   const next = configStore.savePreferences(payload || {});
   registerHotkeys();
+  rebuildTrayMenu();
   return next;
 });
 
-ipcMain.handle("login-chatgpt", async () => {
-  loadServices();
-  notifyRenderer("working", "Opening /api/auth/session in your system browser...");
-  const ok = await chatgptAuth.loginWithPlaywright();
-  if (ok) {
-    notifyRenderer("success", "Auth already available.");
-  } else {
-    notifyRenderer("error", "If page shows WARNING_BANNER only, open login page, then return and copy full session JSON.");
-  }
-  return ok;
-});
+ipcMain.handle("open-settings", () => createPreferencesWindow());
+ipcMain.handle("open-mic-settings", () => shell.openExternal("ms-settings:privacy-microphone"));
 
-ipcMain.handle("open-chatgpt-login-page", async () => {
-  loadServices();
-  await chatgptAuth.openLoginPage();
-  return true;
-});
+ipcMain.handle("get-auto-launch", () => app.getLoginItemSettings().openAtLogin);
+ipcMain.handle("set-auto-launch", (_e, enabled) => { setAutoLaunch(!!enabled); return true; });
 
-ipcMain.handle("save-chatgpt-session-text", async (_event, sessionText) => {
-  loadServices();
-  return chatgptAuth.saveManualSessionFromText(sessionText);
-});
-
-ipcMain.handle("open-settings", () => {
-  createPreferencesWindow();
-});
-
+// ── App lifecycle ──────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  const { session } = require("electron");
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
+    cb(permission === "media" || permission === "audioCapture");
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return permission === "media" || permission === "audioCapture";
+  });
+
+  // Kill the default File / Edit / View / Window menu — slop tell otherwise
+  Menu.setApplicationMenu(null);
+
   createMainWindow();
   createOverlayWindow();
+  createTray();
   registerHotkeys();
 
-  loadServices();
-  const preferences = configStore.getPreferences();
-  if (preferences.autoLoginOnStart && !chatgptAuth.hasStorageState()) {
-    chatgptAuth.loginWithPlaywright().catch(() => {
-      notifyRenderer("error", "Auto-login failed.");
-    });
-  }
+  // Background session check — if cookies are stale, ping the user via the OS.
+  // Small delay so the window is up first and the notification doesn't fight it.
+  setTimeout(async () => {
+    try {
+      loadServices();
+      if (chatgptAuth.hasCookies()) {
+        const ok = await chatgptAuth.validateSession();
+        if (!ok) notifyExternalError("Session expired");
+      }
+    } catch { /* ignore — surface only when user actually tries to record */ }
+  }, 4000);
 });
 
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
+// On macOS clicking dock icon should re-open the window
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+  else showMainWindow();
 });
+
+// Don't quit when all windows are closed — stay alive in tray
+app.on("window-all-closed", (e) => {
+  // Default Electron behaviour quits on non-macOS — we want background mode
+  e.preventDefault?.();
+});
+
+app.on("before-quit", () => { isQuitting = true; });
+app.on("will-quit", () => { globalShortcut.unregisterAll(); });
