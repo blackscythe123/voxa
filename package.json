@@ -1,18 +1,118 @@
 {
-  "name": "budget-whisper",
+  "name": "voxa",
   "version": "0.1.0",
   "description": "System-wide voice-to-text desktop helper using ChatGPT transcription",
+  "homepage": "https://github.com/blackscythe123/voxa",
   "main": "src/main.js",
+  "author": {
+    "name": "Voxa",
+    "email": "noreply@voxa.app"
+  },
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder -mwl"
   },
   "dependencies": {
-    "@nut-tree-fork/nut-js": "^4.2.1",
-    "electron-store": "^8.2.0",
-    "playwright": "^1.53.0"
+    "electron-store": "^8.2.0"
   },
   "devDependencies": {
-    "electron": "^31.7.7"
+    "electron": "^42.0.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.Voxa.app",
+    "productName": "Voxa",
+    "copyright": "Copyright © 2026 Voxa",
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!**/.DS_Store",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Voxa"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Voxa needs microphone access to record your voice for transcription.",
+        "LSUIElement": false
+      },
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "Voxa ${version}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "synopsis": "System-wide voice-to-text powered by ChatGPT Whisper",
+      "maintainer": "Voxa <noreply@voxa.app>"
+    }
   }
 }
