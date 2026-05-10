@@ -1,25 +1,22 @@
 const Store = require("electron-store");
 
 const defaults = {
-  startHotkey: "CommandOrControl+Shift+R",
+  startHotkey: "F9",
   stopHotkey: "Escape",
   overlayPosition: "bottom-right",
-  autoLoginOnStart: false,
-  maxRecordingSeconds: 120
+  maxRecordingSeconds: 120,
+  inputDeviceId: "default"
 };
 
-const store = new Store({
-  name: "preferences",
-  defaults
-});
+const store = new Store({ name: "preferences", defaults });
 
 function getPreferences() {
   return {
     startHotkey: store.get("startHotkey"),
     stopHotkey: store.get("stopHotkey"),
     overlayPosition: store.get("overlayPosition"),
-    autoLoginOnStart: store.get("autoLoginOnStart"),
-    maxRecordingSeconds: store.get("maxRecordingSeconds")
+    maxRecordingSeconds: store.get("maxRecordingSeconds"),
+    inputDeviceId: store.get("inputDeviceId")
   };
 }
 
@@ -32,7 +29,4 @@ function savePreferences(next) {
   return getPreferences();
 }
 
-module.exports = {
-  getPreferences,
-  savePreferences
-};
+module.exports = { getPreferences, savePreferences };
