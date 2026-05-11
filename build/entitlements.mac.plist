@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Electron's V8 needs JIT'd pages and an unsigned executable region.
+       Without these two, hardened-runtime Electron builds crash on launch
+       with "Killed: 9" / EXC_BAD_ACCESS the moment a renderer spins up. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- Microphone capture — pairs with NSMicrophoneUsageDescription in
+       Info.plist. Without this entitlement the consent prompt never fires
+       on hardened-runtime builds even if the description string is set. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+
+  <!-- Outbound network for ChatGPT transcription + cookie session check. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- Sending Cmd+V to other apps relies on driving the focused app via
+       AppleEvents. macOS will still gate this behind Accessibility — the
+       user grants it once from System Settings → Privacy & Security. -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>

@@ -1,5 +1,6 @@
 const path = require("node:path");
-const { app, BrowserWindow, globalShortcut, ipcMain, shell, Tray, Menu, nativeImage, Notification } = require("electron");
+const fs = require("node:fs");
+const { app, BrowserWindow, globalShortcut, ipcMain, shell, Tray, Menu, nativeImage, Notification, systemPreferences } = require("electron");
 
 let mainWindow;
 let overlayWindow;
@@ -8,7 +9,17 @@ let tray;
 let isRecording = false;
 let isQuitting = false;
 
-const ICON_PATH = path.join(__dirname, "..", "assets", "icon.png");
+// Per-OS icon. Windows reads .ico for taskbar/start-menu/explorer at every
+// size — handing it a .png makes the shell fall back to the Electron globe
+// even after install. macOS and Linux both happily take .png at runtime.
+const ICON_PATH = (() => {
+  const dir = path.join(__dirname, "..", "assets");
+  if (process.platform === "win32") {
+    const ico = path.join(dir, "icon.ico");
+    if (fs.existsSync(ico)) return ico;
+  }
+  return path.join(dir, "icon.png");
+})();
 const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "tray.png");
 
 let configStore, chatgptAuth, textInserter;
@@ -350,20 +361,69 @@ ipcMain.handle("save-preferences", (_event, payload) => {
 });
 
 ipcMain.handle("open-settings", () => createPreferencesWindow());
-ipcMain.handle("open-mic-settings", () => shell.openExternal("ms-settings:privacy-microphone"));
+ipcMain.handle("open-mic-settings", () => {
+  // Each OS has its own deep-link to the microphone privacy pane. Falling
+  // back to a docs page would feel evasive, so we route to the right pane.
+  if (process.platform === "win32") {
+    return shell.openExternal("ms-settings:privacy-microphone");
+  }
+  if (process.platform === "darwin") {
+    return shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+  }
+  // GNOME / KDE both honour gnome-control-center; if it isn't installed
+  // we fall through to a plain xdg-open of the sound pane.
+  const { exec } = require("node:child_process");
+  exec("gnome-control-center microphone || gnome-control-center sound || xdg-open settings://privacy/microphone || true");
+  return true;
+});
 
 ipcMain.handle("get-auto-launch", () => app.getLoginItemSettings().openAtLogin);
 ipcMain.handle("set-auto-launch", (_e, enabled) => { setAutoLaunch(!!enabled); return true; });
 
+// ── OS-level permission bootstrap ──────────────────────────────────────────
+// Electron's session permission handler only governs *renderer*-initiated
+// requests. The OS itself (macOS TCC, Windows privacy settings) is a
+// separate layer — we have to nudge it explicitly the first time so the
+// user actually sees the native consent prompt, instead of silent denial.
+async function bootstrapOsPermissions() {
+  if (process.platform === "darwin") {
+    // Mic — fires the native consent sheet the first run, no-op after.
+    try {
+      const status = systemPreferences.getMediaAccessStatus("microphone");
+      if (status !== "granted") {
+        await systemPreferences.askForMediaAccess("microphone");
+      }
+    } catch { /* askForMediaAccess can reject if NSMic*Description is missing */ }
+
+    // Pasting the transcript drives the focused app via SendKeys/keystroke —
+    // macOS treats that as Accessibility, which the user has to grant once
+    // from System Settings. We just surface a toast pointing them there.
+    try {
+      const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+      if (!trusted) {
+        notifyOS(
+          "Voxa needs Accessibility access",
+          "Open System Settings → Privacy & Security → Accessibility and enable Voxa so transcripts can paste into other apps."
+        );
+      }
+    } catch { /* non-mac platforms or unavailable API */ }
+  }
+  // Windows + Linux: the mic gate is enforced inside getUserMedia() from
+  // the renderer — Chromium will trigger the OS prompt itself there.
+  // Clipboard + outbound network need no OS permission on either platform.
+}
+
 // ── App lifecycle ──────────────────────────────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const { session } = require("electron");
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
-    cb(permission === "media" || permission === "audioCapture");
+    cb(permission === "media" || permission === "audioCapture" || permission === "clipboard-read" || permission === "clipboard-sanitized-write");
   });
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
-    return permission === "media" || permission === "audioCapture";
+    return permission === "media" || permission === "audioCapture" || permission === "clipboard-read" || permission === "clipboard-sanitized-write";
   });
+
+  await bootstrapOsPermissions();
 
   // Kill the default File / Edit / View / Window menu — slop tell otherwise
   Menu.setApplicationMenu(null);

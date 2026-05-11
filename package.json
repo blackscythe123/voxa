@@ -12,11 +12,13 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "icons": "node scripts/make-icon.js",
+    "prebuild": "node scripts/make-icon.js",
     "build": "electron-builder",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux",
-    "build:all": "electron-builder -mwl"
+    "build:win": "node scripts/make-icon.js && electron-builder --win",
+    "build:mac": "node scripts/make-icon.js && electron-builder --mac",
+    "build:linux": "node scripts/make-icon.js && electron-builder --linux",
+    "build:all": "node scripts/make-icon.js && electron-builder -mwl"
   },
   "dependencies": {
     "electron-store": "^8.2.0"
@@ -55,7 +57,10 @@
           ]
         }
       ],
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.ico",
+      "executableName": "Voxa",
+      "artifactName": "Voxa-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
@@ -63,7 +68,13 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Voxa"
+      "shortcutName": "Voxa",
+      "menuCategory": false,
+      "uninstallDisplayName": "Voxa — voice to text",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": [
@@ -82,14 +93,19 @@
           ]
         }
       ],
-      "icon": "assets/icon.png",
+      "icon": "assets/icon.icns",
       "category": "public.app-category.productivity",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Voxa needs microphone access to record your voice for transcription.",
-        "LSUIElement": false
+        "NSAppleEventsUsageDescription": "Voxa pastes your transcript into the focused app by sending a Cmd+V keystroke.",
+        "NSSystemAdministrationUsageDescription": "Voxa pastes transcripts into other apps via the keyboard, which macOS treats as an Accessibility action.",
+        "LSUIElement": false,
+        "ITSAppUsesNonExemptEncryption": false
       },
       "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "title": "Voxa ${version}"
@@ -110,9 +126,33 @@
         }
       ],
       "icon": "assets/icon.png",
-      "category": "Utility",
+      "category": "Utility;AudioVideo;Audio",
       "synopsis": "System-wide voice-to-text powered by ChatGPT Whisper",
-      "maintainer": "Voxa <noreply@voxa.app>"
+      "description": "Voxa records your voice on a global hotkey, transcribes it through ChatGPT, and pastes the result into whatever app is focused.",
+      "maintainer": "Voxa <noreply@voxa.app>",
+      "executableName": "voxa",
+      "desktop": {
+        "entry": {
+          "Name": "Voxa",
+          "GenericName": "Voice to Text",
+          "Comment": "Push-to-talk transcription via ChatGPT",
+          "Keywords": "voice;dictation;speech;transcribe;whisper;chatgpt;microphone;",
+          "StartupWMClass": "Voxa",
+          "Categories": "Utility;AudioVideo;Audio;",
+          "Terminal": "false",
+          "Type": "Application"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "libasound2 | libasound2t64",
+        "libgtk-3-0 | libgtk-3-0t64",
+        "libnss3",
+        "libxss1",
+        "libsecret-1-0",
+        "xdotool"
+      ]
     }
   }
 }
