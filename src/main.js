@@ -255,11 +255,44 @@ function stopRecording() {
   }
 }
 
-function startRecording() {
+async function ensureMicAccess() {
+  // macOS gates microphone access through TCC. The native prompt only fires
+  // when *something* in the app explicitly asks — calling this at the
+  // moment the user presses record makes it feel intentional, and it's
+  // the gesture macOS expects. On Win/Linux this is a no-op.
+  if (process.platform !== "darwin") return true;
+  try {
+    let status = systemPreferences.getMediaAccessStatus("microphone");
+    if (status === "not-determined") {
+      const ok = await systemPreferences.askForMediaAccess("microphone");
+      status = ok ? "granted" : "denied";
+    }
+    if (status !== "granted") {
+      // Already denied previously — macOS won't show the prompt a second
+      // time, the user has to flip the switch themselves. Hand them the
+      // exact pane and a notification so the next press succeeds.
+      notifyOS(
+        "Voxa needs microphone access",
+        "Open System Settings → Privacy & Security → Microphone and enable Voxa, then try again."
+      );
+      shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+      notifyMain("error", "Microphone access denied — enable it in System Settings.");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    notifyMain("error", `Microphone check failed: ${err.message}`);
+    return false;
+  }
+}
+
+async function startRecording() {
   if (isRecording) {
     stopRecording();
     return;
   }
+
+  if (!(await ensureMicAccess())) return;
 
   loadServices();
   const prefs = configStore.getPreferences();
@@ -385,32 +418,23 @@ ipcMain.handle("set-auto-launch", (_e, enabled) => { setAutoLaunch(!!enabled); r
 // requests. The OS itself (macOS TCC, Windows privacy settings) is a
 // separate layer — we have to nudge it explicitly the first time so the
 // user actually sees the native consent prompt, instead of silent denial.
-async function bootstrapOsPermissions() {
-  if (process.platform === "darwin") {
-    // Mic — fires the native consent sheet the first run, no-op after.
-    try {
-      const status = systemPreferences.getMediaAccessStatus("microphone");
-      if (status !== "granted") {
-        await systemPreferences.askForMediaAccess("microphone");
-      }
-    } catch { /* askForMediaAccess can reject if NSMic*Description is missing */ }
-
-    // Pasting the transcript drives the focused app via SendKeys/keystroke —
-    // macOS treats that as Accessibility, which the user has to grant once
-    // from System Settings. We just surface a toast pointing them there.
-    try {
-      const trusted = systemPreferences.isTrustedAccessibilityClient(false);
-      if (!trusted) {
-        notifyOS(
-          "Voxa needs Accessibility access",
-          "Open System Settings → Privacy & Security → Accessibility and enable Voxa so transcripts can paste into other apps."
-        );
-      }
-    } catch { /* non-mac platforms or unavailable API */ }
-  }
-  // Windows + Linux: the mic gate is enforced inside getUserMedia() from
-  // the renderer — Chromium will trigger the OS prompt itself there.
-  // Clipboard + outbound network need no OS permission on either platform.
+function bootstrapOsPermissions() {
+  // Mic permission is deferred to ensureMicAccess() at record-time — asking
+  // here, with no user gesture, has macOS silently swallow the prompt and
+  // wastes the one-shot ask (subsequent calls just return the cached
+  // status without re-prompting). Accessibility we still surface up-front
+  // because it has to be granted from System Settings before the first
+  // paste, not in the middle of a recording flow.
+  if (process.platform !== "darwin") return;
+  try {
+    const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+    if (!trusted) {
+      notifyOS(
+        "Voxa needs Accessibility access",
+        "Open System Settings → Privacy & Security → Accessibility and enable Voxa so transcripts can paste into other apps."
+      );
+    }
+  } catch { /* non-mac or API unavailable */ }
 }
 
 // ── App lifecycle ──────────────────────────────────────────────────────────
@@ -423,7 +447,7 @@ app.whenReady().then(async () => {
     return permission === "media" || permission === "audioCapture" || permission === "clipboard-read" || permission === "clipboard-sanitized-write";
   });
 
-  await bootstrapOsPermissions();
+  bootstrapOsPermissions();
 
   // Kill the default File / Edit / View / Window menu — slop tell otherwise
   Menu.setApplicationMenu(null);
