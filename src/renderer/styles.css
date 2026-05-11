@@ -1,221 +1,577 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Voxa — Warm & Cozy (Balanced)
+   Reference scene: a writer's desk by a sunlit window, mid-morning.
+   Cream paper, warm dark ink, terracotta marginalia, a sage pen-nib dot.
+   ════════════════════════════════════════════════════════════════════════ */
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Lora:ital,wght@0,400..600;1,400..600&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap");
+
+:root {
+  /* ── The desk (paper, lamp, ink) ──────────────────────────────────── */
+  --paper:        #faf6f0;      /* cream — the page */
+  --paper-warm:   #f3eadb;      /* aged margin */
+  --vellum:       #fffbf4;      /* a fresh sheet on top */
+  --rule:         #e8dcc7;      /* hairline rules */
+  --rule-soft:    #efe5d2;      /* lighter rule */
+
+  /* ── Ink (everything readable) ────────────────────────────────────── */
+  --ink:          #2d2418;      /* warm dark brown — body text */
+  --ink-2:        #6b5c40;      /* faded brown — secondary */
+  --ink-3:        #a89880;      /* annotation pencil — tertiary */
+  --ink-faint:    #c9b994;      /* placeholder / disabled */
+
+  /* ── Marginalia & accents ─────────────────────────────────────────── */
+  --terra:        #c4632a;      /* terracotta — primary accent */
+  --terra-warm:   #d97c3f;      /* lighter terracotta — hover */
+  --terra-deep:   #a14c1d;      /* burnt terracotta — pressed */
+  --sage:         #5a7d5a;      /* binding-cloth sage — secondary */
+  --sage-warm:    #7a9a7a;      /* sage hover */
+
+  /* ── Status semantics ─────────────────────────────────────────────── */
+  --signal-on:    #5a7d5a;      /* sage — "logged in" reads as natural */
+  --signal-off:   #b34a3f;      /* warm rust — error */
+  --signal-warn:  #c89c3f;      /* mustard — warning */
+
+  /* ── Curves ──────────────────────────────────────────────────────── */
+  --ease:         cubic-bezier(0.32, 0, 0.32, 1);
+  --ease-soft:    cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 * {
   box-sizing: border-box;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
 }
 
-body {
-  margin: 0;
-  background: linear-gradient(135deg, #0f1218 0%, #1a2332 100%);
-  color: #f4f6fb;
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Lora", Georgia, serif;
+  font-size: clamp(14px, 0.85vw + 11px, 17px);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100%;
+  position: relative;
+  overflow-x: hidden;
 }
+
+/* ── A 40px drag region at the top — covers the hidden title bar area
+   so the user can grab anywhere and drag the window. The native min/max/
+   close buttons sit on top of this on Windows via titleBarOverlay. */
+.drag-region {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 40px;
+  -webkit-app-region: drag;
+  z-index: 50;
+  pointer-events: none; /* let clicks fall through to elements below — drag still works */
+}
+
+/* ── The lamplit warmth (a soft radial off the top-left, like a window) ─ */
+body {
+  background:
+    radial-gradient(ellipse 900px 700px at 18% 8%, rgba(255, 244, 220, 0.7) 0%, rgba(255, 244, 220, 0) 55%),
+    radial-gradient(ellipse 800px 600px at 82% 92%, rgba(196, 99, 42, 0.04) 0%, transparent 60%),
+    var(--paper);
+  background-attachment: fixed;
+}
+
+/* ── Subtle paper grain (cream-tinted noise) ───────────────────────── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.14 0 0 0 0 0.09 0 0 0 0.10 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* ── A quill resting against the right edge.
+   Positioned so the nib (the bottom of the SVG) is FULLY visible above the
+   bottom of the viewport. Scales with viewport, hidden on very narrow widths. */
+body::after {
+  content: "";
+  position: fixed;
+  right: clamp(-30px, 1vw, 24px);
+  bottom: clamp(28px, 4vh, 64px);
+  width:  clamp(200px, 22vw, 380px);
+  height: clamp(320px, 36vw, 600px);
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("./quill.svg");
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-position: bottom right;
+  opacity: 0.22;
+  transform: rotate(-6deg);
+  transform-origin: bottom right;
+}
+@media (max-width: 760px) {
+  body::after { display: none; } /* on narrow widths, give content the space back */
+}
+
+/* ── Selection / scrollbar / focus — terracotta marginalia ─────────── */
+::selection {
+  background: rgba(196, 99, 42, 0.22);
+  color: var(--ink);
+}
+
+::-webkit-scrollbar { width: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(45, 36, 24, 0.12);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s var(--ease);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(196, 99, 42, 0.45);
+  background-clip: padding-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--terra);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Layout — main window
+   Single centered column. Width scales with viewport but stays readable.
+   Watermark imagery fills the surrounding canvas so the rails don't strand.
+   ════════════════════════════════════════════════════════════════════════ */
 
 .app-container {
-  max-width: 700px;
+  position: relative;
+  z-index: 10;
+  max-width: clamp(320px, 88vw, 880px);
   margin: 0 auto;
-  padding: 40px 24px;
+  padding:
+    clamp(56px, 9vh, 92px)
+    clamp(20px, 4vw, 48px)
+    clamp(72px, 12vh, 120px);
 }
 
-header {
+/* Hero — typographic title above a thin pen-stroke rule, centered always */
+.hero {
+  margin-bottom: clamp(36px, 5vh, 64px);
   text-align: center;
-  margin-bottom: 40px;
+}
+.hero .pen-rule {
+  position: relative;
+  height: 16px;
+  margin-bottom: 22px;
+}
+.hero .pen-rule::before {
+  /* a single ink stroke: tapered ends, slight wave, hand-drawn feel */
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 180px;
+  height: 1.4px;
+  background: linear-gradient(90deg, transparent 0%, var(--terra) 18%, var(--terra) 82%, transparent 100%);
+  border-radius: 999px;
+}
+.hero .pen-rule::after {
+  /* a small ink dot above the stroke — like the period at the start of a thought */
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--terra);
+  opacity: 0.85;
 }
 
-header h1 {
-  margin: 0;
-  font-size: 32px;
-  font-weight: 700;
+.hero h1 {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(56px, 7vw + 24px, 128px);
+  font-weight: 500;
+  font-style: italic;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  margin-bottom: 14px;
+  font-variation-settings: "opsz" 144, "SOFT" 50;
+}
+.hero h1 em {
+  font-style: italic;
+  color: var(--terra);
+}
+.hero .tagline {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: clamp(15px, 0.6vw + 12px, 22px);
+  color: var(--ink-2);
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+  margin-bottom: 6px;
+}
+.hero .aside {
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: clamp(12px, 0.3vw + 11px, 15px);
+  color: var(--ink-3);
 }
 
-header p {
-  margin: 8px 0 0;
+/* ════════════════════════════════════════════════════════════════════════
+   Paper cards — soft shadows, organic borders
+   ════════════════════════════════════════════════════════════════════════ */
+
+.note {
+  position: relative;
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: clamp(14px, 1.2vw, 22px);
+  padding: clamp(20px, 2.2vw, 32px) clamp(20px, 2.4vw, 36px);
+  margin-bottom: clamp(14px, 1.6vw, 24px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 1px 1px rgba(45, 36, 24, 0.04),
+    0 6px 20px -8px rgba(45, 36, 24, 0.08),
+    0 14px 32px -16px rgba(45, 36, 24, 0.06);
+  transition: transform 0.4s var(--ease), box-shadow 0.4s var(--ease);
+}
+.note:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 2px 2px rgba(45, 36, 24, 0.04),
+    0 10px 28px -10px rgba(45, 36, 24, 0.10),
+    0 22px 48px -20px rgba(45, 36, 24, 0.08);
+}
+
+.note h2 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 22px;
+  color: var(--ink);
+  margin-bottom: 4px;
+  font-variation-settings: "opsz" 36, "SOFT" 50;
+}
+.note h2 .quill {
+  color: var(--terra);
+  font-style: normal;
+  margin-right: 6px;
   font-size: 14px;
-  color: #a0afc0;
+  vertical-align: 4px;
 }
-
-.status-card {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 32px;
-}
-
-.status-card h2 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #d3daea;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-#status {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #6fdb8f;
-}
-
-#detail {
-  margin: 8px 0 0;
+.note .note-aside {
+  font-family: "Lora", serif;
+  font-style: italic;
   font-size: 13px;
-  color: #a0afc0;
-  min-height: 18px;
+  color: var(--ink-3);
+  margin-bottom: 18px;
+  line-height: 1.55;
 }
 
-.setup {
-  margin-bottom: 32px;
+/* ════════════════════════════════════════════════════════════════════════
+   Status block — feels like a margin note
+   ════════════════════════════════════════════════════════════════════════ */
+
+.status-block {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#status {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(22px, 1.4vw + 14px, 36px);
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+}
+#status::before {
+  /* a small terra dot — replaces the em-dash prefix (em-dashes read as AI slop) */
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--terra);
+  margin-right: 14px;
+  vertical-align: 4px;
+}
+#detail {
+  font-family: "Lora", serif;
+  font-size: 14.5px;
+  font-style: italic;
+  color: var(--ink-2);
+  margin-top: 4px;
+  line-height: 1.55;
+}
+#detail:not(:empty)::before {
+  content: "✎";
+  color: var(--terra);
+  margin-right: 8px;
+  font-style: normal;
+  font-size: 13px;
+  vertical-align: 1px;
 }
 
-.setup h2 {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #d3daea;
-}
+/* ════════════════════════════════════════════════════════════════════════
+   Auth state — reads like a postscript
+   ════════════════════════════════════════════════════════════════════════ */
 
-.setup label {
-  display: block;
-  margin: 6px 0 8px;
-  font-size: 12px;
-  color: #d3daea;
-}
-
-.setup textarea {
-  width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.25);
-  color: #f4f6fb;
-  padding: 10px;
-  font-size: 12px;
-  resize: vertical;
-  margin-bottom: 12px;
-}
-
-.primary-btn, .secondary-btn {
-  display: block;
-  width: 100%;
+.auth-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Lora", serif;
+  font-size: 13.5px;
+  font-style: italic;
+  color: var(--ink-2);
+  margin-bottom: 16px;
+  padding: 0;
   border: none;
-  border-radius: 8px;
-  padding: 12px 16px;
-  font-size: 14px;
-  font-weight: 600;
+  background: transparent;
+}
+.auth-badge::before {
+  content: "✎";
+  color: var(--ink-3);
+  font-style: normal;
+}
+
+.auth-ok::before { content: "✓"; color: var(--sage); }
+.auth-ok      { color: var(--sage); }
+.auth-none::before { content: "✕"; color: var(--signal-off); }
+.auth-none    { color: var(--signal-off); }
+.auth-unknown::before { content: "…"; color: var(--ink-3); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Buttons — pen-on-paper feel
+   ════════════════════════════════════════════════════════════════════════ */
+
+.primary-btn,
+.secondary-btn {
+  display: inline-block;
+  width: 100%;
+  border-radius: 14px;
+  padding: 13px 20px;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 15.5px;
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: -0.005em;
   cursor: pointer;
-  margin-bottom: 12px;
-  transition: all 0.2s ease;
+  margin-bottom: 10px;
+  transition: all 0.3s var(--ease);
+  font-variation-settings: "opsz" 36, "SOFT" 100;
 }
 
 .primary-btn {
-  background: #6fdb8f;
-  color: #0d2014;
+  background: var(--terra);
+  border: 1px solid var(--terra-deep);
+  color: var(--vellum);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.12) inset,
+    0 1px 2px rgba(45, 36, 24, 0.18),
+    0 6px 16px -8px rgba(196, 99, 42, 0.4);
 }
-
 .primary-btn:hover {
-  background: #5ec97d;
+  background: var(--terra-warm);
   transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.18) inset,
+    0 2px 3px rgba(45, 36, 24, 0.18),
+    0 12px 24px -10px rgba(196, 99, 42, 0.5);
 }
+.primary-btn:active { transform: translateY(0); background: var(--terra-deep); }
+.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 .secondary-btn {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f4f6fb;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
 }
-
 .secondary-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--terra);
+  color: var(--terra);
+  background: rgba(196, 99, 42, 0.04);
 }
 
-.instructions {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 32px;
+/* ════════════════════════════════════════════════════════════════════════
+   Form controls — pen-and-paper inputs
+   ════════════════════════════════════════════════════════════════════════ */
+
+.note label {
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--ink-3);
+  margin: 14px 0 8px;
+  letter-spacing: 0.04em;
 }
 
-.instructions h2 {
-  margin: 0 0 16px;
-  font-size: 16px;
+#micSelect {
+  width: 100%;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ink-3);
+  color: var(--ink);
+  border-radius: 10px 10px 4px 4px;
+  padding: 11px 38px 11px 14px;
+  font-size: 14px;
+  font-family: "Lora", serif;
+  font-style: italic;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 5l4 4 4-4' stroke='%23c4632a' stroke-width='1.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  cursor: pointer;
+  transition: all 0.25s var(--ease);
+  margin-bottom: 12px;
+}
+#micSelect:hover {
+  background-color: var(--vellum);
+  border-bottom-color: var(--terra);
+}
+#micSelect:focus {
+  outline: none;
+  border-color: var(--terra);
+  border-bottom-width: 2px;
+  background-color: var(--vellum);
+}
+#micSelect option {
+  background: var(--vellum);
+  color: var(--ink);
+  font-style: normal;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Mic level meter — like ink rising in a fountain pen
+   ════════════════════════════════════════════════════════════════════════ */
+
+#micLevelWrap > div:first-child {
+  height: 12px !important;
+  background: var(--paper-warm) !important;
+  border: 1px solid var(--rule) !important;
+  border-radius: 999px !important;
+  overflow: hidden;
+}
+#micLevelBar {
+  height: 100% !important;
+  background: linear-gradient(90deg, var(--sage) 0%, var(--terra) 100%) !important;
+  border-radius: 999px;
+  transition: width 60ms linear;
+  position: relative;
+}
+#micLevelText {
+  margin-top: 8px !important;
+  font-family: "Lora", serif !important;
+  font-size: 13px !important;
+  font-style: italic !important;
+  color: var(--ink-2) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   The "how it flows" steps — a recipe-card numbered list
+   ════════════════════════════════════════════════════════════════════════ */
+
+.flow {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+}
+.flow li {
+  counter-increment: step;
+  position: relative;
+  padding: 14px 4px 14px 56px;
+  font-family: "Lora", serif;
+  font-size: 14.5px;
+  color: var(--ink);
+  line-height: 1.65;
+  border-bottom: 1px dashed var(--rule);
+}
+.flow li:last-child { border-bottom: none; }
+.flow li::before {
+  content: counter(step, lower-roman) ".";
+  position: absolute;
+  left: 8px;
+  top: 14px;
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--terra);
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+  width: 36px;
+  text-align: right;
+}
+.flow li em {
+  font-style: italic;
+  color: var(--ink-2);
+  font-size: 13px;
+  display: block;
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.flow li em::before {
+  /* small handwritten "·" middot, not the AI-slop em-dash */
+  content: "·";
+  margin-right: 8px;
+  color: var(--terra);
+  font-style: normal;
   font-weight: 600;
-  color: #d3daea;
 }
 
-.instructions ol {
-  margin: 0;
-  padding-left: 24px;
-  color: #a0afc0;
-}
-
-.instructions li {
-  line-height: 1.8;
-  margin-bottom: 8px;
-}
-
+/* ── kbd — a stamped key on warm paper ──────────────────────────────── */
 kbd {
   display: inline-block;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-family: "Courier New", monospace;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
-  color: #6fdb8f;
+  font-weight: 500;
+  font-style: normal;
+  padding: 2px 8px;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  color: var(--terra);
+  margin: 0 3px;
+  vertical-align: 1px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Postscript footer — a margin signature
+   ════════════════════════════════════════════════════════════════════════ */
 
 footer {
+  margin-top: 32px;
   text-align: center;
-  padding-top: 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  padding-top: 22px;
 }
-
+footer::before {
+  /* same hand-drawn ink mark used in the hero — visual through-line */
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 1.4px;
+  background: linear-gradient(90deg, transparent, var(--rule), transparent);
+  border-radius: 999px;
+}
 footer p {
-  margin: 0;
-  font-size: 12px;
-  color: #6a7684;
-}
-
-/* Recording Overlay */
-.recording-overlay {
-  position: fixed;
-  width: 360px;
-  background: linear-gradient(155deg, #163126 0%, #0d1d19 100%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
-  padding: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  z-index: 10000;
-}
-
-.recording-overlay.hidden {
-  display: none;
-}
-
-.recording-overlay h3 {
-  margin: 0 0 12px;
-  font-size: 16px;
-  font-weight: 700;
-  color: #d6efe0;
-}
-
-.recording-overlay #timer {
-  margin: 0 0 14px;
-  font-size: 28px;
-  font-weight: 700;
-  color: #6fdb8f;
-}
-
-.recording-overlay #stopButton {
-  width: 100%;
-  border: none;
-  background: #f1c84f;
-  color: #111;
-  border-radius: 8px;
-  padding: 10px;
-  font-weight: 700;
-  cursor: pointer;
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
   font-size: 13px;
-}
-
-.recording-overlay #stopButton:hover {
-  background: #e5b83d;
+  color: var(--ink-3);
+  font-variation-settings: "opsz" 24, "SOFT" 100;
 }

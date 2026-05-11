@@ -1,4 +1,4 @@
-# budgetWhisper
+# Voxa
 
 A cross-platform desktop app that captures voice input, transcribes it using ChatGPT, and automatically inserts the text into any active text field.
 
@@ -16,7 +16,7 @@ A cross-platform desktop app that captures voice input, transcribes it using Cha
 1. Clone or download this repository
 2. Navigate to the folder:
    ```bash
-   cd budgetWhisper
+   cd Voxa
    ```
 3. Install dependencies:
    ```bash
