@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,400..600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --paper:     #faf6f0;
+        --paper-warm:#f3eadb;
+        --vellum:    #fffbf4;
+        --rule:      #e8dcc7;
+        --ink:       #2d2418;
+        --ink-2:     #6b5c40;
+        --terra:     #c4632a;
+        --terra-deep:#a14c1d;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        width: 240px;
+        height: 84px;
+        background: transparent;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* SVG mask for the torn-left edge — wavy bite into the paper */
+      .strip {
+        position: relative;
+        width: 220px;
+        height: 64px;
+        background: var(--vellum);
+        padding: 0 16px 0 22px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        transform: rotate(-1.4deg);
+        filter: drop-shadow(0 6px 14px rgba(45, 36, 24, 0.22)) drop-shadow(0 1px 2px rgba(45, 36, 24, 0.18));
+        -webkit-app-region: drag;
+
+        /* The torn left edge: a clip-path with little jagged variation */
+        clip-path: polygon(
+          6px   8%, 2px  16%, 10px 24%, 4px 32%,  9px 40%,
+          3px  48%, 8px  56%, 2px 64%,  7px 72%, 4px 80%,
+          9px  88%, 3px  96%, 100% 100%, 100% 0%, 8px 0%
+        );
+      }
+
+      /* A faint paper grain on the strip itself */
+      .strip::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.14 0 0 0 0 0.09 0 0 0 0.08 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        mix-blend-mode: multiply;
+        opacity: 0.7;
+      }
+
+      /* A small terracotta thumbtack at the top-right of the strip */
+      .pin {
+        position: absolute;
+        top: -5px;
+        right: 16px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 30%, #e2864c 0%, var(--terra) 50%, var(--terra-deep) 100%);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.25),
+          0 1px 2px rgba(45, 36, 24, 0.5),
+          0 4px 6px -2px rgba(45, 36, 24, 0.4);
+        z-index: 2;
+      }
+      .pin::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.35);
+        transform: translate(-50%, -50%);
+      }
+
+      /* The pulsing terracotta dot — a fountain pen tapping a page */
+      .dot {
+        position: relative;
+        width: 9px;
+        height: 9px;
+        background: var(--terra);
+        border-radius: 50%;
+        flex-shrink: 0;
+        box-shadow: 0 0 0 1px rgba(196, 99, 42, 0.25);
+        animation: dot-tap 1.6s var(--ease, cubic-bezier(0.4,0,0.2,1)) infinite;
+      }
+      @keyframes dot-tap {
+        0%, 100% { opacity: 0.95; transform: scale(1); }
+        50%      { opacity: 0.55; transform: scale(0.85); }
+      }
+
+      /* Italic-ish "rec." prefix before the timer */
+      .label {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 12.5px;
+        color: var(--ink-2);
+        font-variation-settings: "opsz" 24, "SOFT" 100;
+      }
+
+      /* The writing quill — a tiny pen that wavy-glides L→R inside the strip,
+         leaving a fading ink line behind. Loops infinitely while the
+         recording strip is visible. */
+      .writing {
+        position: absolute;
+        left: 64px;          /* clear of dot + "rec." */
+        right: 80px;         /* clear of timer + stop */
+        bottom: 8px;
+        height: 14px;
+        pointer-events: none;
+        overflow: visible;
+      }
+      /* The ink trail itself is now a sine-wave SVG path, drawn left-to-right
+         via animated stroke-dashoffset. The pen bobs in lockstep so it looks
+         like it's making the curve, not just hovering above a straight line. */
+      .ink-svg {
+        position: absolute;
+        left: 0; right: 0;
+        bottom: 0;
+        width: 100%; height: 100%;
+        overflow: visible;
+      }
+      .ink-stroke {
+        stroke: #2d2418;
+        stroke-width: 1;
+        fill: none;
+        stroke-linecap: round;
+        pathLength: 100;
+        stroke-dasharray: 100;
+        stroke-dashoffset: 100;
+        animation: ink-draw 4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+      }
+      @keyframes ink-draw {
+        0%   { stroke-dashoffset: 100; opacity: 0; }
+        6%   { stroke-dashoffset: 100; opacity: 0.9; }
+        92%  { stroke-dashoffset: 0;   opacity: 0.9; }
+        100% { stroke-dashoffset: 0;   opacity: 0; }
+      }
+      .quill-pen {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 14px;
+        height: 14px;
+        animation: quill-glide 4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+        transform-origin: 78% 92%;
+        will-change: left, transform;
+      }
+      /* Pen tracks the sine path — peaks at 12.5%, 62.5%; troughs at 37.5%, 87.5%.
+         translateY(-3px) at peaks (path goes up), +3px at troughs (path goes down).
+         Tilt also flexes a few degrees to feel like a real wrist following the curve. */
+      @keyframes quill-glide {
+        0%    { left: 0%;    transform: translateY(0px)  rotate(-12deg); opacity: 0; }
+        4%    { left: 1%;    transform: translateY(0px)  rotate(-12deg); opacity: 1; }
+        12.5% { left: 12.5%; transform: translateY(-3px) rotate(-15deg); }
+        25%   { left: 25%;   transform: translateY(0px)  rotate(-12deg); }
+        37.5% { left: 37.5%; transform: translateY(3px)  rotate(-9deg); }
+        50%   { left: 50%;   transform: translateY(0px)  rotate(-12deg); }
+        62.5% { left: 62.5%; transform: translateY(-3px) rotate(-15deg); }
+        75%   { left: 75%;   transform: translateY(0px)  rotate(-12deg); }
+        87.5% { left: 87.5%; transform: translateY(3px)  rotate(-9deg); }
+        94%   { left: 97%;   transform: translateY(0px)  rotate(-12deg); opacity: 1; }
+        100%  { left: 100%;  transform: translateY(0px)  rotate(-12deg); opacity: 0; }
+      }
+      .quill-pen svg { width: 100%; height: 100%; display: block; }
+
+      /* Timer — IBM Plex Mono, warm ink, tabular */
+      .timer {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--ink);
+        letter-spacing: 0.04em;
+        flex: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Stop button — italic, terracotta on cream */
+      .stop-btn {
+        -webkit-app-region: no-drag;
+        background: transparent;
+        border: 1px solid var(--rule);
+        color: var(--terra);
+        border-radius: 999px;
+        padding: 4px 11px;
+        font-family: "Fraunces", Georgia, serif;
+        font-size: 12px;
+        font-style: italic;
+        font-weight: 500;
+        cursor: pointer;
+        flex-shrink: 0;
+        font-variation-settings: "opsz" 24, "SOFT" 100;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .stop-btn:hover {
+        background: var(--terra);
+        border-color: var(--terra-deep);
+        color: var(--vellum);
+      }
+      .stop-btn:active { transform: scale(0.96); }
+      .stop-btn:disabled { opacity: 0.4; cursor: default; }
+    </style>
+  </head>
+  <body>
+    <div class="strip">
+      <div class="pin"></div>
+      <div class="dot" id="dot"></div>
+      <span class="label">rec.</span>
+      <span class="timer" id="timer">00:00</span>
+      <button class="stop-btn" id="stopBtn">stop</button>
+
+      <!-- A tiny quill writing across the strip while recording. The trail is
+           a sine-wave SVG path drawn left-to-right via stroke-dashoffset. -->
+      <div class="writing" aria-hidden="true">
+        <svg class="ink-svg" viewBox="0 0 200 14" preserveAspectRatio="none">
+          <path class="ink-stroke"
+                d="M 0 7 Q 25 2 50 7 T 100 7 T 150 7 T 200 7" />
+        </svg>
+        <span class="quill-pen">
+          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+            <!-- feather body in black ink -->
+            <path d="M 12.5 1.5 C 9 4 6.5 8 5.5 13 L 4.5 14.5 L 4 15
+                     C 6 14.5 8 13 9.5 11 C 11.5 8.5 13 5 12.5 1.5 Z"
+                  fill="#2d2418" />
+            <!-- spine, slightly darker -->
+            <path d="M 12.2 2 C 9.5 4.5 7 8.5 5.5 13"
+                  stroke="#000" stroke-width="0.55" fill="none" stroke-linecap="round" opacity="0.6" />
+            <!-- nib touching the line -->
+            <path d="M 4 15 L 2 15.6 L 3 14"
+                  fill="#1a1410" stroke="#1a1410" stroke-width="0.4" stroke-linejoin="round" />
+          </svg>
+        </span>
+      </div>
+    </div>
+
+    <script>
+      const timerEl = document.getElementById("timer");
+      const stopBtn = document.getElementById("stopBtn");
+
+      const SAMPLE_RATE = 16000; // 16 kHz mono PCM is what Whisper prefers
+      let recState = null;       // { stream, audioCtx, processor, pcmChunks }
+      let timerHandle;
+      let seconds = 0;
+      let maxSecs = 120;
+
+      function formatTime(s) {
+        return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+      }
+
+      async function startRecording(payload) {
+        maxSecs = payload?.maxRecordingSeconds ?? 120;
+        const deviceId = payload?.inputDeviceId || "default";
+        seconds = 0;
+        timerEl.textContent = "00:00";
+
+        const audioConstraints = {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: SAMPLE_RATE
+        };
+        if (deviceId !== "default") audioConstraints.deviceId = { exact: deviceId };
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+
+        const tracks = stream.getAudioTracks();
+        console.log("[overlay] mic track:", tracks[0]?.label, "settings:", tracks[0]?.getSettings());
+
+        const audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+        const source = audioCtx.createMediaStreamSource(stream);
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        const pcmChunks = [];
+        let peakAbs = 0;
+
+        processor.onaudioprocess = (e) => {
+          const input = e.inputBuffer.getChannelData(0);
+          for (let i = 0; i < input.length; i++) {
+            const a = Math.abs(input[i]);
+            if (a > peakAbs) peakAbs = a;
+          }
+          pcmChunks.push(new Float32Array(input));
+        };
+
+        source.connect(processor);
+        // do NOT connect to destination — that creates a speaker feedback loop and
+        // some browsers mute capture if the graph is "playing" the same stream
+        processor.connect(audioCtx.destination);
+
+        recState = { stream, audioCtx, processor, pcmChunks, getPeak: () => peakAbs };
+        stopBtn.disabled = false;
+
+        clearInterval(timerHandle);
+        timerHandle = setInterval(() => {
+          seconds += 1;
+          timerEl.textContent = formatTime(seconds);
+          if (seconds >= maxSecs) stopRecording();
+        }, 1000);
+      }
+
+      function encodeWav(chunks, sampleRate) {
+        const totalSamples = chunks.reduce((a, c) => a + c.length, 0);
+        const dataSize = totalSamples * 2;
+        const buf = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buf);
+        const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+
+        writeStr(0, "RIFF");
+        view.setUint32(4, 36 + dataSize, true);
+        writeStr(8, "WAVE");
+        writeStr(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);   // PCM
+        view.setUint16(22, 1, true);   // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeStr(36, "data");
+        view.setUint32(40, dataSize, true);
+
+        let off = 44;
+        for (const chunk of chunks) {
+          for (let i = 0; i < chunk.length; i++) {
+            const s = Math.max(-1, Math.min(1, chunk[i]));
+            view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            off += 2;
+          }
+        }
+        return buf;
+      }
+
+      async function stopRecording() {
+        if (!recState) return;
+
+        clearInterval(timerHandle);
+        stopBtn.disabled = true;
+
+        const { stream, audioCtx, processor, pcmChunks, getPeak } = recState;
+        recState = null;
+
+        processor.disconnect();
+        try { await audioCtx.close(); } catch {}
+        stream.getTracks().forEach((t) => t.stop());
+
+        console.log(`[overlay] captured ${pcmChunks.length} chunks  peak amplitude: ${getPeak().toFixed(4)} (1.0 = full scale)`);
+
+        const wavBuf = encodeWav(pcmChunks, SAMPLE_RATE);
+        await window.voiceBridge.finalizeRecording(Array.from(new Uint8Array(wavBuf)), "audio/wav");
+      }
+
+      window.voiceBridge.onStartRecording((payload) => {
+        startRecording(payload).catch(console.error);
+      });
+
+      window.voiceBridge.onStopRecording(() => {
+        stopRecording().catch(console.error);
+      });
+
+      stopBtn.addEventListener("click", () => {
+        stopRecording().catch(console.error);
+      });
+    </script>
+  </body>
+</html>

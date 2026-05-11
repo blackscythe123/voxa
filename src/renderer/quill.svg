@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 540" fill="none" stroke="#8a4a23" stroke-linecap="round" stroke-linejoin="round">
+  <!-- A quill resting at a slight diagonal — hand-drawn feel.
+       Uses #8a4a23 so the host page sets the tint via CSS.
+       Designed for Voxa: terra accent at low opacity as a page watermark. -->
+
+  <!-- main feather spine, gently curving -->
+  <path d="M 240 30 C 220 80, 195 140, 175 200 C 155 260, 135 320, 110 380 C 95 420, 80 460, 65 495"
+        stroke-width="2.6" />
+
+  <!-- feather body silhouette (left vane) -->
+  <path d="M 240 30 C 200 60, 165 110, 140 175 C 118 235, 95 295, 70 360 C 55 405, 50 450, 60 490
+           C 75 470, 95 440, 115 400 C 145 340, 175 270, 200 200 C 220 140, 240 80, 250 35 Z"
+        stroke-width="1.4" stroke-opacity="0.85" />
+
+  <!-- feather body silhouette (right vane, slightly sparser) -->
+  <path d="M 240 30 C 270 70, 270 130, 250 195 C 230 265, 200 330, 165 395 C 135 445, 95 480, 65 495"
+        stroke-width="1.4" stroke-opacity="0.85" />
+
+  <!-- vane combs (left side, multiple short strokes) -->
+  <g stroke-width="0.9" stroke-opacity="0.55">
+    <path d="M 220 60  Q 210 70, 195 75" />
+    <path d="M 210 90  Q 195 100, 175 105" />
+    <path d="M 198 125 Q 178 138, 152 142" />
+    <path d="M 184 165 Q 158 180, 128 184" />
+    <path d="M 170 205 Q 140 222, 110 224" />
+    <path d="M 154 245 Q 122 260, 92 262" />
+    <path d="M 138 290 Q 108 305, 80 304" />
+    <path d="M 122 335 Q 96 348, 72 345" />
+    <path d="M 105 380 Q 84 388, 65 384" />
+    <path d="M  90 420 Q 75 425, 62 420" />
+  </g>
+
+  <!-- vane combs (right side, sparser) -->
+  <g stroke-width="0.9" stroke-opacity="0.45">
+    <path d="M 245 70  Q 258 80, 268 92" />
+    <path d="M 240 110 Q 256 122, 263 138" />
+    <path d="M 230 155 Q 248 172, 252 192" />
+    <path d="M 218 200 Q 234 220, 232 244" />
+    <path d="M 200 250 Q 213 272, 206 296" />
+    <path d="M 180 300 Q 188 322, 178 344" />
+    <path d="M 158 350 Q 162 370, 148 390" />
+    <path d="M 132 395 Q 130 415, 112 432" />
+  </g>
+
+  <!-- nib at the bottom — pen tip touching paper -->
+  <path d="M 65 495 L 50 525 L 70 520 L 80 510 Z"
+        stroke-width="1.8" fill="#8a4a23" fill-opacity="0.55" />
+  <line x1="58" y1="510" x2="68" y2="520" stroke-width="0.8" />
+
+  <!-- tiny ink dot suggesting the pen has just lifted -->
+  <circle cx="40" cy="535" r="2.2" fill="#8a4a23" stroke="none" fill-opacity="0.6" />
+  <circle cx="32" cy="528" r="1.2" fill="#8a4a23" stroke="none" fill-opacity="0.4" />
+</svg>
