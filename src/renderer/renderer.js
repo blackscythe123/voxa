@@ -1,144 +1,41 @@
 const statusEl = document.getElementById("status");
 const detailEl = document.getElementById("detail");
 const loginBtn = document.getElementById("loginButton");
-const openLoginPageBtn = document.getElementById("openLoginPageButton");
-const saveSessionBtn = document.getElementById("saveSessionButton");
-const sessionJsonInput = document.getElementById("sessionJsonInput");
 const settingsBtn = document.getElementById("settingsButton");
-const timerEl = document.getElementById("timer");
-const stopButton = document.getElementById("stopButton");
-const recordingOverlay = document.getElementById("recordingOverlay");
-
-let mediaRecorder;
-let chunks = [];
-let timerHandle;
-let seconds = 0;
-let maxRecordingSeconds = 120;
-
-function formatSeconds(value) {
-  const mins = String(Math.floor(value / 60)).padStart(2, "0");
-  const secs = String(value % 60).padStart(2, "0");
-  return `${mins}:${secs}`;
-}
+const authBadge = document.getElementById("authBadge");
+const micSettingsBtn = document.getElementById("micSettingsBtn");
 
 function setStatus(label, detail = "") {
   statusEl.textContent = label;
   detailEl.textContent = detail;
+  const isMicError = /microphone|mic permission|silent/i.test(detail);
+  micSettingsBtn.style.display = isMicError ? "block" : "none";
 }
 
-function resetTimer() {
-  clearInterval(timerHandle);
-  seconds = 0;
-  timerEl.textContent = "00:00";
+micSettingsBtn.addEventListener("click", () => {
+  window.voiceBridge.openMicSettings();
+});
+
+function setAuthBadge(loggedIn) {
+  authBadge.textContent = loggedIn ? "signed in, we're set" : "not yet. let's fix that.";
+  authBadge.className = "auth-badge " + (loggedIn ? "auth-ok" : "auth-none");
 }
 
-function startTimer() {
-  clearInterval(timerHandle);
-  timerHandle = setInterval(() => {
-    seconds += 1;
-    timerEl.textContent = formatSeconds(seconds);
-    if (seconds >= maxRecordingSeconds) {
-      stopRecording().catch((error) => {
-        setStatus("Error", error.message || "Auto-stop failed.");
-      });
-    }
-  }, 1000);
-}
-
-async function startRecording(payload) {
-  maxRecordingSeconds = payload?.maxRecordingSeconds ?? 120;
-  resetTimer();
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    chunks = [];
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) {
-        chunks.push(event.data);
-      }
-    };
-
-    mediaRecorder.start();
-    stopButton.disabled = false;
-    recordingOverlay.classList.remove("hidden");
-    setStatus("Recording", "Speak now. Press Escape or click Stop to finish.");
-    startTimer();
-  } catch (error) {
-    setStatus("Error", error.message || "Microphone unavailable.");
-  }
-}
-
-async function stopRecording() {
-  if (!mediaRecorder || mediaRecorder.state === "inactive") {
-    return;
-  }
-
-  setStatus("Working", "Finalizing audio...");
-
-  const done = new Promise((resolve) => {
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" });
-      const bytes = await blob.arrayBuffer();
-      resolve({ bytes, mimeType: blob.type || "audio/webm" });
-      mediaRecorder.stream.getTracks().forEach((track) => track.stop());
-    };
-  });
-
-  mediaRecorder.stop();
-  stopButton.disabled = true;
-  clearInterval(timerHandle);
-
-  const { bytes, mimeType } = await done;
-  const result = await window.voiceBridge.finalizeRecording(Array.from(new Uint8Array(bytes)), mimeType);
-
-  if (!result.ok) {
-    setStatus("Error", result.error || "Transcription failed.");
-    recordingOverlay.classList.add("hidden");
-    return;
-  }
-
-  setStatus("Ready", "Transcript inserted!");
-  recordingOverlay.classList.add("hidden");
+async function checkAuth() {
+  const ok = await window.voiceBridge.getAuthStatus();
+  setAuthBadge(ok);
 }
 
 loginBtn.addEventListener("click", async () => {
   loginBtn.disabled = true;
-  setStatus("Working", "Opening /api/auth/session in your browser...");
+  setStatus("just a moment", "opening the ChatGPT sign-in window. it'll close itself.");
   const ok = await window.voiceBridge.loginChatGPT();
   loginBtn.disabled = false;
+  setAuthBadge(ok);
   if (ok) {
-    setStatus("Ready", "Auth already available.");
+    refreshHotkeyDisplay();
   } else {
-    setStatus("Ready", "If only WARNING_BANNER appears, open login page and sign in first.");
-  }
-});
-
-openLoginPageBtn.addEventListener("click", async () => {
-  openLoginPageBtn.disabled = true;
-  setStatus("Working", "Opening ChatGPT login page in your browser...");
-  await window.voiceBridge.openChatGPTLoginPage();
-  openLoginPageBtn.disabled = false;
-  setStatus("Ready", "After login, open /api/auth/session and paste full JSON here.");
-});
-
-saveSessionBtn.addEventListener("click", async () => {
-  const sessionText = sessionJsonInput.value.trim();
-  if (!sessionText) {
-    setStatus("Error", "Paste full /api/auth/session JSON first.");
-    return;
-  }
-
-  saveSessionBtn.disabled = true;
-  try {
-    await window.voiceBridge.saveChatGPTSessionText(sessionText);
-    setStatus("Success", "Session data saved. You can now transcribe.");
-    sessionJsonInput.value = "";
-  } catch (error) {
-    setStatus("Error", error?.message || "Failed to parse/save session JSON.");
-  } finally {
-    saveSessionBtn.disabled = false;
+    setStatus("ready", "the sign-in window closed early. try again whenever.");
   }
 });
 
@@ -146,47 +43,145 @@ settingsBtn.addEventListener("click", () => {
   window.voiceBridge.openSettings();
 });
 
-stopButton.addEventListener("click", () => {
-  stopRecording().catch((error) => {
-    setStatus("Error", error.message || "Stop failed.");
-  });
-});
-
-window.voiceBridge.onStartRecording((_event, payload) => {
-  startRecording(payload).catch((error) => {
-    setStatus("Error", error.message || "Failed to start recording.");
-  });
-});
-
-window.voiceBridge.onStopRecording(() => {
-  stopRecording().catch((error) => {
-    setStatus("Error", error.message || "Stop failed.");
-  });
-});
-
 window.voiceBridge.onRecordingStatus((payload) => {
   if (!payload) return;
 
   if (payload.status === "idle") {
-    stopButton.disabled = true;
-    resetTimer();
-    recordingOverlay.classList.add("hidden");
-    setStatus("Ready", "Press Ctrl+Shift+R in any text field to record.");
-  }
-
-  if (payload.status === "working") {
-    setStatus("Working", payload.detail || "Please wait...");
-  }
-
-  if (payload.status === "error") {
-    setStatus("Error", payload.detail || "Unknown error.");
-    recordingOverlay.classList.add("hidden");
-  }
-
-  if (payload.status === "success") {
-    setStatus("Success", payload.detail || "Completed.");
-    recordingOverlay.classList.add("hidden");
+    refreshHotkeyDisplay();
+  } else if (payload.status === "recording") {
+    setStatus("listening", "say what's on your mind. Escape stops it.");
+  } else if (payload.status === "working") {
+    setStatus("a moment", payload.detail || "thinking…");
+  } else if (payload.status === "error") {
+    setStatus("hmm", payload.detail || "something went sideways");
+  } else if (payload.status === "success") {
+    setStatus("done", payload.detail || "your words landed where the cursor was");
   }
 });
 
-setStatus("Ready", "Open /api/auth/session and import session JSON to get started.");
+// ── Microphone picker + live level meter ────────────────────────────────────
+const micSelect    = document.getElementById("micSelect");
+const testMicBtn   = document.getElementById("testMicBtn");
+const micLevelWrap = document.getElementById("micLevelWrap");
+const micLevelBar  = document.getElementById("micLevelBar");
+const micLevelText = document.getElementById("micLevelText");
+
+let testCtx = null;
+
+async function loadMicList() {
+  try {
+    // Need permission to see device labels. A throwaway getUserMedia call grants it.
+    const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+    probe.getTracks().forEach((t) => t.stop());
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((d) => d.kind === "audioinput");
+    const prefs = await window.voiceBridge.getPreferences();
+
+    micSelect.innerHTML = "";
+    const defaultOpt = document.createElement("option");
+    defaultOpt.value = "default";
+    defaultOpt.textContent = "System default";
+    micSelect.appendChild(defaultOpt);
+
+    for (const d of inputs) {
+      const opt = document.createElement("option");
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `Microphone (${d.deviceId.slice(0, 8)})`;
+      micSelect.appendChild(opt);
+    }
+
+    micSelect.value = prefs.inputDeviceId || "default";
+  } catch (err) {
+    micSelect.innerHTML = `<option>Error: ${err.message}</option>`;
+  }
+}
+
+micSelect.addEventListener("change", async () => {
+  await window.voiceBridge.savePreferences({ inputDeviceId: micSelect.value });
+  if (testCtx) await stopMicTest(); // restart the test against the new device
+  startMicTest();
+});
+
+async function startMicTest() {
+  if (testCtx) return;
+  micLevelWrap.style.display = "block";
+  micLevelText.textContent = "listening, say something to confirm.";
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: micSelect.value === "default" ? undefined : { exact: micSelect.value },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: true
+      }
+    });
+
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);
+
+    const data = new Uint8Array(analyser.fftSize);
+    let peakSeen = 0;
+    let raf;
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let peak = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = Math.abs(data[i] - 128);
+        if (v > peak) peak = v;
+      }
+      if (peak > peakSeen) peakSeen = peak;
+      const pct = Math.min(100, (peak / 128) * 100 * 4); // visual amplification
+      micLevelBar.style.width = pct.toFixed(0) + "%";
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+
+    testCtx = { ctx, stream, raf, peakRef: () => peakSeen };
+    testMicBtn.textContent = "Stop the test";
+  } catch (err) {
+    micLevelText.textContent = "couldn't open the mic. " + err.message;
+  }
+}
+
+async function stopMicTest() {
+  if (!testCtx) return;
+  cancelAnimationFrame(testCtx.raf);
+  testCtx.stream.getTracks().forEach((t) => t.stop());
+  try { await testCtx.ctx.close(); } catch {}
+  const peak = testCtx.peakRef();
+  testCtx = null;
+  testMicBtn.textContent = "Test it. speak softly, the bar should move.";
+  micLevelBar.style.width = "0%";
+  if (peak < 5) {
+    micLevelText.textContent = "✕ silence. try a different device above.";
+  } else {
+    micLevelText.textContent = `✓ peak ${peak}/128. this one works, saved.`;
+  }
+}
+
+testMicBtn.addEventListener("click", () => {
+  if (testCtx) stopMicTest();
+  else startMicTest();
+});
+
+async function refreshHotkeyDisplay() {
+  const prefs = await window.voiceBridge.getPreferences();
+  const pretty = (s) => (s || "").replace(/CommandOrControl/g, "Ctrl");
+  const startEl = document.getElementById("startKbd");
+  const stopEl  = document.getElementById("stopKbd");
+  if (startEl && prefs.startHotkey) startEl.textContent = pretty(prefs.startHotkey);
+  if (stopEl  && prefs.stopHotkey)  stopEl.textContent  = pretty(prefs.stopHotkey);
+  setStatus("ready", `click into any text field, then press ${pretty(prefs.startHotkey)}`);
+}
+
+loadMicList();
+checkAuth();
+refreshHotkeyDisplay();
+// Re-read prefs whenever the prefs window saves something (poll on focus)
+window.addEventListener("focus", refreshHotkeyDisplay);

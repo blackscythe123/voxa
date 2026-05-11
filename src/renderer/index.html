@@ -3,57 +3,90 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>budgetWhisper</title>
+    <title>Voxa</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <div class="drag-region" aria-hidden="true"></div>
     <main class="app-container">
-      <header>
-        <h1>🎙️ budgetWhisper</h1>
-        <p>Voice-to-text for any app</p>
-      </header>
+      <section class="hero">
+        <h1>V<em>oxa</em></h1>
+        <p class="tagline">your voice, written down</p>
+        <p class="aside">quietly, the moment you stop talking</p>
+        <div class="pen-rule" aria-hidden="true"></div>
+      </section>
 
-      <section class="status-card">
-        <h2>Status</h2>
-        <p id="status">Ready</p>
+      <section class="note">
+        <h2><span class="quill">✎</span>Right now</h2>
+        <p class="note-aside">a margin note from the app, refreshed as things happen.</p>
+
+        <div class="status-block">
+          <p id="status">Ready</p>
+        </div>
         <p id="detail"></p>
+        <button id="micSettingsBtn" class="secondary-btn" style="display:none; margin-top:14px;">Open Windows mic settings, let's give it permission.</button>
       </section>
 
-      <section class="setup">
-        <h2>Setup</h2>
-        <button id="loginButton" class="primary-btn">Open /api/auth/session</button>
-        <button id="openLoginPageButton" class="secondary-btn">Open ChatGPT Login Page</button>
-        <button id="settingsButton" class="secondary-btn">Preferences</button>
+      <section class="note">
+        <h2><span class="quill">✎</span>Sign in once</h2>
+        <p class="note-aside">we hand the cookies over to ChatGPT, and they last weeks. you'll rarely do this twice.</p>
 
-        <label for="sessionJsonInput">Paste /api/auth/session JSON</label>
-        <textarea id="sessionJsonInput" rows="6" placeholder="Paste full JSON response from https://chatgpt.com/api/auth/session"></textarea>
-        <button id="saveSessionButton" class="primary-btn">Use This Session Data</button>
+        <div id="authBadge" class="auth-badge auth-unknown">Checking the cabinet…</div>
+        <button id="loginButton" class="primary-btn">Sign in to ChatGPT</button>
+        <button id="settingsButton" class="secondary-btn">Open preferences</button>
       </section>
 
-      <section class="instructions">
-        <h2>How to Use</h2>
-        <ol>
-          <li>Click "Open /api/auth/session"</li>
-          <li>If you only see WARNING_BANNER, click "Open ChatGPT Login Page" and log in</li>
-          <li>Open /api/auth/session again and copy the full JSON</li>
-          <li>Paste JSON in the app and click "Use This Session Data"</li>
-          <li>Click into any text field in any app</li>
-          <li>Press <kbd>Ctrl+Shift+R</kbd> to start recording</li>
-          <li>Speak naturally, then press <kbd>Escape</kbd> to stop</li>
-          <li>Your transcript will be typed automatically</li>
+      <section class="note">
+        <h2><span class="quill">✎</span>The microphone</h2>
+        <p class="note-aside">pick whichever input Windows knows about. we'll listen through that one.</p>
+
+        <label for="micSelect">Input device</label>
+        <select id="micSelect">
+          <option value="default">Loading the device list…</option>
+        </select>
+        <button id="testMicBtn" class="secondary-btn">Test it. speak softly, the bar should move.</button>
+        <div id="micLevelWrap" style="display:none; margin-top:14px;">
+          <div>
+            <div id="micLevelBar" style="width:0%;"></div>
+          </div>
+          <p id="micLevelText">Listening… say something to confirm.</p>
+        </div>
+      </section>
+
+      <section class="note">
+        <h2><span class="quill">✎</span>The way it flows</h2>
+        <p class="note-aside">a small recipe in five steps, set in roman numerals like an old book.</p>
+
+        <ol class="flow">
+          <li>
+            Sign in once, up top.
+            <em>cookies last weeks. most people do this on the first run and never again.</em>
+          </li>
+          <li>
+            Click into any text field, anywhere on the system.
+            <em>a chat box, a code editor, an email, the address bar. anywhere a cursor will rest.</em>
+          </li>
+          <li>
+            Press <kbd id="startKbd">F9</kbd> to begin.
+            <em>a small paper strip pins itself to the corner. that's the timer.</em>
+          </li>
+          <li>
+            Speak naturally.
+            <em>no need to talk into the mic like a 1950s detective. just say what's on your mind.</em>
+          </li>
+          <li>
+            Press <kbd id="stopKbd">Escape</kbd> or tap the strip.
+            <em>your words appear right where the cursor was, freshly transcribed and copied to the clipboard.</em>
+          </li>
         </ol>
       </section>
 
       <footer>
-        <p>Recording widget appears in the corner when active</p>
+        <p>made for the days you'd rather speak than type.</p>
       </footer>
     </main>
-
-    <div id="recordingOverlay" class="recording-overlay hidden">
-      <h3>Recording...</h3>
-      <p id="timer">00:00</p>
-      <button id="stopButton">Stop</button>
-    </div>
 
     <script src="./renderer.js"></script>
   </body>
