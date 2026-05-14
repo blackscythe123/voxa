@@ -40,7 +40,7 @@ class OverlayService : Service() {
     private var isRecording = false
     private var isProcessing = false
 
-    override fun onBind(intent: IBinder?): IBinder? = null
+    override fun onBind(intent: android.content.Intent): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()

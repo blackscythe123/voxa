@@ -101,32 +101,32 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
-                    WebView(ctx).apply {
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            @Suppress("DEPRECATION")
-                            allowFileAccessFromFileURLs = false
-                        }
-                        CookieManager.getInstance().apply {
-                            setAcceptCookie(true)
-                            setAcceptThirdPartyCookies(this@apply, true)
-                        }
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                loading = false
-                                url?.let { tryCaptureSession(it) }
-                            }
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                request?.url?.toString()?.let { tryCaptureSession(it) }
-                                return false
-                            }
-                        }
-                        loadUrl(LOGIN_URL)
+                    val wv = WebView(ctx)
+                    wv.settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        @Suppress("DEPRECATION")
+                        allowFileAccessFromFileURLs = false
                     }
+                    CookieManager.getInstance().apply {
+                        setAcceptCookie(true)
+                        setAcceptThirdPartyCookies(wv, true)
+                    }
+                    wv.webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            loading = false
+                            url?.let { tryCaptureSession(it) }
+                        }
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): Boolean {
+                            request?.url?.toString()?.let { tryCaptureSession(it) }
+                            return false
+                        }
+                    }
+                    wv.loadUrl(LOGIN_URL)
+                    wv
                 }
             )
 

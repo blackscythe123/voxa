@@ -4,10 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 
 // ── Colours ──────────────────────────────────────────────────────────────────
 object VoxaColors {
@@ -37,11 +34,8 @@ object Sp {
 }
 
 // ── Typography ────────────────────────────────────────────────────────────────
-// Using system serif/sans as fallback; replace Font() refs with bundled assets if desired.
-val FrauncesFamily = FontFamily(
-    Font(resId = android.R.font.serif, weight = FontWeight.Bold, style = FontStyle.Italic),
-    Font(resId = android.R.font.serif, weight = FontWeight.Normal, style = FontStyle.Italic),
-)
+// System serif italic — replace with bundled Fraunces TTF assets when available.
+val FrauncesFamily = FontFamily.Serif
 
 private val colorScheme = darkColorScheme(
     background = VoxaColors.Bg,
