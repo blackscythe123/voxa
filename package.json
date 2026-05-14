@@ -42,6 +42,9 @@
       "!**/.DS_Store",
       "!**/*.map"
     ],
+    "asarUnpack": [
+      "assets/**/*"
+    ],
     "win": {
       "target": [
         {

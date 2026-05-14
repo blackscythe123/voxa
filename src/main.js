@@ -9,24 +9,42 @@ let tray;
 let isRecording = false;
 let isQuitting = false;
 
-// Per-OS icon. Windows reads .ico for taskbar/start-menu/explorer at every
-// size — handing it a .png makes the shell fall back to the Electron globe
-// even after install. macOS and Linux both happily take .png at runtime.
+// In a packaged build electron-builder unpacks assets to app.asar.unpacked/
+// so Win32 Shell APIs (nativeImage, Tray) get a real filesystem path.
+// In dev mode __dirname/../assets is the source tree.
+const assetsDir = app.isPackaged
+  ? path.join(process.resourcesPath, "app.asar.unpacked", "assets")
+  : path.join(__dirname, "..", "assets");
+
 const ICON_PATH = (() => {
-  const dir = path.join(__dirname, "..", "assets");
   if (process.platform === "win32") {
-    const ico = path.join(dir, "icon.ico");
+    const ico = path.join(assetsDir, "icon.ico");
     if (fs.existsSync(ico)) return ico;
   }
-  return path.join(dir, "icon.png");
+  return path.join(assetsDir, "icon.png");
 })();
-const TRAY_ICON_PATH = path.join(__dirname, "..", "assets", "tray.png");
+const TRAY_ICON_PATH = path.join(assetsDir, "tray.png");
 
 let configStore, chatgptAuth, textInserter;
 function loadServices() {
   if (!configStore) configStore = require("./services/configStore");
   if (!chatgptAuth) chatgptAuth = require("./services/chatgptAuth");
   if (!textInserter) textInserter = require("./services/textInserter");
+}
+
+// ── File logging — written to %AppData%\Voxa\voxa.log ─────────────────────
+let _logPath;
+function log(...args) {
+  const line = `[${new Date().toISOString()}] ${args.join(" ")}\n`;
+  process.stdout.write(line);
+  try {
+    if (!_logPath) _logPath = path.join(app.getPath("userData"), "voxa.log");
+    // Rotate: keep last ~200 KB
+    try {
+      if (fs.statSync(_logPath).size > 200_000) fs.writeFileSync(_logPath, line);
+      else fs.appendFileSync(_logPath, line);
+    } catch { fs.appendFileSync(_logPath, line); }
+  } catch { /* never let logging kill the app */ }
 }
 
 // Tells Windows which app is firing notifications — without it, toasts read
@@ -91,11 +109,13 @@ function createOverlayWindow() {
     height: 84,
     frame: false,
     transparent: true,
+    backgroundColor: "#00000000",
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
     focusable: false,
     hasShadow: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -104,7 +124,17 @@ function createOverlayWindow() {
   });
 
   overlayWindow.loadFile(path.join(__dirname, "renderer", "overlay.html"));
-  overlayWindow.hide();
+
+  overlayWindow.on("closed", () => {
+    log("overlay window closed unexpectedly");
+    overlayWindow = null;
+    if (!isQuitting) {
+      log("recreating overlay window");
+      createOverlayWindow();
+    }
+  });
+
+  log("overlay window created");
 }
 
 function createPreferencesWindow() {
@@ -187,7 +217,7 @@ function setAutoLaunch(enabled) {
 
 // ── Recording flow ─────────────────────────────────────────────────────────
 function placeOverlay(position) {
-  if (!overlayWindow) return;
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const { screen } = require("electron");
   const bounds = screen.getPrimaryDisplay().workArea;
   const [width, height] = overlayWindow.getSize();
@@ -252,6 +282,10 @@ function stopRecording() {
   if (!isRecording) return;
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send("stop-recording");
+  } else {
+    // Overlay gone — reset state directly so the hotkey isn't stuck
+    log("stopRecording: overlay gone, resetting state directly");
+    setRecordingState(false);
   }
 }
 
@@ -294,15 +328,26 @@ async function startRecording() {
 
   if (!(await ensureMicAccess())) return;
 
+  // Guard: recreate overlay if it was destroyed since startup
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    log("startRecording: overlay was destroyed, recreating");
+    createOverlayWindow();
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   loadServices();
   const prefs = configStore.getPreferences();
+  log(`startRecording: position=${prefs.overlayPosition}`);
   placeOverlay(prefs.overlayPosition);
-  overlayWindow.showInactive();
+  overlayWindow.show();
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  overlayWindow.moveTop();
   overlayWindow.webContents.send("start-recording", {
     maxRecordingSeconds: prefs.maxRecordingSeconds,
     inputDeviceId: prefs.inputDeviceId
   });
   setRecordingState(true);
+  log("startRecording: done");
 }
 
 function registerHotkeys() {
@@ -323,6 +368,7 @@ function registerHotkeys() {
     stopOk = globalShortcut.register(stopKey, stopRecording);
   }
 
+  log(`registerHotkeys: start=${startKey}(ok=${startOk}) stop=${stopKey}(ok=${stopOk})`);
   if (!startOk || !stopOk) {
     notifyMain("error", "Could not register shortcuts. Check Preferences.");
   }
@@ -332,6 +378,7 @@ function registerHotkeys() {
 ipcMain.handle("finalize-recording", async (_event, audioBytes, mimeType) => {
   try {
     loadServices();
+    log(`finalize-recording: ${audioBytes?.length ?? 0} bytes, ${mimeType}`);
     notifyMain("working", "Transcribing...");
 
     const transcript = await chatgptAuth.transcribeAudio(Buffer.from(audioBytes), mimeType);
@@ -349,8 +396,8 @@ ipcMain.handle("finalize-recording", async (_event, audioBytes, mimeType) => {
     setRecordingState(false);
     if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
     const msg = error.message || "Unknown error.";
+    log(`finalize-recording error: ${msg}`);
     notifyMain("error", msg);
-    // Surface to the OS too — the main window may be hidden in the tray
     if (!mainWindow || !mainWindow.isVisible()) notifyExternalError(msg);
     return { ok: false, error: msg };
   }

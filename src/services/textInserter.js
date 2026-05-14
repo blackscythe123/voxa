@@ -6,11 +6,14 @@ async function insertTranscript(text) {
 
   clipboard.writeText(text);
 
-  await new Promise((r) => setTimeout(r, 80));
+  // Give the foreground window time to settle after the overlay hides.
+  await new Promise((r) => setTimeout(r, 200));
 
   await new Promise((resolve, reject) => {
+    // -WindowStyle Hidden suppresses the PowerShell console flash.
     exec(
-      "powershell -NoProfile -NonInteractive -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')\"",
+      "powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command \"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')\"",
+      { timeout: 5000 },
       (err) => {
         if (err) reject(err);
         else resolve();
