@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voxa</string>
+    <string name="overlay_notification_title">Voxa Overlay Active</string>
+    <string name="overlay_notification_text">Floating mic is visible above keyboard</string>
+    <string name="channel_overlay">Voxa Overlay</string>
+</resources>
