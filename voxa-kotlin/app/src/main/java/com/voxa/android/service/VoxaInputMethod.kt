@@ -1,10 +1,10 @@
 ﻿package com.voxa.android.service
 
-import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
-import android.os.Build
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -12,6 +12,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import com.voxa.android.VoxaApp
 import com.voxa.android.data.AudioRecorder
 import com.voxa.android.network.TranscriptionApi
@@ -34,10 +35,7 @@ class VoxaInputMethod : InputMethodService() {
     private var statusLabel: TextView? = null
     private var waveRow: LinearLayout? = null
 
-    override fun onCreateInputView(): View {
-        val root = buildImeView()
-        return root
-    }
+    override fun onCreateInputView(): View = buildImeView()
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
@@ -50,18 +48,35 @@ class VoxaInputMethod : InputMethodService() {
         scope.cancel()
     }
 
+    private fun hasMicPermission() = ContextCompat.checkSelfPermission(
+        this, Manifest.permission.RECORD_AUDIO
+    ) == PackageManager.PERMISSION_GRANTED
+
     private fun resetState() {
         isRecording = false
         isProcessing = false
         micLabel?.text = "🎤"
-        statusLabel?.text = "Tap mic to start recording"
         setMicColor(COLOR_AMBER)
         setWaveActive(false)
+        statusLabel?.text = when {
+            !hasMicPermission() -> "Open Voxa app → grant microphone permission"
+            VoxaApp.prefs.getSessionCookie() == null -> "Open Voxa app → sign in to ChatGPT"
+            else -> "Tap mic to start recording"
+        }
     }
 
     private fun handleMicTap(view: View) {
         if (isProcessing) return
         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+
+        if (!hasMicPermission()) {
+            statusLabel?.text = "Open Voxa app → grant microphone permission"
+            return
+        }
+        if (VoxaApp.prefs.getSessionCookie() == null) {
+            statusLabel?.text = "Open Voxa app → sign in to ChatGPT"
+            return
+        }
 
         if (!isRecording) {
             isRecording = true
@@ -73,6 +88,7 @@ class VoxaInputMethod : InputMethodService() {
                 try {
                     recorder.start()
                 } catch (e: Exception) {
+                    isRecording = false
                     resetState()
                     statusLabel?.text = "Mic error: ${e.message}"
                 }
@@ -92,48 +108,48 @@ class VoxaInputMethod : InputMethodService() {
                     if (!text.isNullOrEmpty() && ic != null) {
                         ic.commitText(text, text.length)
                     }
+                    isProcessing = false
                     resetState()
                     if (text.isNullOrEmpty()) statusLabel?.text = "No speech detected"
                 } catch (e: Exception) {
+                    isProcessing = false
                     resetState()
-                    val msg = if (e.message == "NOT_LOGGED_IN") "Not logged in — open Voxa app first" else e.message ?: "Error"
-                    statusLabel?.text = msg
+                    statusLabel?.text = if (e.message == "NOT_LOGGED_IN")
+                        "Open Voxa app → sign in to ChatGPT"
+                    else "Error: ${e.message}"
                 }
-                isProcessing = false
             }
         }
     }
 
     private fun buildImeView(): View {
-        val ctx = this
-        val root = LinearLayout(ctx).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#0D0B08"))
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(0, dp(24), 0, dp(32))
         }
 
-        // Status text
-        statusLabel = TextView(ctx).apply {
+        statusLabel = TextView(this).apply {
             text = "Tap mic to start recording"
             textSize = 13f
             setTextColor(Color.parseColor("#8A7862"))
             gravity = Gravity.CENTER
+            setPadding(dp(16), 0, dp(16), 0)
         }
         root.addView(statusLabel, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(16) })
 
-        // Mic button
         val orbSize = dp(80)
-        micBtn = FrameLayout(ctx).apply {
+        micBtn = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(orbSize, orbSize)
             background = buildCircle(COLOR_AMBER)
             isClickable = true
             isFocusable = true
             setOnClickListener { handleMicTap(it) }
         }
-        micLabel = TextView(ctx).apply {
+        micLabel = TextView(this).apply {
             text = "🎤"
             textSize = 28f
             gravity = Gravity.CENTER
@@ -143,22 +159,14 @@ class VoxaInputMethod : InputMethodService() {
             )
         }
         micBtn!!.addView(micLabel)
-
-        // Wave bars below mic
-        waveRow = buildWaveRow(ctx)
+        waveRow = buildWaveRow()
 
         root.addView(micBtn)
         root.addView(waveRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, dp(20)
         ).apply { topMargin = dp(10) })
 
-        // Bottom row: Done + Switch keyboard hint
-        val bottomRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, dp(20), 0, 0)
-        }
-        val doneBtn = TextView(ctx).apply {
+        val doneBtn = TextView(this).apply {
             text = "Done"
             textSize = 14f
             setTextColor(Color.parseColor("#C97D2E"))
@@ -166,25 +174,27 @@ class VoxaInputMethod : InputMethodService() {
             background = buildPill(Color.parseColor("#1E1A14"), Color.parseColor("#2A231B"))
             setOnClickListener { requestHideSelf(0) }
         }
-        bottomRow.addView(doneBtn)
+        val bottomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(20), 0, 0)
+            addView(doneBtn)
+        }
         root.addView(bottomRow)
-
         return root
     }
 
-    private fun buildWaveRow(ctx: Context): LinearLayout {
-        return LinearLayout(ctx).apply {
+    private fun buildWaveRow(): LinearLayout {
+        return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             for (i in 0 until 5) {
-                val bar = View(ctx).apply {
+                val bar = View(this@VoxaInputMethod).apply {
                     background = buildRect(COLOR_AMBER)
-                    tag = "bar_$i"
                 }
-                val params = LinearLayout.LayoutParams(dp(3), dp(4)).apply {
+                addView(bar, LinearLayout.LayoutParams(dp(3), dp(4)).apply {
                     if (i > 0) leftMargin = dp(4)
-                }
-                addView(bar, params)
+                })
             }
         }
     }
@@ -192,42 +202,23 @@ class VoxaInputMethod : InputMethodService() {
     private fun setWaveActive(active: Boolean) {
         val row = waveRow ?: return
         val heights = if (active) intArrayOf(dp(8), dp(16), dp(20), dp(16), dp(8))
-                      else intArrayOf(dp(4), dp(4), dp(4), dp(4), dp(4))
+                      else        intArrayOf(dp(4),  dp(4),  dp(4),  dp(4),  dp(4))
         for (i in 0 until row.childCount) {
-            val bar = row.getChildAt(i)
-            val p = bar.layoutParams as LinearLayout.LayoutParams
+            val p = row.getChildAt(i).layoutParams as LinearLayout.LayoutParams
             p.height = heights[i]
-            bar.layoutParams = p
+            row.getChildAt(i).layoutParams = p
         }
     }
 
-    private fun setMicColor(color: Int) {
-        micBtn?.background = buildCircle(color)
-    }
-
-    private fun buildCircle(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(color)
-    }
-
-    private fun buildRect(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(2).toFloat()
-        setColor(color)
-    }
-
-    private fun buildPill(fillColor: Int, strokeColor: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(20).toFloat()
-        setColor(fillColor)
-        setStroke(dp(1), strokeColor)
-    }
-
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private fun setMicColor(color: Int) { micBtn?.background = buildCircle(color) }
+    private fun buildCircle(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+    private fun buildRect(color: Int) = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = dp(2).toFloat(); setColor(color) }
+    private fun buildPill(fill: Int, stroke: Int) = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = dp(20).toFloat(); setColor(fill); setStroke(dp(1), stroke) }
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     companion object {
-        private val COLOR_AMBER = Color.parseColor("#C97D2E")
-        private val COLOR_RED   = Color.parseColor("#D94030")
+        private val COLOR_AMBER  = Color.parseColor("#C97D2E")
+        private val COLOR_RED    = Color.parseColor("#D94030")
         private val COLOR_BRIGHT = Color.parseColor("#E09840")
     }
 }
