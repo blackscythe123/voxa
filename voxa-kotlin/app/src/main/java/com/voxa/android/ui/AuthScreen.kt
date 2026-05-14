@@ -1,4 +1,4 @@
-package com.voxa.android.ui
+﻿package com.voxa.android.ui
 
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -107,6 +107,10 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                         domStorageEnabled = true
                         @Suppress("DEPRECATION")
                         allowFileAccessFromFileURLs = false
+                        // Spoof real Chrome UA — ChatGPT blocks the default WebView UA
+                        userAgentString =
+                            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
+                            "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
                     }
                     CookieManager.getInstance().apply {
                         setAcceptCookie(true)
@@ -141,7 +145,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     CircularProgressIndicator(color = VoxaColors.AccentAmber)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = if (capturing) "Capturing session…" else "Loading…",
+                        text = if (capturing) "Capturing sessionâ€¦" else "Loadingâ€¦",
                         fontSize = 14.sp,
                         color = VoxaColors.TextMuted,
                     )
@@ -162,3 +166,4 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         )
     }
 }
+
