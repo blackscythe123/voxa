@@ -1,4 +1,4 @@
-package com.voxa.android.network
+﻿package com.voxa.android.network
 
 import com.voxa.android.VoxaApp
 import kotlinx.coroutines.Dispatchers
@@ -24,16 +24,24 @@ object TranscriptionApi {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    /** Pull the full cookie header (preferred — passes cf_clearance for Cloudflare) or fall back to bare session-token. */
+    private fun buildCookieHeader(): String {
+        val prefs = VoxaApp.prefs
+        prefs.getCookieHeader()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val token = prefs.getSessionCookie() ?: throw Exception("NOT_LOGGED_IN")
+        return "__Secure-next-auth.session-token=$token"
+    }
+
     private suspend fun getAccessToken(): String = withContext(Dispatchers.IO) {
         val prefs = VoxaApp.prefs
-        val cookie = prefs.getSessionCookie() ?: throw Exception("NOT_LOGGED_IN")
+        val cookieHeader = buildCookieHeader()
         val deviceId = prefs.getDeviceId()
         val sessionId = prefs.getOaiSessionId()
 
         val request = Request.Builder()
             .url(SESSION_URL)
             .get()
-            .header("Cookie", "__Secure-next-auth.session-token=$cookie")
+            .header("Cookie", cookieHeader)
             .header("User-Agent", UA)
             .header("Accept", "*/*")
             .header("Accept-Language", "en-US,en;q=0.5")
@@ -49,7 +57,10 @@ object TranscriptionApi {
         if (response.code == 401 || response.code == 403) throw Exception("SESSION_EXPIRED")
 
         val body = response.body?.string() ?: throw Exception("Empty response")
-        val json = JSONObject(body)
+        // Cloudflare challenge returns HTML, not JSON
+        if (body.trimStart().startsWith("<")) throw Exception("CLOUDFLARE_CHALLENGE")
+
+        val json = try { JSONObject(body) } catch (e: Exception) { throw Exception("Invalid response") }
         json.optString("accessToken").takeIf { it.isNotEmpty() }
             ?: throw Exception("NO_ACCESS_TOKEN")
     }
@@ -64,7 +75,7 @@ object TranscriptionApi {
     suspend fun transcribeAudio(filePath: String): String = withContext(Dispatchers.IO) {
         val accessToken = getAccessToken()
         val prefs = VoxaApp.prefs
-        val cookie = prefs.getSessionCookie()!!
+        val cookieHeader = buildCookieHeader()
         val deviceId = prefs.getDeviceId()
         val sessionId = prefs.getOaiSessionId()
 
@@ -83,7 +94,7 @@ object TranscriptionApi {
             .url(TRANSCRIBE_URL)
             .post(body)
             .header("Authorization", "Bearer $accessToken")
-            .header("Cookie", "__Secure-next-auth.session-token=$cookie")
+            .header("Cookie", cookieHeader)
             .header("User-Agent", UA)
             .header("Accept", "*/*")
             .header("Accept-Language", "en-US,en;q=0.5")
@@ -100,10 +111,8 @@ object TranscriptionApi {
         if (!response.isSuccessful) throw Exception("Transcription failed (${response.code}): ${text.take(200)}")
 
         val json = JSONObject(text)
-        json.optString("text")
-            .takeIf { it.isNotEmpty() }
-            ?: json.optString("transcript")
-                .takeIf { it.isNotEmpty() }
+        json.optString("text").takeIf { it.isNotEmpty() }
+            ?: json.optString("transcript").takeIf { it.isNotEmpty() }
             ?: json.optString("message")
             ?: ""
     }

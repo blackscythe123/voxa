@@ -41,19 +41,24 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         captured = true
         capturing = true
         scope.launch {
-            repeat(20) {
+            repeat(30) {
                 delay(500)
-                val cookies = CookieManager.getInstance().getCookie("https://chatgpt.com") ?: return@repeat
-                val token = cookies.split(";")
+                val cookieHeader = CookieManager.getInstance().getCookie("https://chatgpt.com") ?: return@repeat
+                // Must contain the session-token to confirm successful login
+                if (!cookieHeader.contains("__Secure-next-auth.session-token")) return@repeat
+
+                // Extract the bare session-token value (legacy) AND save the full cookie header (for Cloudflare)
+                val sessionToken = cookieHeader.split(";")
                     .map { it.trim() }
                     .find { it.startsWith("__Secure-next-auth.session-token") }
                     ?.substringAfter("=")
                     ?.trim()
-                if (!token.isNullOrEmpty()) {
-                    VoxaApp.prefs.setSessionCookie(token)
-                    onLoginSuccess()
-                    return@launch
-                }
+                    ?: return@repeat
+
+                VoxaApp.prefs.setSessionCookie(sessionToken)
+                VoxaApp.prefs.setCookieHeader(cookieHeader)
+                onLoginSuccess()
+                return@launch
             }
             capturing = false
             captured = false
@@ -66,7 +71,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             .background(VoxaColors.Bg)
             .systemBarsPadding()
     ) {
-        // Header
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -90,7 +94,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             )
         }
 
-        // WebView
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -145,7 +148,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     CircularProgressIndicator(color = VoxaColors.AccentAmber)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = if (capturing) "Capturing sessionâ€¦" else "Loadingâ€¦",
+                        text = if (capturing) "Capturing session…" else "Loading…",
                         fontSize = 14.sp,
                         color = VoxaColors.TextMuted,
                     )
@@ -153,7 +156,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             }
         }
 
-        // Retry hint
         Text(
             text = "Having trouble? Tap to retry",
             fontSize = 13.sp,
@@ -166,4 +168,3 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         )
     }
 }
-

@@ -1,4 +1,4 @@
-package com.voxa.android.data
+﻿package com.voxa.android.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -9,9 +9,19 @@ class Prefs(context: Context) {
     private val sp: SharedPreferences =
         context.getSharedPreferences("voxa_prefs", Context.MODE_PRIVATE)
 
+    /** Legacy single-cookie storage (kept for compatibility) */
     fun getSessionCookie(): String? = sp.getString(KEY_SESSION_COOKIE, null)
     fun setSessionCookie(value: String) = sp.edit().putString(KEY_SESSION_COOKIE, value).apply()
-    fun clearSession() = sp.edit().remove(KEY_SESSION_COOKIE).remove(KEY_ACCESS_TOKEN).apply()
+
+    /** Full Cookie header captured from the WebView — includes cf_clearance, session-token, etc. */
+    fun getCookieHeader(): String? = sp.getString(KEY_COOKIE_HEADER, null)
+    fun setCookieHeader(value: String) = sp.edit().putString(KEY_COOKIE_HEADER, value).apply()
+
+    fun clearSession() = sp.edit()
+        .remove(KEY_SESSION_COOKIE)
+        .remove(KEY_COOKIE_HEADER)
+        .remove(KEY_ACCESS_TOKEN)
+        .apply()
 
     fun getDeviceId(): String {
         var id = sp.getString(KEY_DEVICE_ID, null)
@@ -39,6 +49,7 @@ class Prefs(context: Context) {
 
     companion object {
         private const val KEY_SESSION_COOKIE = "voxa_session_cookie"
+        private const val KEY_COOKIE_HEADER = "voxa_cookie_header"
         private const val KEY_ACCESS_TOKEN = "voxa_access_token"
         private const val KEY_DEVICE_ID = "voxa_device_id"
         private const val KEY_OAI_SESSION_ID = "voxa_oai_session_id"
