@@ -1,0 +1,3 @@
+-keep class com.voxa.android.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
