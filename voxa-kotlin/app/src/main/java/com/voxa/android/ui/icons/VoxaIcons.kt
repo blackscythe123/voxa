@@ -148,6 +148,40 @@ object VoxaIcons {
         moveTo(9f, 6f); lineTo(15f, 12f); lineTo(9f, 18f)
     }
 
+    val ChevronLeft: ImageVector = strokedIcon("ChevronLeft") {
+        moveTo(15f, 6f); lineTo(9f, 12f); lineTo(15f, 18f)
+    }
+
+    val Book: ImageVector = strokedIcon("Book") {
+        moveTo(4f, 4f); lineTo(4f, 20f); lineTo(18f, 20f); arcTo(2f, 2f, 0f, false, false, 20f, 18f); lineTo(20f, 6f); arcTo(2f, 2f, 0f, false, false, 18f, 4f); close()
+        moveTo(8f, 4f); lineTo(8f, 20f)
+        moveTo(12f, 9f); lineTo(16f, 9f)
+        moveTo(12f, 13f); lineTo(16f, 13f)
+    }
+
+    val Settings: ImageVector = strokedIcon("Settings") {
+        moveTo(12f, 9f); arcTo(3f, 3f, 0f, true, true, 11.99f, 9f); close()
+        moveTo(12f, 3f); lineTo(12f, 5f)
+        moveTo(12f, 19f); lineTo(12f, 21f)
+        moveTo(3f, 12f); lineTo(5f, 12f)
+        moveTo(19f, 12f); lineTo(21f, 12f)
+        moveTo(5.6f, 5.6f); lineTo(7f, 7f)
+        moveTo(17f, 17f); lineTo(18.4f, 18.4f)
+        moveTo(5.6f, 18.4f); lineTo(7f, 17f)
+        moveTo(17f, 7f); lineTo(18.4f, 5.6f)
+    }
+
+    val User: ImageVector = strokedIcon("User") {
+        moveTo(12f, 4f); arcTo(4f, 4f, 0f, true, true, 11.99f, 4f); close()
+        moveTo(4f, 21f); arcTo(8f, 8f, 0f, false, true, 20f, 21f)
+    }
+
+    val Question: ImageVector = strokedIcon("Question") {
+        moveTo(12f, 3f); arcTo(9f, 9f, 0f, true, true, 11.99f, 3f); close()
+        moveTo(9f, 9f); arcTo(3f, 3f, 0f, false, true, 12f, 6f); arcTo(3f, 3f, 0f, false, true, 14.5f, 10.5f); lineTo(12f, 13f); lineTo(12f, 14f)
+        moveTo(12f, 17.5f); lineTo(12f, 17.51f)
+    }
+
     val Backspace: ImageVector = strokedIcon("Backspace") {
         moveTo(21f, 5f); lineTo(8f, 5f); lineTo(3f, 12f); lineTo(8f, 19f); lineTo(21f, 19f); arcTo(0f, 0f, 0f, false, false, 21f, 19f); lineTo(21f, 5f); close()
         moveTo(11f, 9f); lineTo(17f, 15f)

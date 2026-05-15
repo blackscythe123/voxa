@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voxa · v3 multi-page spec</title>
+<style>
+  :root {
+    --bg: #FAFAFA;
+    --surface: #FFFFFF;
+    --surface-alt: #F5F5F5;
+    --ink: #16161A;
+    --ink-soft: #2A2A30;
+    --muted: #7A7A82;
+    --muted-soft: #A5A29F;
+    --hair: #E5E5E5;
+    --hair-soft: #EEEEEE;
+    --chip: #F2F2F2;
+    --primary: #1F4FE0;
+    --primary-soft: rgba(31, 79, 224, 0.08);
+    --destructive: #E5484D;
+    --destructive-soft: #FCEAEA;
+    --success: #7FB069;
+    --success-soft: rgba(127, 176, 105, 0.13);
+    --success-fg: #3E7B30;
+    --shadow: 0 1px 0 rgba(22,22,26,0.04);
+  }
+  * { box-sizing: border-box; }
+  html, body { background: #E9E8E4; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    padding: 32px 16px 80px;
+  }
+  h1.page-title {
+    font-size: 14px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #4A4A52;
+    margin: 0 0 4px;
+  }
+  p.page-sub {
+    font-size: 13px;
+    color: #6A6A74;
+    margin: 0 0 28px;
+    max-width: 760px;
+  }
+  .row-of-phones {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 32px;
+    justify-items: center;
+    max-width: 1480px;
+    margin: 0 auto;
+  }
+  .phone {
+    width: 360px;
+    height: 760px;
+    border-radius: 36px;
+    background: var(--bg);
+    box-shadow:
+      0 0 0 1px rgba(22,22,26,0.07),
+      0 28px 60px -25px rgba(22,22,26,0.25);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .phone-label {
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #6A6A74;
+    margin-top: 10px;
+    text-align: center;
+  }
+  /* Status bar / safe area */
+  .status-bar {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 22px;
+    font-size: 11px;
+    color: var(--ink);
+    font-feature-settings: "tnum";
+  }
+  /* Common header / nav */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    padding: 14px 22px 6px;
+  }
+  .top-bar .wordmark {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.9px;
+    color: var(--ink);
+  }
+  .top-bar .spacer { flex: 1; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 99px;
+    font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .pill .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+  }
+  .pill.connected {
+    background: var(--success-soft);
+    color: var(--success-fg);
+  }
+  .pill.connected .dot { background: var(--success); }
+  .pill.expired {
+    background: var(--destructive-soft);
+    color: var(--destructive);
+  }
+  .pill.expired .dot { background: var(--destructive); }
+
+  .sub-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px 8px 8px;
+  }
+  .back-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .back-btn svg { width: 22px; height: 22px; stroke: var(--ink); }
+  .sub-header .title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--ink);
+    margin-left: 4px;
+  }
+
+  .blurb {
+    padding: 0 22px;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--muted);
+    max-width: 320px;
+  }
+
+  .section-label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    padding: 20px 26px 8px;
+    color: var(--ink);
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    margin: 0 16px;
+    overflow: hidden;
+  }
+  .panel + .panel { margin-top: 12px; }
+
+  .row {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    gap: 13px;
+    border-bottom: 1px solid var(--hair-soft);
+  }
+  .row:last-child { border-bottom: none; }
+  .row.clickable { cursor: pointer; }
+  .row .ic {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: var(--chip);
+    display: grid; place-items: center;
+  }
+  .row .ic svg { width: 18px; height: 18px; stroke: var(--ink); stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .row .col { flex: 1; min-width: 0; }
+  .row .name { font-size: 14.5px; font-weight: 500; color: var(--ink); }
+  .row .sub  { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 16px; }
+  .row .trail { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .row .chev { width: 16px; height: 16px; stroke: var(--muted-soft); fill: none; stroke-width: 1.5; }
+  .row.destructive .ic { background: var(--destructive-soft); }
+  .row.destructive .ic svg { stroke: var(--destructive); }
+  .row.destructive .name { color: var(--destructive); }
+  .row.destructive .chev { stroke: var(--destructive); }
+
+  /* Switch */
+  .switch {
+    width: 38px; height: 22px;
+    background: #D6D2C7;
+    border-radius: 99px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .switch.on { background: var(--primary); }
+  .switch::after {
+    content: "";
+    width: 18px; height: 18px;
+    background: #fff;
+    border-radius: 50%;
+    position: absolute; top: 2px; left: 2px;
+    transition: left 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  }
+  .switch.on::after { left: 18px; }
+
+  /* Setup hero card */
+  .hero {
+    margin: 14px 16px 0;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%);
+    border: 1px solid var(--hair);
+    padding: 18px 18px 16px;
+  }
+  .hero .eyebrow {
+    font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted);
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+  }
+  .hero .h {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    color: var(--ink);
+    margin-top: 6px;
+  }
+  .hero .p {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 18px;
+    margin-top: 6px;
+  }
+  .hero .actions { display: flex; gap: 10px; margin-top: 14px; }
+  .btn-primary {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    padding: 9px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--primary);
+    border: none;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  /* Setup checklist inside hero */
+  .checklist { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .check-item { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-soft); }
+  .check-item .dot {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    flex-shrink: 0;
+  }
+  .check-item.done .dot { background: var(--success); }
+  .check-item.done .dot::after { content: ""; width: 9px; height: 5px; border-left: 1.6px solid #fff; border-bottom: 1.6px solid #fff; transform: rotate(-45deg) translate(1px, -1px); }
+  .check-item.todo .dot { background: var(--surface); border: 1.4px solid #D9D6CF; }
+  .check-item.done { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(122,122,130,0.4); }
+
+  /* Nav tile grid on Home */
+  .tile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 16px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    padding: 16px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    min-height: 112px;
+  }
+  .tile .ic-lg {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: var(--chip);
+    display: grid; place-items: center;
+  }
+  .tile .ic-lg svg { width: 20px; height: 20px; stroke: var(--ink); stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .tile .tile-name { font-size: 14.5px; font-weight: 600; color: var(--ink); margin-top: 12px; letter-spacing: -0.1px; }
+  .tile .tile-sub  { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 15px; }
+
+  /* Tutorial steps */
+  .tut-step {
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    margin: 0 16px 12px;
+    padding: 16px 16px 14px;
+  }
+  .tut-step .head { display: flex; align-items: center; gap: 12px; }
+  .tut-step .num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: grid; place-items: center;
+    font-size: 13px; font-weight: 600;
+  }
+  .tut-step .step-title {
+    font-size: 15px; font-weight: 600; color: var(--ink); letter-spacing: -0.2px;
+  }
+  .tut-step .body { font-size: 12.5px; color: var(--ink-soft); line-height: 18px; margin-top: 10px; }
+  .tut-step .body b { font-weight: 600; color: var(--ink); }
+  .tut-step .body code {
+    background: var(--surface-alt);
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ink);
+  }
+  .tut-step .action { margin-top: 12px; }
+  .tut-step .keyboard-illu {
+    margin-top: 14px;
+    background: var(--surface-alt);
+    border-radius: 10px;
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .key-row { display: flex; gap: 4px; justify-content: center; }
+  .key {
+    background: #fff;
+    border: 1px solid var(--hair);
+    border-radius: 5px;
+    padding: 7px 0;
+    flex: 1;
+    text-align: center;
+    font-size: 10px;
+    color: var(--ink);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+  .key.spacebar { flex: 6; font-weight: 500; position: relative; }
+  .key.spacebar.highlight {
+    background: #FFF7CD;
+    border-color: #F1D86F;
+    box-shadow: 0 0 0 3px rgba(241,216,111,0.25);
+  }
+  .key.globe { font-size: 13px; flex: 0.8; }
+  .ring-pulse {
+    position: absolute; inset: -3px;
+    border-radius: 8px;
+    border: 2px solid rgba(241,216,111,0.6);
+    animation: pulse 1.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    from { transform: scale(1); opacity: 1; }
+    to   { transform: scale(1.18); opacity: 0; }
+  }
+
+  /* Auth screen */
+  .auth-top {
+    display: flex; align-items: center;
+    padding: 14px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--hair-soft);
+  }
+  .auth-top .col { flex: 1; }
+  .auth-top .title { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; color: var(--ink); }
+  .auth-top .sub   { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  .auth-top .x {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--chip);
+    display: grid; place-items: center;
+    font-size: 14px;
+  }
+  .auth-banner {
+    background: #F7F5EE;
+    border-bottom: 1px solid var(--hair-soft);
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 16px;
+  }
+  .auth-banner .info {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .auth-webview {
+    flex: 1;
+    background: #FFFFFF;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted-soft);
+    font-size: 12px;
+    font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    border-top: 1px dashed var(--hair);
+  }
+
+  /* Simulated ChatGPT login WebView contents — for before/after mocks */
+  .cgpt-page {
+    flex: 1;
+    background: #FFFFFF;
+    border-top: 1px dashed var(--hair);
+    position: relative;
+    overflow: hidden;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  .cgpt-page.before { justify-content: flex-start; }
+  .cgpt-page.after  { justify-content: center; }
+  .cgpt-logo {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: #16161A;
+    color: #fff;
+    display: grid; place-items: center;
+    font-size: 16px; font-weight: 700;
+    margin: 0 auto 14px;
+  }
+  .cgpt-h2 { font-size: 18px; font-weight: 600; text-align: center; color: #0d0d0d; margin: 0 0 14px; }
+  .cgpt-input {
+    width: 100%;
+    border: 1px solid #D1D5DB;
+    background: #FFFFFF;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #6B7280;
+    margin-bottom: 10px;
+  }
+  .cgpt-btn {
+    width: 100%;
+    background: #000000;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+  .cgpt-or {
+    text-align: center;
+    font-size: 11px;
+    color: #6B7280;
+    margin: 8px 0;
+  }
+  .cgpt-oauth {
+    width: 100%;
+    background: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 9px;
+    font-size: 12px;
+    color: #0d0d0d;
+    margin-bottom: 7px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .cgpt-tos {
+    text-align: center;
+    font-size: 10px;
+    color: #6B7280;
+    margin-top: 10px;
+    line-height: 14px;
+  }
+  .cgpt-tos a { color: #1F4FE0; text-decoration: underline; }
+  .cgpt-marketing {
+    margin-top: 16px;
+    padding: 12px;
+    background: #F9F8F6;
+    border: 1px solid #E5E5E5;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 12px;
+    color: #4A4A52;
+  }
+  .cgpt-marketing .cta { color: #0d0d0d; font-weight: 600; margin-top: 4px; display: block; }
+  .cgpt-marketing.crossed { position: relative; opacity: 0.5; }
+  .cgpt-marketing.crossed::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(229,72,77,0.18) 4px, rgba(229,72,77,0.18) 6px);
+    pointer-events: none;
+  }
+  .cgpt-white-pad {
+    flex: 1;
+    background: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(229,72,77,0.1) 8px, rgba(229,72,77,0.1) 10px);
+    border: 1px dashed rgba(229,72,77,0.4);
+    border-radius: 6px;
+    margin-top: 14px;
+    display: grid;
+    place-items: center;
+    font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: rgba(229,72,77,0.75);
+    text-align: center;
+    padding: 8px;
+  }
+  .crossed-label {
+    position: absolute;
+    top: 6px; right: 6px;
+    background: var(--destructive);
+    color: #fff;
+    font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 2;
+  }
+  .added-label {
+    position: absolute;
+    top: 6px; right: 6px;
+    background: var(--success);
+    color: #fff;
+    font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 2;
+  }
+  .auth-foot {
+    background: var(--surface-alt);
+    padding: 11px 14px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .auth-foot .spinner {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--hair);
+    border-top-color: var(--primary);
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .footnote {
+    text-align: center;
+    font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted-soft);
+    padding: 24px 0 28px;
+  }
+
+  /* Privacy text */
+  .prose {
+    padding: 8px 26px 16px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 19px;
+  }
+  .prose p { margin: 0 0 10px; }
+
+  /* Removed / Added legend */
+  .legend {
+    max-width: 980px;
+    margin: 8px auto 28px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .legend > div {
+    background: #fff;
+    border: 1px solid #D9D6CF;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--ink-soft);
+  }
+  .legend h3 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #4A4A52;
+  }
+  .legend ul { margin: 0; padding-left: 14px; }
+  .legend.removed h3 { color: #B83A3F; }
+  .legend.kept    h3 { color: #3E7B30; }
+  .legend.added   h3 { color: #1F4FE0; }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">Voxa · v3 multi-page redesign</h1>
+<p class="page-sub">
+  Replaces the single, all-in-one Home screen with a dashboard + four focused subpages
+  (Tutorial, Settings, Account, About). Strips ~10 settings rows that had a chevron but no
+  implementation. Adds a step-by-step Tutorial that teaches the user how to switch to the
+  Voxa keyboard from any text field (long-press space, system picker, etc.). On the Auth
+  screen, a small CSS+JS payload is injected into ChatGPT's login page to vertically center
+  the form and hide marketing chrome ("Try ChatGPT Plus", "Get free access", etc.) — the
+  login form itself is never touched.
+</p>
+
+<div class="legend">
+  <div class="legend removed">
+    <h3>Removed (no impl today)</h3>
+    <ul>
+      <li>Set as default keyboard (duplicate)</li>
+      <li>Sample rate</li>
+      <li>Test microphone</li>
+      <li>Language</li>
+      <li>Model (whisper-1 is locked)</li>
+      <li>Auto-punctuation (toggle did nothing)</li>
+      <li>Start and stop sound</li>
+      <li>ChatGPT session (status pill says this)</li>
+      <li>Privacy row (now inline on About)</li>
+    </ul>
+  </div>
+  <div class="legend kept">
+    <h3>Kept (functional)</h3>
+    <ul>
+      <li>Voxa keyboard enable + switch picker</li>
+      <li>Max length</li>
+      <li>Trim silence</li>
+      <li>Hold to talk</li>
+      <li>Haptics</li>
+      <li>Refresh session (newly wired)</li>
+      <li>Sign out</li>
+      <li>Version</li>
+    </ul>
+  </div>
+  <div class="legend added">
+    <h3>Added</h3>
+    <ul>
+      <li>Home dashboard with setup hero + 4 nav tiles</li>
+      <li>Tutorial screen with 4 numbered steps + keyboard illustrations</li>
+      <li>Settings / Account / About subpages with back nav</li>
+      <li>Auth: native helper banner explaining what's happening</li>
+      <li>Auth: CSS injection to center login + hide marketing chrome (best-effort, login never broken)</li>
+    </ul>
+  </div>
+</div>
+
+<div class="row-of-phones">
+
+  <!-- ───────── HOME DASHBOARD ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+
+    <div class="top-bar">
+      <div class="wordmark">voxa</div>
+      <div class="spacer"></div>
+      <div class="pill connected"><span class="dot"></span>Connected</div>
+    </div>
+    <div class="blurb">Dictate anywhere on your phone. Tap a text field, switch to Voxa, hold to talk.</div>
+
+    <!-- Hero: setup progress -->
+    <div class="hero">
+      <div class="eyebrow">Setup · 1 of 2</div>
+      <div class="h">Almost ready</div>
+      <div class="p">One step left before you can dictate in other apps.</div>
+      <div class="checklist">
+        <div class="check-item done">
+          <div class="dot"></div>
+          <span>ChatGPT account linked</span>
+        </div>
+        <div class="check-item todo">
+          <div class="dot"></div>
+          <span>Enable Voxa keyboard in system settings</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn-primary">Enable keyboard</button>
+        <button class="btn-ghost">How to use →</button>
+      </div>
+    </div>
+
+    <!-- Nav tiles -->
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="ic-lg">
+          <svg viewBox="0 0 24 24"><path d="M4 4v16h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM8 4v16M12 9h4M12 13h4"/></svg>
+        </div>
+        <div class="tile-name">How to use</div>
+        <div class="tile-sub">Step-by-step setup and dictation tour</div>
+      </div>
+      <div class="tile">
+        <div class="ic-lg">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>
+        </div>
+        <div class="tile-name">Settings</div>
+        <div class="tile-sub">Length, hold, trim, haptics</div>
+      </div>
+      <div class="tile">
+        <div class="ic-lg">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+        </div>
+        <div class="tile-name">Account</div>
+        <div class="tile-sub">ChatGPT session · Sign out</div>
+      </div>
+      <div class="tile">
+        <div class="ic-lg">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M11 12h1v5h1"/></svg>
+        </div>
+        <div class="tile-name">About</div>
+        <div class="tile-sub">Version · Privacy</div>
+      </div>
+    </div>
+
+    <div class="footnote">voxa · dictate anywhere</div>
+  </div>
+  <div class="phone-label">Home (dashboard)</div>
+  </div>
+
+  <!-- ───────── TUTORIAL ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+    <div class="sub-header">
+      <div class="back-btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6 9 12l6 6"/></svg></div>
+      <div class="title">How to use</div>
+    </div>
+    <div class="blurb" style="padding-bottom: 14px;">Four short steps. Tap the action on each step to jump straight to the right system screen.</div>
+
+    <div class="tut-step">
+      <div class="head"><div class="num">1</div><div class="step-title">Enable Voxa keyboard</div></div>
+      <div class="body">Android needs your permission before any keyboard can run. Open <b>System &gt; Languages &amp; input &gt; On-screen keyboards</b> and toggle <b>Voxa</b> on.</div>
+      <div class="action"><button class="btn-primary">Open system settings</button></div>
+    </div>
+
+    <div class="tut-step">
+      <div class="head"><div class="num">2</div><div class="step-title">Switch to Voxa from any text field</div></div>
+      <div class="body">In any app, tap a text field so a keyboard pops up. Then <b>long-press the space bar</b> and pick Voxa — or tap the keyboard icon in your navigation bar.</div>
+      <div class="keyboard-illu">
+        <div class="key-row">
+          <div class="key">Q</div><div class="key">W</div><div class="key">E</div><div class="key">R</div><div class="key">T</div><div class="key">Y</div><div class="key">U</div><div class="key">I</div><div class="key">O</div><div class="key">P</div>
+        </div>
+        <div class="key-row">
+          <div class="key">A</div><div class="key">S</div><div class="key">D</div><div class="key">F</div><div class="key">G</div><div class="key">H</div><div class="key">J</div><div class="key">K</div><div class="key">L</div>
+        </div>
+        <div class="key-row">
+          <div class="key globe">⇧</div><div class="key">Z</div><div class="key">X</div><div class="key">C</div><div class="key">V</div><div class="key">B</div><div class="key">N</div><div class="key">M</div><div class="key globe">⌫</div>
+        </div>
+        <div class="key-row">
+          <div class="key globe">123</div>
+          <div class="key spacebar highlight">long-press<div class="ring-pulse"></div></div>
+          <div class="key globe">↵</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tut-step">
+      <div class="head"><div class="num">3</div><div class="step-title">Hold the mic to record</div></div>
+      <div class="body">When Voxa is up, <b>press and hold the big mic button</b>. The waveform shows live audio. Release to stop, or tap <b>Pause</b> to take a breath and resume.</div>
+    </div>
+
+    <div class="tut-step">
+      <div class="head"><div class="num">4</div><div class="step-title">Tap Send to insert text</div></div>
+      <div class="body">Voxa transcribes your audio through your ChatGPT session and inserts the result into the field you were typing in. No copy-paste needed.</div>
+    </div>
+
+    <div style="height: 16px;"></div>
+  </div>
+  <div class="phone-label">Tutorial (long-press space + 3 more steps)</div>
+  </div>
+
+  <!-- ───────── SETTINGS ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+    <div class="sub-header">
+      <div class="back-btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6 9 12l6 6"/></svg></div>
+      <div class="title">Settings</div>
+    </div>
+
+    <div class="section-label">Keyboard</div>
+    <div class="panel">
+      <div class="row">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M7 16h10"/></svg></div>
+        <div class="col">
+          <div class="name">Voxa keyboard</div>
+          <div class="sub">Enabled. Switch to it in any text field.</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+      <div class="row clickable">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 8h14l-3-3M21 16H7l3 3"/></svg></div>
+        <div class="col">
+          <div class="name">Show keyboard picker</div>
+          <div class="sub">Opens the system switcher.</div>
+        </div>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+    </div>
+
+    <div class="section-label">Recording</div>
+    <div class="panel">
+      <div class="row clickable">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M5 12c0-3 2.2-5 5-5 3 0 5 5 9 5 1.7 0 3-1.3 3-3s-1.3-3-3-3c-4 0-6 5-9 5-2.8 0-5-2-5-5"/></svg></div>
+        <div class="col">
+          <div class="name">Max length</div>
+          <div class="sub">Tap to choose Unlimited.</div>
+        </div>
+        <span class="trail">2:00</span>
+        <svg class="chev" viewBox="0 0 24 24" style="margin-left:6px;"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="row">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h3M18 12h3M9 12h.01M15 12h.01"/></svg></div>
+        <div class="col">
+          <div class="name">Trim silence</div>
+          <div class="sub">Auto-stop on sustained quiet.</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+      <div class="row">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 11V6.5a2.5 2.5 0 0 1 5 0V12a4 4 0 1 1-8 0V8.5M14 13l2 2 4-4"/></svg></div>
+        <div class="col">
+          <div class="name">Hold to talk</div>
+          <div class="sub">Long-press the mic to record.</div>
+        </div>
+        <div class="switch"></div>
+      </div>
+    </div>
+
+    <div class="section-label">Feedback</div>
+    <div class="panel">
+      <div class="row">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h3M18 12h3M9 12h.01M15 12h.01"/></svg></div>
+        <div class="col">
+          <div class="name">Haptic feedback</div>
+          <div class="sub">Vibrate on tap, send, and error.</div>
+        </div>
+        <div class="switch on"></div>
+      </div>
+    </div>
+
+    <div style="height: 24px;"></div>
+  </div>
+  <div class="phone-label">Settings (only functional toggles)</div>
+  </div>
+
+  <!-- ───────── ACCOUNT ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+    <div class="sub-header">
+      <div class="back-btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6 9 12l6 6"/></svg></div>
+      <div class="title">Account</div>
+    </div>
+
+    <div class="hero" style="margin-top: 6px;">
+      <div class="eyebrow">ChatGPT session</div>
+      <div class="h" style="display:flex;align-items:center;gap:10px;">
+        <span>Connected</span>
+        <span class="pill connected" style="font-size:9px;"><span class="dot"></span>Live</span>
+      </div>
+      <div class="p">Voxa transcribes through your ChatGPT account. If transcription starts failing, refresh the session here.</div>
+      <div class="actions">
+        <button class="btn-primary">Refresh session</button>
+      </div>
+    </div>
+
+    <div class="section-label">Linked account</div>
+    <div class="panel">
+      <div class="row destructive clickable">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/></svg></div>
+        <div class="col">
+          <div class="name">Sign out</div>
+          <div class="sub">Clear session and re-link.</div>
+        </div>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+    </div>
+
+    <div style="height: 24px;"></div>
+  </div>
+  <div class="phone-label">Account (Refresh wired, Sign out)</div>
+  </div>
+
+  <!-- ───────── ABOUT ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+    <div class="sub-header">
+      <div class="back-btn"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6 9 12l6 6"/></svg></div>
+      <div class="title">About</div>
+    </div>
+
+    <div class="section-label">Build</div>
+    <div class="panel">
+      <div class="row">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></div>
+        <div class="col">
+          <div class="name">Version</div>
+        </div>
+        <span class="trail">0.1.4 · build 142</span>
+      </div>
+    </div>
+
+    <div class="section-label">Privacy</div>
+    <div class="prose">
+      <p>Voxa records your voice only while you hold the mic. Audio is uploaded to ChatGPT for transcription using your signed-in session, and then deleted from the device.</p>
+      <p>Your ChatGPT session cookie is stored locally. Voxa never sends it anywhere except chatgpt.com.</p>
+      <p>No analytics. No third-party servers.</p>
+    </div>
+
+    <div style="height: 24px;"></div>
+  </div>
+  <div class="phone-label">About (inline privacy, no empty rows)</div>
+  </div>
+
+  <!-- ───────── AUTH BEFORE ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+    <div class="auth-top">
+      <div class="col">
+        <div class="title">Voxa</div>
+        <div class="sub">Sign in to ChatGPT to use Voxa</div>
+      </div>
+      <div class="x">✕</div>
+    </div>
+    <div class="cgpt-page before">
+      <span class="crossed-label">Today</span>
+      <div class="cgpt-logo">★</div>
+      <h2 class="cgpt-h2">Welcome back</h2>
+      <input class="cgpt-input" placeholder="Email address" />
+      <button class="cgpt-btn">Continue</button>
+      <div class="cgpt-or">OR</div>
+      <button class="cgpt-oauth">G  Continue with Google</button>
+      <button class="cgpt-oauth">  Continue with Apple</button>
+      <div class="cgpt-tos">Don't have an account? <a>Sign up</a></div>
+      <div class="cgpt-marketing">
+        Try ChatGPT Plus<br/><span class="cta">Get free access →</span>
+      </div>
+      <div class="cgpt-white-pad">~25% of viewport is unused whitespace<br/>content jammed at top</div>
+    </div>
+    <div class="auth-foot">
+      <div class="spinner"></div>
+      <span>Waiting for sign-in</span>
+    </div>
+  </div>
+  <div class="phone-label">Auth · before (cluttered, content jammed top)</div>
+  </div>
+
+  <!-- ───────── AUTH AFTER ───────── -->
+  <div>
+  <div class="phone">
+    <div class="status-bar"><span>9:41</span><span>● ● ●</span></div>
+    <div class="auth-top">
+      <div class="col">
+        <div class="title">Voxa</div>
+        <div class="sub">Sign in to ChatGPT to use Voxa</div>
+      </div>
+      <div class="x">✕</div>
+    </div>
+    <div class="auth-banner">
+      <div class="info">i</div>
+      <div>ChatGPT's sign-in page. Sign in normally. Voxa closes this view automatically once your session is captured.</div>
+    </div>
+    <div class="cgpt-page after">
+      <span class="added-label">v3</span>
+      <div class="cgpt-logo">★</div>
+      <h2 class="cgpt-h2">Welcome back</h2>
+      <input class="cgpt-input" placeholder="Email address" />
+      <button class="cgpt-btn">Continue</button>
+      <div class="cgpt-or">OR</div>
+      <button class="cgpt-oauth">G  Continue with Google</button>
+      <button class="cgpt-oauth">  Continue with Apple</button>
+      <div class="cgpt-tos">By continuing, you agree to ChatGPT's <a>Terms</a> and <a>Privacy</a>.</div>
+    </div>
+    <div class="auth-foot">
+      <div class="spinner"></div>
+      <span>Waiting for sign-in</span>
+    </div>
+  </div>
+  <div class="phone-label">Auth · after (centered, marketing hidden)</div>
+  </div>
+
+</div>
+
+<div style="max-width: 980px; margin: 24px auto 0; background: #fff; border: 1px solid #D9D6CF; border-radius: 12px; padding: 18px 22px; font-size: 13px; line-height: 19px; color: var(--ink-soft);">
+  <h3 style="margin: 0 0 8px; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; color: #4A4A52;">How the Auth cleanup works (technical note)</h3>
+  <p style="margin: 0 0 8px;">
+    The WebView injects a small CSS+JS payload in <code>onPageFinished</code> only when the URL is on
+    <code>chatgpt.com/auth/*</code>. The injection does <b>three</b> things, and nothing else:
+  </p>
+  <ol style="margin: 0 0 8px; padding-left: 20px;">
+    <li><b>Vertical-center the login form</b> using flexbox on the page's main container. Fixes the "content jammed at top, whitespace below" complaint.</li>
+    <li><b>Hide marketing chrome</b> — best-effort: hides elements whose visible text matches phrases like "Try ChatGPT", "Get free access", "Plus", "Pro" when they sit outside a <code>&lt;form&gt;</code>, <code>&lt;input&gt;</code>, or <code>&lt;button[type=submit]&gt;</code> (so we never break the actual login). Also hides anchors that link to <code>/pricing</code> or <code>marketing.openai.com</code>.</li>
+    <li><b>Suppress horizontal scroll</b> and set <code>html, body { background: #FFFFFF; min-height: 100vh; }</code> so the empty area looks intentional, not broken.</li>
+  </ol>
+  <p style="margin: 0;">
+    The injection runs once per page-finished event and re-runs on a 2-second MutationObserver tick (ChatGPT's auth flow is an SPA). If OpenAI changes the page structure tomorrow,
+    the worst case is the marketing chrome reappears — login itself never breaks because the safety guards skip anything inside the form. Auth scouting via agent-browser was attempted but Cloudflare Turnstile blocked the headless session; the real app's Chrome UA + cookie state passes CF, so this only affected reconnaissance, not the runtime.
+  </p>
+</div>
+
+</body>
+</html>
