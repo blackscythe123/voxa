@@ -187,6 +187,31 @@ object VoxaIcons {
         moveTo(11f, 9f); lineTo(17f, 15f)
         moveTo(17f, 9f); lineTo(11f, 15f)
     }
+
+    val Shift: ImageVector = strokedIcon("Shift") {
+        moveTo(12f, 4f); lineTo(4f, 12f); lineTo(8f, 12f); lineTo(8f, 20f); lineTo(16f, 20f); lineTo(16f, 12f); lineTo(20f, 12f); close()
+    }
+
+    val ShiftFilled: ImageVector = strokedIcon("ShiftFilled") {
+        moveTo(12f, 4f); lineTo(4f, 12f); lineTo(8f, 12f); lineTo(8f, 20f); lineTo(16f, 20f); lineTo(16f, 12f); lineTo(20f, 12f); close()
+        moveTo(8f, 18f); lineTo(16f, 18f)
+    }
+
+    val Stop: ImageVector = strokedIcon("Stop") {
+        moveTo(7f, 7f); lineTo(17f, 7f); lineTo(17f, 17f); lineTo(7f, 17f); close()
+    }
+
+    val Return: ImageVector = strokedIcon("Return") {
+        moveTo(20f, 6f); lineTo(20f, 12f); arcTo(2f, 2f, 0f, false, true, 18f, 14f); lineTo(5f, 14f)
+        moveTo(9f, 10f); lineTo(5f, 14f); lineTo(9f, 18f)
+    }
+
+    val Smiley: ImageVector = strokedIcon("Smiley") {
+        moveTo(12f, 3f); arcTo(9f, 9f, 0f, true, true, 11.99f, 3f); close()
+        moveTo(9f, 10f); lineTo(9f, 10.01f)
+        moveTo(15f, 10f); lineTo(15f, 10.01f)
+        moveTo(8.5f, 14f); curveTo(9.5f, 16f, 14.5f, 16f, 15.5f, 14f)
+    }
 }
 
 private inline fun strokedIcon(name: String, crossinline pathSpec: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit): ImageVector =

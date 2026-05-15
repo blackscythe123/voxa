@@ -4,4 +4,6 @@
     <string name="overlay_notification_title">Voxa Overlay Active</string>
     <string name="overlay_notification_text">Floating mic is visible above keyboard</string>
     <string name="channel_overlay">Voxa Overlay</string>
+    <string name="ime_label_voice">Voxa · Dictate</string>
+    <string name="ime_label_qwerty">Voxa · QWERTY + mic</string>
 </resources>

@@ -128,14 +128,16 @@ class OverlayService : Service() {
         }
 
         val circle = View(this).apply {
-            background = buildCircleDrawable(Color.parseColor("#C97D2E"))
+            background = buildCircleDrawable(Color.parseColor("#1F4FE0"))
             layoutParams = FrameLayout.LayoutParams(size, size)
         }
 
         val label = TextView(this).apply {
-            text = "🎤"
+            text = "V"
             textSize = 22f
+            setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -155,23 +157,26 @@ class OverlayService : Service() {
 
         if (!isRecording) {
             isRecording = true
-            label.text = "🎙"
-            circle.background = buildCircleDrawable(Color.parseColor("#D94030"))
+            label.text = "REC"
+            label.textSize = 12f
+            circle.background = buildCircleDrawable(Color.parseColor("#E5484D"))
             scope.launch {
                 try {
                     recorder.value.start()
                 } catch (e: Exception) {
                     isRecording = false
-                    label.text = "🎤"
-                    circle.background = buildCircleDrawable(Color.parseColor("#C97D2E"))
+                    label.text = "V"
+                    label.textSize = 22f
+                    circle.background = buildCircleDrawable(Color.parseColor("#1F4FE0"))
                     Toast.makeText(this@OverlayService, "Recording failed: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         } else {
             isRecording = false
             isProcessing = true
-            label.text = "⏳"
-            circle.background = buildCircleDrawable(Color.parseColor("#E09840"))
+            label.text = "..."
+            label.textSize = 22f
+            circle.background = buildCircleDrawable(Color.parseColor("#7A7A82"))
             scope.launch {
                 try {
                     val path = recorder.value.stop()
@@ -187,8 +192,9 @@ class OverlayService : Service() {
                     Toast.makeText(this@OverlayService, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                 } finally {
                     isProcessing = false
-                    label.text = "🎤"
-                    circle.background = buildCircleDrawable(Color.parseColor("#C97D2E"))
+                    label.text = "V"
+                    label.textSize = 22f
+                    circle.background = buildCircleDrawable(Color.parseColor("#1F4FE0"))
                 }
             }
         }

@@ -36,9 +36,10 @@
             </intent-filter>
         </activity>
 
-        <!-- Voxa IME — appears as a keyboard option -->
+        <!-- Voxa Voice IME — voice-only dictation keyboard -->
         <service
             android:name=".service.VoxaInputMethod"
+            android:label="@string/ime_label_voice"
             android:exported="true"
             android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>
@@ -47,6 +48,20 @@
             <meta-data
                 android:name="android.view.im"
                 android:resource="@xml/method" />
+        </service>
+
+        <!-- Voxa QWERTY + mic IME — full keyboard with mic in top bar -->
+        <service
+            android:name=".service.VoxaKeyboardInputMethod"
+            android:label="@string/ime_label_qwerty"
+            android:exported="true"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method_qwerty" />
         </service>
 
         <receiver
