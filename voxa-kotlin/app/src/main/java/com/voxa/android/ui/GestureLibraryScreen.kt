@@ -1,6 +1,7 @@
 package com.voxa.android.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,6 +31,16 @@ import java.io.File
 
 private const val LIB_FILE_NAME = "libjni_latinime.so"
 private const val PREF_LIBRARY_CHECKSUM = "lib_checksum"
+
+// HeliBoard's README points users to this exact tag of erkserkserks/openboard
+// for the glide typing native library. Files live under
+// `app/src/main/jniLibs/<abi>/libjni_latinime.so`. We construct the raw URL
+// per device ABI so the user gets the exact right file in one tap.
+private const val LIB_BASE_URL =
+    "https://github.com/erkserkserks/openboard/raw/46fdf2b550035ca69299ce312fa158e7ade36967/app/src/main/jniLibs/"
+
+private fun downloadUrlForAbi(abi: String): String =
+    "${LIB_BASE_URL}${abi}/libjni_latinime.so"
 
 @Composable
 fun GestureLibraryScreen(onBack: () -> Unit) {
@@ -132,7 +143,44 @@ fun GestureLibraryScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // Primary action
+        // Step 1 — open the community download page in a browser
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VoxaColors.PrimarySoft)
+                    .border(1.dp, VoxaColors.Primary, RoundedCornerShape(12.dp))
+                    .clickable {
+                        // Direct download link for the user's device ABI, per
+                        // HeliBoard's README pointer to erkserkserks/openboard.
+                        // We don't redistribute the file ourselves — we just hand
+                        // off to the browser/DownloadManager.
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(downloadUrlForAbi(abi)),
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                    .padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "1. Download library for $abi",
+                    color = VoxaColors.Primary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
+        // Step 2 — pick the file you downloaded
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -148,7 +196,7 @@ fun GestureLibraryScreen(onBack: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (installed) "Replace library file" else "Pick library file (.so)",
+                    text = if (installed) "Replace library file" else "2. Pick downloaded file (.so)",
                     color = Color.White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
