@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Voxa" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#0D0B08</item>
-        <item name="android:statusBarColor">#0D0B08</item>
-        <item name="android:navigationBarColor">#0D0B08</item>
+
+    <style name="Theme.Voxa.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#FFFFFF</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenAnimationDuration">200</item>
+        <item name="postSplashScreenTheme">@style/Theme.Voxa</item>
+    </style>
+
+    <style name="Theme.Voxa" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FAFAFA</item>
+        <item name="android:statusBarColor">#FAFAFA</item>
+        <item name="android:navigationBarColor">#FAFAFA</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
