@@ -7,7 +7,10 @@ import com.voxa.android.data.AudioRecorder
 import com.voxa.android.network.TranscriptionApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -32,6 +35,9 @@ object VoxaVoiceController {
     @Volatile private var currentState: State = State.Idle
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var recorder: AudioRecorder? = null
+    // Re-issues the "Listening…" toast every ~2 s while recording so the user
+    // always sees the indicator. Cancelled when the state leaves Recording.
+    private var feedbackJob: Job? = null
 
     @JvmStatic
     fun state(): State = currentState
@@ -52,10 +58,18 @@ object VoxaVoiceController {
     private fun start(context: Context) {
         currentState = State.Recording
         val rec = AudioRecorder(context.applicationContext).also { recorder = it }
+        feedbackJob?.cancel()
+        feedbackJob = scope.launch {
+            while (isActive && currentState == State.Recording) {
+                toast(context, "Listening… tap mic again to stop")
+                delay(2_500)
+            }
+        }
         scope.launch {
             try {
                 rec.start()
             } catch (e: Exception) {
+                feedbackJob?.cancel()
                 currentState = State.Idle
                 toast(context, "Recording failed: ${e.message?.take(60) ?: "unknown"}")
             }
@@ -64,7 +78,9 @@ object VoxaVoiceController {
 
     private fun stopAndCommit(context: Context, ic: InputConnection?) {
         val rec = recorder ?: return
+        feedbackJob?.cancel()
         currentState = State.Transcribing
+        toast(context, "Transcribing…")
         scope.launch {
             try {
                 val path = rec.stop()

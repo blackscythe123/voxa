@@ -21,6 +21,7 @@ import com.voxa.android.network.TranscriptionApi
 import com.voxa.android.ui.AboutScreen
 import com.voxa.android.ui.AccountScreen
 import com.voxa.android.ui.AuthScreen
+import com.voxa.android.ui.GestureLibraryScreen
 import com.voxa.android.ui.HomeScreen
 import com.voxa.android.ui.SettingsScreen
 import com.voxa.android.ui.SplashScreen
@@ -82,6 +83,7 @@ private sealed class Screen {
     object Settings : Screen()
     object Account : Screen()
     object About : Screen()
+    object GestureLibrary : Screen()
 }
 
 @Composable
@@ -101,8 +103,9 @@ private fun VoxaNavHost() {
 
     // Back button maps each subpage back to Home; Home keeps system default.
     BackHandler(enabled = screen is Screen.Tutorial || screen is Screen.Settings
-            || screen is Screen.Account || screen is Screen.About) {
-        screen = Screen.Home
+            || screen is Screen.Account || screen is Screen.About
+            || screen is Screen.GestureLibrary) {
+        screen = if (screen is Screen.GestureLibrary) Screen.Settings else Screen.Home
     }
 
     when (screen) {
@@ -127,7 +130,11 @@ private fun VoxaNavHost() {
             onOpenAbout = { screen = Screen.About },
         )
         Screen.Tutorial -> TutorialScreen(onBack = { screen = Screen.Home })
-        Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Home })
+        Screen.Settings -> SettingsScreen(
+            onBack = { screen = Screen.Home },
+            onOpenGestureLibrary = { screen = Screen.GestureLibrary },
+        )
+        Screen.GestureLibrary -> GestureLibraryScreen(onBack = { screen = Screen.Settings })
         Screen.Account -> AccountScreen(
             onBack = { screen = Screen.Home },
             onLogout = {

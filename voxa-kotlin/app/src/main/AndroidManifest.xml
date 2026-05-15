@@ -52,19 +52,10 @@
                 android:resource="@xml/method_voice" />
         </service>
 
-        <!-- Voxa QWERTY + mic IME — full keyboard with mic in top bar -->
-        <service
-            android:name=".service.VoxaKeyboardInputMethod"
-            android:label="@string/ime_label_qwerty"
-            android:exported="true"
-            android:permission="android.permission.BIND_INPUT_METHOD">
-            <intent-filter>
-                <action android:name="android.view.InputMethod" />
-            </intent-filter>
-            <meta-data
-                android:name="android.view.im"
-                android:resource="@xml/method_qwerty" />
-        </service>
+        <!-- Voxa QWERTY + mic IME removed in favour of the HeliBoard-derived IME
+             registered automatically by the :keyboard library
+             (`helium314.keyboard.latin.LatinIME`). See git tag `pre-heliboard-cleanup`
+             for the previous home-grown Compose keyboard. -->
 
         <receiver
             android:name=".receiver.BootReceiver"

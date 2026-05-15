@@ -25,7 +25,7 @@ import com.voxa.android.ui.theme.MonoFamily
 import com.voxa.android.ui.theme.VoxaColors
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenGestureLibrary: () -> Unit = {}) {
     val context = LocalContext.current
     val prefs = VoxaApp.prefs
 
@@ -89,6 +89,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                     )
                 },
+            )
+            HairDivider()
+            SettingsRow(
+                icon = VoxaIcons.Finger,
+                name = "Swipe typing",
+                sub = "Install the optional library to type by sliding across keys.",
+                trailing = { Chevron() },
+                onClick = onOpenGestureLibrary,
             )
         }
 
