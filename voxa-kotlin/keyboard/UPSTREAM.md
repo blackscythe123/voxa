@@ -25,6 +25,26 @@ cd voxa-kotlin/keyboard
 ./gradlew :app:assembleDebug
 ```
 
+### Windows note: spaces in path break NDK build
+
+The Android NDK's `ndk-build.cmd` can't parse paths with spaces, so building from the OneDrive location directly (`C:\Users\sam\OneDrive\one drive back up\...`) fails with:
+
+```
+APP_BUILD_SCRIPT points to an unknown file: ...\jni\Android.mk
+```
+
+Workaround: map the keyboard dir to a virtual drive letter in PowerShell, then build from there.
+
+```powershell
+subst V: "C:\Users\sam\OneDrive\one drive back up\OneDrive - SSN-Institute\Documents\projects\voxa\voxa-kotlin\keyboard"
+cd V:\
+./gradlew :app:assembleDebug
+```
+
+The `subst` mapping only persists for the current Windows session. To remove it: `subst V: /D`.
+
+(Long-term fix: move the project to a no-spaces path or use `cmake` instead of `ndk-build`. Not worth the effort for a fork.)
+
 ## License interaction
 
 HeliBoard is GPL-3.0. Vendoring it into Voxa means the resulting HeliBoard-derived APK is GPL-3.0. Voxa's other components (the existing `voxa-kotlin/app/` Compose app, and the Electron desktop app) are not affected by inclusion of this directory — they sit in separate APKs / Gradle projects and do not link against HeliBoard code.
