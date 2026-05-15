@@ -23,6 +23,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Reuse the debug keystore so `assembleRelease` produces an installable APK
+            // for personal sideload. Replace with a proper release keystore for Play Store.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -42,6 +45,7 @@ android {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))

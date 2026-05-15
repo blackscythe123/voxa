@@ -1,4 +1,4 @@
-﻿package com.voxa.android
+package com.voxa.android
 
 import android.Manifest
 import android.os.Build
@@ -15,17 +15,25 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.voxa.android.network.TranscriptionApi
 import com.voxa.android.ui.AuthScreen
 import com.voxa.android.ui.HomeScreen
+import com.voxa.android.ui.SplashScreen
 import com.voxa.android.ui.theme.VoxaColors
 import com.voxa.android.ui.theme.VoxaTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splash = installSplashScreen()
+        // Keep the system splash on screen briefly until our Compose splash takes over.
+        var systemSplashReady = false
+        splash.setKeepOnScreenCondition { !systemSplashReady }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        systemSplashReady = true
         setContent {
             VoxaTheme {
                 PermissionGate {
@@ -45,11 +53,14 @@ private fun PermissionGate(content: @Composable () -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             add(Manifest.permission.POST_NOTIFICATIONS)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
     }.toTypedArray()
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { ready = true }   // continue even if some are denied — IME will show appropriate message
+    ) { ready = true }
 
     LaunchedEffect(Unit) {
         launcher.launch(permissions)
@@ -59,6 +70,7 @@ private fun PermissionGate(content: @Composable () -> Unit) {
 }
 
 private sealed class Screen {
+    object Splash : Screen()
     object Loading : Screen()
     object Auth : Screen()
     object Home : Screen()
@@ -67,11 +79,13 @@ private sealed class Screen {
 @Composable
 private fun VoxaNavHost() {
     val scope = rememberCoroutineScope()
-    var screen by remember { mutableStateOf<Screen>(Screen.Loading) }
+    var screen by remember { mutableStateOf<Screen>(Screen.Splash) }
+    var sessionResolved by remember { mutableStateOf<Screen?>(null) }
 
+    // Kick off cookie/session validation in parallel with the splash animation.
     LaunchedEffect(Unit) {
         val cookie = VoxaApp.prefs.getSessionCookie()
-        screen = if (cookie == null) {
+        sessionResolved = if (cookie == null) {
             Screen.Auth
         } else {
             if (TranscriptionApi.validateSession()) Screen.Home else Screen.Auth
@@ -79,11 +93,18 @@ private fun VoxaNavHost() {
     }
 
     when (screen) {
+        Screen.Splash -> SplashScreen(onFinished = {
+            screen = sessionResolved ?: Screen.Loading
+        })
         Screen.Loading -> Box(
             modifier = Modifier.fillMaxSize().background(VoxaColors.Bg),
             contentAlignment = Alignment.Center,
         ) {
-            CircularProgressIndicator(color = VoxaColors.AccentAmber)
+            CircularProgressIndicator(color = VoxaColors.Primary)
+            LaunchedEffect(sessionResolved) {
+                val resolved = sessionResolved
+                if (resolved != null) screen = resolved
+            }
         }
         Screen.Auth -> AuthScreen(onLoginSuccess = { screen = Screen.Home })
         Screen.Home -> HomeScreen(onLogout = {
