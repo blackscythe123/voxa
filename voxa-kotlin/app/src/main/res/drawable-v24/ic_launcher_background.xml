@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Voxa's app icon background is a plain white square. The matching unqualified
+  drawable at `drawable/ic_launcher_background.xml` works fine for pre-API-24,
+  but the vendored HeliBoard library ships a -v24 qualified version of the same
+  resource name (a colored gradient), which would otherwise win on every modern
+  device (minSdk = 29). Re-declaring the white square here at the -v24 qualifier
+  forces our app's resource to override the library's at merge time.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"/>
+</vector>
