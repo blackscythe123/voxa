@@ -5,6 +5,8 @@ coverage
 *.log
 .env
 *.env
+voxa-expo/*
+
 .DS_Store
 .idea
 .vscode
