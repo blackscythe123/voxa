@@ -86,6 +86,11 @@ dependencies {
 
     // kotlin
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Voxa: HTTP client for TranscriptionApi (vendored from app/ when those files
+    // moved to this module so both IMEs share the recorder + Whisper bridge).
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // compose
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")

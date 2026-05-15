@@ -6,6 +6,8 @@ import java.util.UUID
 
 class Prefs(context: Context) {
 
+    init { register(this) }
+
     private val sp: SharedPreferences =
         context.getSharedPreferences("voxa_prefs", Context.MODE_PRIVATE)
 
@@ -67,6 +69,13 @@ class Prefs(context: Context) {
     fun setModel(value: String) = sp.edit().putString(KEY_MODEL, value).apply()
 
     companion object {
+        // Single-process singleton — the first Prefs(context) call (made from
+        // VoxaApp.onCreate) installs itself here so code that has no app reference
+        // (TranscriptionApi, IME services in the :keyboard library) can still get it.
+        @Volatile private var instance: Prefs? = null
+        private fun register(p: Prefs) { instance = p }
+        fun get(): Prefs = instance ?: error("Prefs.get() before Prefs(context) was constructed")
+
         private const val KEY_SESSION_COOKIE = "voxa_session_cookie"
         private const val KEY_COOKIE_HEADER = "voxa_cookie_header"
         private const val KEY_ACCESS_TOKEN = "voxa_access_token"

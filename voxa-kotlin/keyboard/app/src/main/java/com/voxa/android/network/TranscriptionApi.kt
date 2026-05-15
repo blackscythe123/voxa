@@ -1,6 +1,6 @@
 ﻿package com.voxa.android.network
 
-import com.voxa.android.VoxaApp
+import com.voxa.android.data.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -26,14 +26,14 @@ object TranscriptionApi {
 
     /** Pull the full cookie header (preferred — passes cf_clearance for Cloudflare) or fall back to bare session-token. */
     private fun buildCookieHeader(): String {
-        val prefs = VoxaApp.prefs
+        val prefs = Prefs.get()
         prefs.getCookieHeader()?.takeIf { it.isNotEmpty() }?.let { return it }
         val token = prefs.getSessionCookie() ?: throw Exception("NOT_LOGGED_IN")
         return "__Secure-next-auth.session-token=$token"
     }
 
     private suspend fun getAccessToken(): String = withContext(Dispatchers.IO) {
-        val prefs = VoxaApp.prefs
+        val prefs = Prefs.get()
         val cookieHeader = buildCookieHeader()
         val deviceId = prefs.getDeviceId()
         val sessionId = prefs.getOaiSessionId()
@@ -74,7 +74,7 @@ object TranscriptionApi {
 
     suspend fun transcribeAudio(filePath: String): String = withContext(Dispatchers.IO) {
         val accessToken = getAccessToken()
-        val prefs = VoxaApp.prefs
+        val prefs = Prefs.get()
         val cookieHeader = buildCookieHeader()
         val deviceId = prefs.getDeviceId()
         val sessionId = prefs.getOaiSessionId()

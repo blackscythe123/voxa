@@ -1395,7 +1395,10 @@ public class LatinIME extends InputMethodService implements
     // completely replace #onCodeInput.
     public void onEvent(@NonNull final Event event) {
         if (KeyCode.VOICE_INPUT == event.getKeyCode()) {
-            mRichImm.switchToShortcutIme(this);
+            // Voxa fork: route the toolbar mic to our Whisper pipeline instead of
+            // switching to the system shortcut IME.
+            com.voxa.android.voice.VoxaVoiceController.toggle(this, getCurrentInputConnection());
+            return;
         }
         final InputTransaction completeInputTransaction =
                 mInputLogic.onCodeInput(mSettings.getCurrent(), event,
