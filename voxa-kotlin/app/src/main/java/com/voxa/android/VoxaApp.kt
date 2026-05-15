@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.voxa.android.data.Prefs
+import com.voxa.android.prefs.VoxaPrefSeed
 import helium314.keyboard.latin.App as HeliBoardApp
 
 class VoxaApp : Application() {
@@ -15,6 +16,9 @@ class VoxaApp : Application() {
         // HeliBoard is vendored as a library, so its own Application class never runs.
         // Invoke its initializer here so Settings, SubtypeSettings, RichInputMethodManager,
         // and the emoji catalog are all set up before the QWERTY IME is bound.
+        // Apply Voxa preference overrides BEFORE HeliBoard reads them, so they're already
+        // in SharedPreferences by the time Settings.init() pulls cached values.
+        VoxaPrefSeed.applySeed(this)
         HeliBoardApp.initHeliBoard(this)
     }
 
