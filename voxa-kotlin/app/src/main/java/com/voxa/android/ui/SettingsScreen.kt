@@ -77,6 +77,19 @@ fun SettingsScreen(onBack: () -> Unit) {
                     imm.showInputMethodPicker()
                 },
             )
+            HairDivider()
+            SettingsRow(
+                icon = VoxaIcons.Settings,
+                name = "Keyboard preferences",
+                sub = "Layout, autocorrect, suggestions, themes, languages.",
+                trailing = { Chevron() },
+                onClick = {
+                    context.startActivity(
+                        Intent(context, Class.forName("helium314.keyboard.settings.SettingsActivity"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                },
+            )
         }
 
         SectionHeader("Recording")

@@ -59,6 +59,8 @@ When pulling a newer HeliBoard tag, re-apply these (the diff is small):
 2. **`app/src/main/AndroidManifest.xml`** — removed the `MAIN`/`LAUNCHER` intent-filter from `helium314.keyboard.settings.SettingsActivity` so the keyboard settings don't show up as a separate launcher icon in the host app drawer. SettingsActivity is still reachable from the keyboard's toolbar settings button.
 3. **`app/src/main/java/helium314/keyboard/latin/App.kt`** — extracted the body of `onCreate` into a public static `App.initHeliBoard(application)` so a host application (such as Voxa) can run it from its own `Application.onCreate()`. The original `onCreate` now just delegates to `initHeliBoard(this)` for the standalone-build case.
 4. **`app/src/main/java/helium314/keyboard/latin/LatinIME.java`** — in `onEvent`, when the user taps the toolbar voice key (`KeyCode.VOICE_INPUT`), Voxa intercepts: instead of switching to the system shortcut IME, we call `com.voxa.android.voice.VoxaVoiceController.toggle()` and return early. The controller lives in the same `:keyboard` library module under `com.voxa.android.voice`.
+5. **`app/src/main/res/values/donottranslate.xml`** and **`app/src/main/res/values/strings.xml`** — rebranded user-visible strings: `english_ime_name` → "Voxa Keyboard", `app_slogan`, `spell_checker_service_name`, `ime_settings`, `android_spell_checker_settings`. Only the `values/` locale; translated locales still say HeliBoard until they're touched.
+6. **`app/src/main/java/helium314/keyboard/latin/utils/Theme.kt`** — replaced the dynamic Material You color scheme used by HeliBoard's Compose settings activity with the Voxa "Quiet Sheet" palette (`#1F4FE0` primary, `#FFFFFF` surfaces, dark counterpart) so settings match the rest of Voxa's UI.
 
 ## Updating
 

@@ -64,6 +64,27 @@ fun AboutScreen(onBack: () -> Unit) {
                 .padding(horizontal = 26.dp, vertical = 4.dp),
         )
 
+        SectionHeader("Credits")
+        Text(
+            text = "The QWERTY keyboard inside Voxa is built on HeliBoard, an open-source Android keyboard maintained by Helium314 and community contributors. HeliBoard is itself a modernized fork of OpenBoard and AOSP LatinIME. Voxa adds the voice-dictation mic, the Whisper transcription bridge, and the surrounding app shell.",
+            fontSize = 13.sp,
+            color = VoxaColors.InkSoft,
+            lineHeight = 19.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 26.dp, vertical = 4.dp),
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = "HeliBoard is licensed GPL-3.0. Source: github.com/Helium314/HeliBoard",
+            fontSize = 12.sp,
+            color = VoxaColors.Muted,
+            lineHeight = 17.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 26.dp, vertical = 4.dp),
+        )
+
         Spacer(Modifier.height(28.dp))
     }
 }
