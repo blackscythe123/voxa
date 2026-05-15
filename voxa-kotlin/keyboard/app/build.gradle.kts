@@ -1,7 +1,5 @@
-import com.android.build.api.variant.ApplicationVariant
-
 plugins {
-    id("com.android.application")
+    id("com.android.library")
     kotlin("android")
     kotlin("plugin.serialization") version "2.2.21"
     kotlin("plugin.compose") version "2.2.21"
@@ -11,59 +9,28 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "helium314.keyboard"
-        minSdk = 21
-        targetSdk = 35
-        versionCode = 3901
-        versionName = "3.9"
+        minSdk = 29 // raised to match Voxa's minSdk; was 21 in upstream HeliBoard
         ndk {
             abiFilters.clear()
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
-        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        consumerProguardFiles("proguard-rules.pro")
+
+        // Libraries don't auto-generate these BuildConfig fields the way applications do,
+        // but a lot of upstream HeliBoard code references them. Inject them explicitly so
+        // we don't have to fork the upstream Kotlin sources.
+        buildConfigField("String", "VERSION_NAME", "\"3.9\"")
+        buildConfigField("int", "VERSION_CODE", "3901")
+        buildConfigField("String", "APPLICATION_ID", "\"com.voxa.android\"")
+        buildConfigField("String", "BUILD_TYPE", "\"debug\"")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = false
-            isDebuggable = false
-            isJniDebuggable = false
-        }
-        create("nouserlib") { // same as release, but does not allow the user to provide a library
-            isMinifyEnabled = true
-            isShrinkResources = false
-            isDebuggable = false
-            isJniDebuggable = false
+            isMinifyEnabled = false
         }
         debug {
-            // "normal" debug has minify for smaller APK to fit the GitHub 25 MB limit when zipped
-            // and for better performance in case users want to install a debug APK
-            isMinifyEnabled = true
-            isJniDebuggable = false
-            applicationIdSuffix = ".debug"
-        }
-        create("runTests") { // build variant for running tests on CI that skips tests known to fail
             isMinifyEnabled = false
-            isJniDebuggable = false
-        }
-        create("debugNoMinify") { // for faster builds in IDE
-            isDebuggable = true
-            isMinifyEnabled = false
-            isJniDebuggable = false
-            signingConfig = signingConfigs.getByName("debug")
-            applicationIdSuffix = ".debug"
-        }
-        base.archivesBaseName = "HeliBoard_" + defaultConfig.versionName
-        // got a little too big for GitHub after some dependency upgrades, so we remove the largest dictionary
-        androidComponents.onVariants { variant: ApplicationVariant ->
-            if (variant.buildType == "debug") {
-                variant.androidResources.ignoreAssetsPatterns = listOf("main_ro.dict")
-                variant.proguardFiles = emptyList()
-                //noinspection ProguardAndroidTxtUsage we intentionally use the "normal" file here
-                variant.proguardFiles.add(project.layout.buildDirectory.file(getDefaultProguardFile("proguard-android.txt").absolutePath))
-                variant.proguardFiles.add(project.layout.buildDirectory.file(project.buildFile.parent + "/proguard-rules.pro"))
-            }
         }
     }
 
@@ -102,11 +69,7 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
-    // see https://github.com/Helium314/HeliBoard/issues/477
-    dependenciesInfo {
-        includeInApk = false
-        includeInBundle = false
-    }
+    // dependenciesInfo is an application-only block; not applicable to library modules.
 
     namespace = "helium314.keyboard.latin"
     lint {

@@ -57,4 +57,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.ui.tooling)
+
+    // Vendored HeliBoard, converted to a library. Provides the QWERTY keyboard
+    // (autocorrect, suggestions, glide, emoji, themes) with the Voxa mic grafted
+    // into its toolbar.
+    implementation(project(":keyboard"))
 }
