@@ -35,6 +35,36 @@ private const val CHROME_UA =
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
+// CSS injected into the ChatGPT auth WebView to vertically center the login form
+// (fixes "content jammed top 75%" complaint). Marketing-hiding is intentionally
+// narrow: only anchors pointing at /pricing or marketing.openai are hidden — the
+// earlier text-phrase scan nuked the whole login subtree, so it has been removed.
+private const val AUTH_CLEANUP_PAYLOAD = """
+(function() {
+    var STYLE_ID = '__voxa_auth_cleanup_style';
+    var css = ''
+        + 'html, body { background: #FFFFFF !important; min-height: 100vh !important; overflow-x: hidden !important; }'
+        + 'body { display: flex !important; flex-direction: column !important; justify-content: center !important; }'
+        + '.__voxa_hidden { display: none !important; }';
+    if (!document.getElementById(STYLE_ID)) {
+        var s = document.createElement('style');
+        s.id = STYLE_ID;
+        s.textContent = css;
+        (document.head || document.documentElement).appendChild(s);
+    }
+
+    var BAD_HREF = /\/pricing|marketing\.openai|openai\.com\/chatgpt\/(plus|pro|team|enterprise)/i;
+    function hideMarketingLinks() {
+        var anchors = document.querySelectorAll('a[href]');
+        for (var i = 0; i < anchors.length; i++) {
+            var href = anchors[i].getAttribute('href') || '';
+            if (BAD_HREF.test(href)) anchors[i].classList.add('__voxa_hidden');
+        }
+    }
+    hideMarketingLinks();
+})();
+"""
+
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit) {
     val context = LocalContext.current
@@ -129,6 +159,38 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     .background(VoxaColors.HairSoft)
             )
 
+            // Native helper banner — explains the embedded ChatGPT page.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(VoxaColors.SurfaceAlt)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(VoxaColors.Primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("i", color = androidx.compose.ui.graphics.Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "ChatGPT's sign-in page. Sign in normally. Voxa closes this view automatically once your session is captured.",
+                    fontSize = 12.sp,
+                    color = VoxaColors.InkSoft,
+                    lineHeight = 16.sp,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(VoxaColors.HairSoft)
+            )
+
             // WebView (edge-to-edge, fills the rest)
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 AndroidView(
@@ -157,6 +219,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                         wv.webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 loading = false
+                                if (url != null && url.contains("chatgpt.com/auth", ignoreCase = true)) {
+                                    view?.evaluateJavascript(AUTH_CLEANUP_PAYLOAD, null)
+                                }
                                 url?.let { tryCaptureSession(it) }
                             }
                             override fun shouldOverrideUrlLoading(
