@@ -13,34 +13,45 @@ import helium314.keyboard.latin.utils.SubtypeSettings
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        DebugFlags.init(this)
-        Settings.init(this)
-        SubtypeSettings.init(this)
-        RichInputMethodManager.init(this)
-
-        AppUpgrade.checkVersionUpgrade(this)
-        AppUpgrade.transferOldPinnedClips(this) // todo: remove in a few months, maybe mid 2026
-        app = this
-        Defaults.initDynamicDefaults(this)
-        LayoutUtilsCustom.removeMissingLayouts(this) // only after version upgrade
-        SupportedEmojis.load(this)
-
-        val packageInfo = packageManager.getPackageInfo(packageName, 0)
-        @Suppress("DEPRECATION")
-        Log.i(
-            "startup", "Starting ${applicationInfo.processName} version ${packageInfo.versionName} (${
-                packageInfo.versionCode
-            }) on Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})"
-        )
+        initHeliBoard(this)
     }
 
     companion object {
         // used so JniUtils can access application once
-        private var app: App? = null
-        fun getApp(): App? {
+        private var app: Application? = null
+        fun getApp(): Application? {
             val application = app
             app = null
             return application
+        }
+
+        /**
+         * The body of [App.onCreate], extracted so a host application (such as Voxa)
+         * can call it from its own `Application.onCreate()`. When HeliBoard is consumed
+         * as a library module, the [App] Application class never runs — the host's
+         * Application takes its place.
+         */
+        @JvmStatic
+        fun initHeliBoard(application: Application) {
+            DebugFlags.init(application)
+            Settings.init(application)
+            SubtypeSettings.init(application)
+            RichInputMethodManager.init(application)
+
+            AppUpgrade.checkVersionUpgrade(application)
+            AppUpgrade.transferOldPinnedClips(application)
+            app = application
+            Defaults.initDynamicDefaults(application)
+            LayoutUtilsCustom.removeMissingLayouts(application)
+            SupportedEmojis.load(application)
+
+            val packageInfo = application.packageManager.getPackageInfo(application.packageName, 0)
+            @Suppress("DEPRECATION")
+            Log.i(
+                "startup", "Starting ${application.applicationInfo.processName} version ${packageInfo.versionName} (${
+                    packageInfo.versionCode
+                }) on Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})"
+            )
         }
     }
 }

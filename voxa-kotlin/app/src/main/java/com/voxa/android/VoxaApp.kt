@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.voxa.android.data.Prefs
+import helium314.keyboard.latin.App as HeliBoardApp
 
 class VoxaApp : Application() {
 
@@ -11,6 +12,10 @@ class VoxaApp : Application() {
         super.onCreate()
         prefs = Prefs(this)
         createNotificationChannel()
+        // HeliBoard is vendored as a library, so its own Application class never runs.
+        // Invoke its initializer here so Settings, SubtypeSettings, RichInputMethodManager,
+        // and the emoji catalog are all set up before the QWERTY IME is bound.
+        HeliBoardApp.initHeliBoard(this)
     }
 
     private fun createNotificationChannel() {

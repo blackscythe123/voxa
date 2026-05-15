@@ -51,6 +51,14 @@ HeliBoard is GPL-3.0. Vendoring it into Voxa means the resulting HeliBoard-deriv
 
 If we ever distribute a binary that combines HeliBoard's code with Voxa's `app/` Kotlin code in a single APK, the combined binary becomes GPL-3.0.
 
+## Voxa-specific patches applied to upstream
+
+When pulling a newer HeliBoard tag, re-apply these (the diff is small):
+
+1. **`app/build.gradle.kts`** — converted from `com.android.application` to `com.android.library`. Removed `applicationId`, `versionCode`, `versionName`, custom `buildTypes` other than `release`/`debug`, `signingConfigs`, the `androidComponents.onVariants` block, and the `dependenciesInfo` block (application-only). Added `buildConfigField` entries for `VERSION_NAME` / `VERSION_CODE` / `APPLICATION_ID` / `BUILD_TYPE` since library modules don't auto-generate them. Raised `minSdk` from 21 to 29 to match Voxa.
+2. **`app/src/main/AndroidManifest.xml`** — removed the `MAIN`/`LAUNCHER` intent-filter from `helium314.keyboard.settings.SettingsActivity` so the keyboard settings don't show up as a separate launcher icon in the host app drawer. SettingsActivity is still reachable from the keyboard's toolbar settings button.
+3. **`app/src/main/java/helium314/keyboard/latin/App.kt`** — extracted the body of `onCreate` into a public static `App.initHeliBoard(application)` so a host application (such as Voxa) can run it from its own `Application.onCreate()`. The original `onCreate` now just delegates to `initHeliBoard(this)` for the standalone-build case.
+
 ## Updating
 
 To pull a newer upstream version:

@@ -51,16 +51,14 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
         </service>
 
         <!-- Activities -->
+        <!-- Voxa fork: removed MAIN/LAUNCHER intent-filter. SettingsActivity is still
+             reachable from the keyboard toolbar, but should not show as a separate
+             app icon in the host application's launcher. -->
         <activity android:name="helium314.keyboard.settings.SettingsActivity"
                 android:theme="@style/platformActivityTheme"
                 android:icon="@mipmap/ic_launcher"
                 android:windowSoftInputMode="adjustResize"
-                android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+                android:exported="true" />
 
         <!-- separate activity that's used internally, only necessary in case the launcher icon is disabled on Android < 10 -->
         <activity android:name="helium314.keyboard.settings.SettingsActivity2"
