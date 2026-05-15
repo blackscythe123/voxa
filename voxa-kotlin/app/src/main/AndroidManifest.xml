@@ -49,7 +49,7 @@
             </intent-filter>
             <meta-data
                 android:name="android.view.im"
-                android:resource="@xml/method" />
+                android:resource="@xml/method_voice" />
         </service>
 
         <!-- Voxa QWERTY + mic IME — full keyboard with mic in top bar -->
