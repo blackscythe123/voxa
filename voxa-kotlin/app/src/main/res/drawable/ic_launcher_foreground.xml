@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Voxa adaptive launcher foreground. A single bold capital V, ink-black on white.
+Adaptive icon spec: 108x108 viewport, safe zone is the center 66dp (x=21..87).
+Medium-sized V: spans x=40..68, y=42..72. Stroke width 10, rounded caps.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#16161A"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M 40,42 L 54,72 L 68,42"/>
+</vector>
