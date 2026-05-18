@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Voxa · Quiet Sheet · v2 spec</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+:root{--page-bg:#111114;--page-fg:#ECECEE;--page-muted:#8B8B92;--page-hair:#2A2A30;}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--page-bg);color:var(--page-fg);font-family:'Geist','SF Pro Display',system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-feature-settings:'ss01','cv11'}
+.page{padding:40px 24px 80px;max-width:1640px;margin:0 auto}
+.page-head{margin-bottom:32px}
+.page-head h1{font-family:'Geist',sans-serif;font-size:30px;font-weight:600;letter-spacing:-0.028em;margin:0 0 8px}
+.page-head p{color:var(--page-muted);margin:0;max-width:820px;line-height:1.55;font-size:14px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--page-muted)}
+.legend span{padding:4px 10px;border:1px solid var(--page-hair);border-radius:99px}
+
+.section-head{display:flex;align-items:baseline;gap:14px;margin:36px 0 18px}
+.section-head h2{margin:0;font-size:20px;font-weight:700;letter-spacing:-0.02em}
+.section-head .tag{font-family:'JetBrains Mono',monospace;font-size:10px;color:#1F4FE0;letter-spacing:0.16em;text-transform:uppercase;padding:3px 8px;border:1px solid rgba(31,79,224,.45);border-radius:99px}
+.section-head .info{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--page-muted)}
+
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:24px}
+@media (max-width:1200px){.grid-3,.grid-2{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:760px){.grid-3,.grid-2{grid-template-columns:1fr}}
+
+.tile{display:flex;flex-direction:column;gap:10px}
+.tile-label{display:flex;justify-content:space-between;align-items:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--page-muted);letter-spacing:0.08em;text-transform:uppercase}
+.tile-label .ok{color:#7FB069}
+.tile-label .live{color:#E5484D}
+
+.phone{width:100%;aspect-ratio:360/780;border:1px solid var(--page-hair);border-radius:38px;padding:10px;background:#08080A;position:relative;overflow:hidden}
+.phone::before{content:"";position:absolute;top:14px;left:50%;transform:translateX(-50%);width:88px;height:22px;background:#000;border-radius:14px;z-index:5}
+.screen{width:100%;height:100%;border-radius:28px;overflow:hidden;position:relative;background:#F7F5F0;color:#16161A;font-family:'Geist',sans-serif}
+
+/* ─── Common Quiet Sheet tokens ─── */
+.qs{--bg:#F7F5F0;--surface:#FFFFFF;--ink:#16161A;--ink-2:#2A2A30;--muted:#7A7A82;--mute2:#A5A2 9A;--hair:#E6E2D9;--hair-soft:#EFEBE2;--primary:#1F4FE0;--primary-soft:rgba(31,79,224,.08);--dest:#E5484D;--vu:#7FB069}
+
+/* ─────────────────────────────────────────────────────────────────────
+   AUTH. full-screen native-feeling embed
+   ───────────────────────────────────────────────────────────────────── */
+.auth .screen{background:#FFFFFF;display:flex;flex-direction:column}
+.auth .topstrip{padding:54px 18px 10px;display:flex;align-items:center;justify-content:space-between;background:#FFFFFF;border-bottom:1px solid #EEEAE0}
+.auth .topstrip .left{display:flex;align-items:center;gap:10px}
+.auth .topstrip .wordmark{font-weight:700;font-size:18px;letter-spacing:-0.025em;color:#16161A}
+.auth .topstrip .crumb{font-family:'Geist',sans-serif;font-size:11px;color:#7A7A82;letter-spacing:-0.005em;border:1px solid #E6E2D9;padding:3px 10px;border-radius:99px;font-weight:500}
+.auth .topstrip .x{width:30px;height:30px;border-radius:99px;background:#F3F0E7;color:#16161A;display:flex;align-items:center;justify-content:center;font-size:14px}
+.auth .web{flex:1;background:#FFFFFF;color:#0D0D0D;padding:34px 28px 28px;display:flex;flex-direction:column;align-items:stretch;gap:18px;position:relative;overflow:hidden}
+.auth .web .oai-mark{width:34px;height:34px;border-radius:99px;background:#000;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;margin:6px 0 4px;align-self:flex-start}
+.auth .web h2{font-size:25px;font-weight:600;letter-spacing:-0.02em;margin:2px 0 0;line-height:1.18}
+.auth .web .sub{font-size:13.5px;color:#5C5C5C;margin:0 0 2px}
+.auth .web .voxa-hint{font-size:12px;color:#1F4FE0;margin:0 0 6px;font-weight:500}
+.auth .web .email{padding:14px 16px;border:1px solid #D8D8D8;border-radius:8px;font-size:14px;color:#9A9A9A}
+.auth .web .primary-btn{padding:14px;border-radius:8px;background:#000;color:#fff;text-align:center;font-weight:500;font-size:14px}
+.auth .web .divider{display:flex;align-items:center;gap:10px;color:#888;font-size:12px;margin:2px 0}
+.auth .web .divider::before,.auth .web .divider::after{content:"";flex:1;height:1px;background:#E6E6E6}
+.auth .web .sso{display:flex;gap:12px;padding:13px 14px;border:1px solid #D8D8D8;border-radius:8px;font-size:14px;color:#0D0D0D;align-items:center;font-weight:500}
+.auth .web .sso .ic{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.auth .web .sso .ic svg{width:100%;height:100%;display:block}
+.auth .web .legal{margin-top:auto;font-size:11px;color:#888;line-height:1.5}
+.auth .web .legal a{color:#1F4FE0;text-decoration:none}
+.auth .progress-strip{padding:11px 14px;display:flex;align-items:center;gap:10px;border-top:1px solid #EEEAE0;background:#FAFAF6}
+.auth .progress-strip .spinner{width:14px;height:14px;border:2px solid #E6E2D9;border-top-color:#1F4FE0;border-radius:99px;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.auth .progress-strip .label{font-size:12px;color:#5A5A60}
+.auth .progress-strip .mono{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:#7A7A82;letter-spacing:.06em}
+
+/* CAPTURING state */
+.auth.capturing .web::after{content:"";position:absolute;inset:0;background:rgba(255,255,255,.85);backdrop-filter:blur(4px);pointer-events:none}
+.auth.capturing .capture-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border:1px solid #E6E2D9;border-radius:14px;padding:20px 22px;width:78%;text-align:center;z-index:5;box-shadow:0 14px 32px rgba(0,0,0,.06)}
+.auth.capturing .capture-card .ring{width:42px;height:42px;border:3px solid #E6E2D9;border-top-color:#1F4FE0;border-radius:99px;margin:2px auto 12px;animation:spin .8s linear infinite}
+.auth.capturing .capture-card h4{font-size:15px;margin:0 0 4px;font-weight:600}
+.auth.capturing .capture-card p{font-size:12.5px;color:#7A7A82;margin:0;line-height:1.55}
+.auth.capturing .capture-card .mono{font-family:'JetBrains Mono',monospace;font-size:10px;color:#1F4FE0;letter-spacing:.1em;display:block;margin-top:10px}
+
+/* ─────────────────────────────────────────────────────────────────────
+   SETTINGS / HOME
+   ───────────────────────────────────────────────────────────────────── */
+.home .screen{background:var(--bg);position:relative;overflow-y:auto}
+.home .screen::before{content:"";position:absolute;inset:0;background:radial-gradient(60% 40% at 20% 8%,rgba(220,180,120,.07),transparent 70%),radial-gradient(50% 40% at 90% 80%,rgba(31,79,224,.04),transparent 75%);pointer-events:none;z-index:0}
+.home .screen > *{position:relative;z-index:1}
+.home .topbar{padding:54px 22px 6px;display:flex;align-items:center;justify-content:space-between}
+.home .topbar h1{margin:0;font-size:28px;font-weight:600;letter-spacing:-0.035em;font-family:'Geist',sans-serif}
+.home .topbar .pill{display:inline-flex;align-items:center;gap:6px;background:rgba(127,176,105,.13);color:#3E7B30;padding:5px 10px;border-radius:99px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.04em}
+.home .topbar .pill .dot{width:5px;height:5px;border-radius:99px;background:#7FB069}
+.home .meta{padding:0 22px 4px;font-size:13px;color:#7A7A82;line-height:1.5;margin-top:2px;max-width:32ch}
+.home .h-sec{font-size:13px;color:#16161A;font-weight:600;letter-spacing:-0.01em;padding:0 26px;margin:24px 0 8px}
+.home .panel{margin:0 16px;background:#FFFFFF;border:1px solid #E6E2D9;border-radius:12px;overflow:hidden}
+.home .row{padding:14px 16px;display:flex;align-items:center;gap:13px;border-top:1px solid #EEEAE0}
+.home .row:first-child{border-top:0}
+.home .row .icon{width:30px;height:30px;border-radius:8px;background:#F3F0E7;color:#16161A;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.home .row .icon svg{width:18px;height:18px}
+.home .row .l{flex:1;min-width:0}
+.home .row .name{font-size:14.5px;font-weight:500}
+.home .row .sub{font-size:11.5px;color:#7A7A82;margin-top:2px}
+.home .row .v{font-family:'JetBrains Mono',monospace;font-size:11px;color:#5C5C62}
+.home .row .chev{color:#B5B0A4;font-size:15px}
+.home .row.destruct .name{color:#E5484D}
+.home .switch{width:42px;height:24px;border-radius:99px;background:#D6D2C7;position:relative;flex-shrink:0}
+.home .switch.on{background:#1F4FE0}
+.home .switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:99px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:.18s}
+.home .switch.on::after{transform:translateX(18px)}
+.home .footer{padding:24px 26px 30px;font-family:'JetBrains Mono',monospace;font-size:10px;color:#A5A29A;letter-spacing:0.06em;text-align:center}
+
+/* ─────────────────────────────────────────────────────────────────────
+   IME. Wispr Flow style live waveform · NORMAL KEYBOARD HEIGHT (~38%)
+   ───────────────────────────────────────────────────────────────────── */
+.ime .screen{background:var(--bg)}
+.ime .app-host{position:absolute;inset:0 0 auto 0;height:62%;background:linear-gradient(180deg,#EFECE4,var(--bg));padding:54px 18px 0}
+.ime .app-host .convo-bubble{background:#FFFFFF;border:1px solid #E6E2D9;border-radius:14px 14px 14px 4px;padding:12px 14px;font-size:13.5px;color:#16161A;max-width:80%;line-height:1.45;box-shadow:0 1px 0 rgba(0,0,0,.02)}
+.ime .app-host .text-field{position:absolute;left:18px;right:18px;bottom:14px;display:flex;align-items:center;gap:10px;padding:11px 14px;background:#FFFFFF;border:1px solid #E6E2D9;border-radius:99px;font-size:13px;color:#A5A29A}
+.ime .app-host .text-field .send{margin-left:auto;width:28px;height:28px;border-radius:99px;background:#1F4FE0;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+.ime .keyboard-host{position:absolute;inset:auto 0 0 0;height:38%;background:#FFFFFF;border-top:1px solid #E6E2D9;border-radius:16px 16px 0 0;padding:10px 14px 14px;box-shadow:0 -6px 18px rgba(22,22,26,.05);display:flex;flex-direction:column}
+
+/* IME top bar inside keyboard surface */
+.ime .kb-top{display:flex;align-items:center;justify-content:space-between;padding:0 2px}
+.ime .kb-top .left{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#7A7A82}
+.ime .kb-top .left .dot{width:6px;height:6px;border-radius:99px;background:#A5A29A}
+.ime .kb-top.recording .left .dot{background:#E5484D;box-shadow:0 0 0 3px rgba(229,72,77,.18);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(229,72,77,.18)}50%{box-shadow:0 0 0 7px rgba(229,72,77,.06)}}
+.ime .kb-top.recording .left{color:#E5484D;font-weight:500}
+.ime .kb-top .timer{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#16161A;font-weight:500;letter-spacing:0.04em}
+
+/* Body wrapper. content centered vertically in remaining space */
+.ime .kb-body{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+
+/* Waveform stage. only shown when recording */
+.ime .wave-stage{position:relative;width:100%;height:64px;display:none;overflow:hidden;border-radius:10px;background:linear-gradient(180deg,#FAFAF6,#F3F0E7)}
+.ime.recording .wave-stage,.ime.processing .wave-stage{display:block}
+.ime .wave-stage .canvas{position:absolute;inset:0;width:100%;height:100%}
+
+/* Mic + transport row */
+.ime .ctl-row{display:flex;align-items:center;justify-content:center;gap:14px}
+.ime .pill-btn{height:32px;padding:0 14px;display:inline-flex;align-items:center;background:#FFFFFF;border:1px solid #E6E2D9;border-radius:99px;font-size:12px;color:#16161A;font-weight:500;letter-spacing:.01em}
+.ime .pill-btn.primary{background:#1F4FE0;border-color:#1F4FE0;color:#fff}
+.ime .pill-btn.danger{background:#FFFFFF;color:#E5484D;border-color:#F5D9DA}
+.ime .mic{width:56px;height:56px;border-radius:99px;background:#16161A;color:#fff;display:flex;align-items:center;justify-content:center;position:relative;box-shadow:0 4px 12px rgba(22,22,26,.18),inset 0 -2px 0 rgba(255,255,255,.06)}
+.ime .mic svg{width:24px;height:24px}
+.ime.recording .mic{background:#E5484D;box-shadow:0 6px 16px rgba(229,72,77,.32),inset 0 -2px 0 rgba(255,255,255,.08)}
+.ime.recording .mic svg{display:none}
+.ime.recording .mic::before{content:"";position:absolute;width:18px;height:18px;background:#fff;border-radius:4px}
+.ime.processing .mic{background:#1F4FE0}
+.ime.processing .mic svg{display:none}
+.ime.processing .mic::before{content:"";position:absolute;width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:99px;animation:spin .8s linear infinite;background:transparent}
+
+/* Hint text under mic when idle */
+.ime .hint{font-size:11.5px;color:#A5A29A;text-align:center}
+
+/* Done button directly below mic. centered */
+.ime .done-row{display:flex;justify-content:center}
+.ime .done-btn{font-size:12.5px;font-weight:500;color:#1F4FE0;padding:5px 14px;border-radius:99px;background:transparent}
+.ime.recording .done-btn,.ime.recording .hint{display:none}
+.ime.processing .done-btn,.ime.processing .hint{display:none}
+
+.dir-notes{font-size:12.5px;color:var(--page-muted);line-height:1.6;padding:14px 16px;border:1px solid var(--page-hair);border-radius:12px;background:#16161B}
+.dir-notes b{color:var(--page-fg);font-weight:600}
+.dir-notes ul{margin:6px 0 0;padding-left:18px}
+.dir-notes li{margin:3px 0}
+.dir-notes code{font-family:'JetBrains Mono',monospace;color:#C7F94B;background:rgba(199,249,75,.06);padding:1px 5px;border-radius:4px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>voxa · Quiet Sheet · v2 spec</h1>
+    <p>Refined Direction C with three changes you asked for: (1) Auth is a full-screen ChatGPT login showing every sign-in option, framed only by a thin native top strip; (2) IME has a Wispr-Flow-style live waveform that responds to your voice amplitude in real time; (3) the IME's Done button switches back to your previous keyboard, not just hide. Each section below shows the relevant states.</p>
+    <div class="legend">
+      <span>Phone-frame 360×780</span>
+      <span>Light theme. bg #F7F5F0 · ink #16161A · primary #1F4FE0</span>
+      <span>Live waveform animates in this browser (real Canvas)</span>
+      <span>Tap any mic in the IME tile to see record/sending states</span>
+    </div>
+  </div>
+
+  <!-- ─────────────────────  AUTH  ───────────────────── -->
+  <div class="section-head">
+    <h2>1 · Auth</h2>
+    <span class="tag">Full ChatGPT login · embedded WebView</span>
+    <span class="info">Thin top strip is native · everything below is real chatgpt.com</span>
+  </div>
+  <div class="grid-2">
+    <!-- AUTH state 1: ChatGPT login page (all options) -->
+    <div class="tile">
+      <div class="tile-label"><span>State A · Sign-in options</span><span>chatgpt.com/auth/login</span></div>
+      <div class="phone qs auth">
+        <div class="screen">
+          <div class="topstrip">
+            <div class="left">
+              <span class="wordmark">Voxa</span>
+              <span class="crumb">Sign in to ChatGPT</span>
+            </div>
+            <div class="x">✕</div>
+          </div>
+          <div class="web">
+            <div class="oai-mark">✲</div>
+            <h2>Welcome back</h2>
+            <p class="sub">Log in to your account to continue</p>
+            <p class="voxa-hint">Sign in with your ChatGPT account to use Voxa</p>
+            <div class="email">Email address</div>
+            <div class="primary-btn">Continue</div>
+            <div class="divider"><span>OR</span></div>
+            <div class="sso google"><span class="ic"><svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/></svg></span><span>Continue with Google</span></div>
+            <div class="sso microsoft"><span class="ic"><svg viewBox="0 0 24 24"><rect x="1" y="1" width="10" height="10" fill="#F25022"/><rect x="13" y="1" width="10" height="10" fill="#7FBA00"/><rect x="1" y="13" width="10" height="10" fill="#00A4EF"/><rect x="13" y="13" width="10" height="10" fill="#FFB900"/></svg></span><span>Continue with Microsoft Account</span></div>
+            <div class="sso apple"><span class="ic"><svg viewBox="0 0 24 24"><path fill="#000" d="M17.05,20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24,0-1.44.62-2.2.44-3.06-.35C2.79,15.25,3.51,7.59,9.05,7.31c1.35.07,2.29.74,3.08.8,1.18-.24,2.31-.93,3.57-.84,1.51.12,2.65.72,3.4,1.8-3.12,1.87-2.38,5.98.48,7.13-.57,1.5-1.31,2.99-2.54,4.09zM12.03,7.25c-.15-2.23,1.66-4.07,3.74-4.25.29,2.58-2.34,4.5-3.74,4.25z"/></svg></span><span>Continue with Apple</span></div>
+            <div class="legal">Don't have an account? <a>Sign up</a><br/><a>Terms of Use</a> · <a>Privacy Policy</a></div>
+          </div>
+          <div class="progress-strip">
+            <div class="spinner"></div>
+            <div class="label">Waiting for sign-in</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTH state 2: capturing -->
+    <div class="tile">
+      <div class="tile-label"><span>State B · Linking account</span><span class="live">live</span></div>
+      <div class="phone qs auth capturing">
+        <div class="screen">
+          <div class="topstrip">
+            <div class="left">
+              <span class="wordmark">Voxa</span>
+              <span class="crumb">Sign in to ChatGPT</span>
+            </div>
+            <div class="x">✕</div>
+          </div>
+          <div class="web">
+            <div class="oai-mark">✲</div>
+            <h2>Welcome back</h2>
+            <p class="sub">Log in to your account to continue</p>
+            <p class="voxa-hint">Sign in with your ChatGPT account to use Voxa</p>
+            <div class="email">user@example.com</div>
+            <div class="primary-btn">Continue</div>
+            <div class="divider"><span>OR</span></div>
+            <div class="sso google"><span class="ic"><svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"/><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"/><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"/><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"/></svg></span><span>Continue with Google</span></div>
+            <div class="sso microsoft"><span class="ic"><svg viewBox="0 0 24 24"><rect x="1" y="1" width="10" height="10" fill="#F25022"/><rect x="13" y="1" width="10" height="10" fill="#7FBA00"/><rect x="1" y="13" width="10" height="10" fill="#00A4EF"/><rect x="13" y="13" width="10" height="10" fill="#FFB900"/></svg></span><span>Continue with Microsoft Account</span></div>
+            <div class="sso apple"><span class="ic"><svg viewBox="0 0 24 24"><path fill="#000" d="M17.05,20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24,0-1.44.62-2.2.44-3.06-.35C2.79,15.25,3.51,7.59,9.05,7.31c1.35.07,2.29.74,3.08.8,1.18-.24,2.31-.93,3.57-.84,1.51.12,2.65.72,3.4,1.8-3.12,1.87-2.38,5.98.48,7.13-.57,1.5-1.31,2.99-2.54,4.09zM12.03,7.25c-.15-2.23,1.66-4.07,3.74-4.25.29,2.58-2.34,4.5-3.74,4.25z"/></svg></span><span>Continue with Apple</span></div>
+            <div class="capture-card">
+              <div class="ring"></div>
+              <h4>Linking your ChatGPT account</h4>
+              <p>Hang on a moment. Don't close the app.</p>
+            </div>
+          </div>
+          <div class="progress-strip">
+            <div class="spinner"></div>
+            <div class="label">Linking your ChatGPT account…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dir-notes">
+      <b>Auth. what changed</b>
+      <ul>
+        <li>WebView is now <b>edge-to-edge</b>. The full ChatGPT login page is shown including email field, Continue button, Google · Microsoft · Apple SSO buttons, and legal links. same as the real chatgpt.com/auth/login.</li>
+        <li>Voxa branding is reduced to a <b>thin top strip</b> (wordmark + "Connect ChatGPT" crumb + close button) so the screen reads as one integrated experience, not "our app wrapping a tiny web view".</li>
+        <li>Bottom <b>progress strip</b> shows live status (spinner + "Waiting for sign-in" → "Capturing session…" after redirect). Replaces the previous "Having trouble? Tap to retry" floating link.</li>
+        <li>When session capture completes, a <b>capture-card</b> overlay appears centered (semi-transparent backdrop, ring spinner, mono cookie names). confirms what's happening so it doesn't feel like a hang.</li>
+        <li>Google / Apple / Microsoft redirects happen <i>inside</i> the WebView (real OAuth flow). We snag the session cookie on the post-redirect `chatgpt.com` URL. No change to cookie-capture logic.</li>
+      </ul>
+    </div>
+
+    <div class="dir-notes">
+      <b>What we preserve from current code</b>
+      <ul>
+        <li><code>userAgentString</code> spoof (Chrome on Pixel 8). keeps the Cloudflare bypass.</li>
+        <li><code>CookieManager.setAcceptThirdPartyCookies</code>. required for Google/Apple/MS SSO.</li>
+        <li><code>tryCaptureSession(url)</code> polling. same logic, just relocated to the bottom progress strip.</li>
+        <li><code>setSessionCookie()</code> and <code>setCookieHeader()</code>. both still written (legacy single token + full cookie incl. cf_clearance).</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ─────────────────────  IME  ───────────────────── -->
+  <div class="section-head">
+    <h2>2 · IME · Wispr-style waveform</h2>
+    <span class="tag">Tap a mic to toggle states</span>
+    <span class="info">Idle → tap → Recording (live wave) → tap → Sending → switch back to previous keyboard</span>
+  </div>
+  <div class="grid-3">
+
+    <!-- IME idle -->
+    <div class="tile">
+      <div class="tile-label"><span>State A · Idle</span><span>centered mic, compact</span></div>
+      <div class="phone qs ime" id="imeA">
+        <div class="screen">
+          <div class="app-host">
+            <div class="convo-bubble">Hey, can you write up notes from this morning's call?</div>
+            <div class="text-field">
+              <span>Message</span>
+              <div class="send">↑</div>
+            </div>
+          </div>
+          <div class="keyboard-host">
+            <div class="kb-top">
+              <div class="left"><div class="dot"></div><span>Voxa · ready</span></div>
+              <div class="timer">00:00</div>
+            </div>
+            <div class="kb-body">
+              <div class="wave-stage"><canvas class="canvas"></canvas></div>
+              <div class="ctl-row">
+                <div class="mic" data-action="record">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+              </div>
+              <div class="hint">Tap to dictate</div>
+              <div class="done-row"><span class="done-btn">Done</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IME recording (live wave) -->
+    <div class="tile">
+      <div class="tile-label"><span>State B · Recording</span><span class="live">live waveform</span></div>
+      <div class="phone qs ime recording" id="imeB">
+        <div class="screen">
+          <div class="app-host">
+            <div class="convo-bubble">Hey, can you write up notes from this morning's call?</div>
+            <div class="text-field">
+              <span style="color:#16161A">I'd love to. The team agreed on a Q3 push</span>
+              <div class="send">↑</div>
+            </div>
+          </div>
+          <div class="keyboard-host">
+            <div class="kb-top recording">
+              <div class="left"><div class="dot"></div><span>Listening</span></div>
+              <div class="timer" id="timerB">00:08</div>
+            </div>
+            <div class="kb-body">
+              <div class="wave-stage"><canvas class="canvas" data-wave="B"></canvas></div>
+              <div class="ctl-row">
+                <span class="pill-btn danger">Cancel</span>
+                <div class="mic" data-action="stop"></div>
+                <span class="pill-btn primary">Send</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IME sending -->
+    <div class="tile">
+      <div class="tile-label"><span>State C · Sending</span><span>then switches to your keyboard</span></div>
+      <div class="phone qs ime processing" id="imeC">
+        <div class="screen">
+          <div class="app-host">
+            <div class="convo-bubble">Hey, can you write up notes from this morning's call?</div>
+            <div class="text-field">
+              <span style="color:#16161A">I'd love to. The team agreed on a Q3 push and Lina takes the design review.</span>
+              <div class="send">↑</div>
+            </div>
+          </div>
+          <div class="keyboard-host">
+            <div class="kb-top">
+              <div class="left"><div class="dot" style="background:#1F4FE0"></div><span style="color:#1F4FE0">Transcribing</span></div>
+              <div class="timer">00:14</div>
+            </div>
+            <div class="kb-body">
+              <div class="wave-stage" style="background:#EEF1FE"></div>
+              <div class="ctl-row">
+                <div class="mic"></div>
+              </div>
+              <div class="hint" style="color:#1F4FE0;display:block">Inserting text. Switching back to your keyboard.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="grid-2" style="margin-top:24px">
+    <div class="dir-notes">
+      <b>IME. Wispr-flow waveform behavior</b>
+      <ul>
+        <li><b>Idle:</b> small dark mic disc (60dp), placeholder hint, monospace counter at 00:00. Delete + Space pill-buttons flank the mic.</li>
+        <li><b>Recording:</b> mic turns coral-red with a white square (rec icon). Status dot pulses. Live waveform replaces the placeholder. <b>The wave responds to your voice amplitude in real time</b>. Compose-side polls <code>MediaRecorder.getMaxAmplitude()</code> every ~50 ms, normalises log-scale, pushes into a 96-sample ring buffer, and a Custom View draws two layered Bézier-smoothed strokes (primary ink-blue + softer trailing) that scroll right-to-left like Wispr Flow.</li>
+        <li><b>Tap mic again →</b> Sending state (blue mic + spinner). Transcribe via existing <code>TranscriptionApi.transcribeAudio()</code>. Insert text into the active text field via <code>currentInputConnection.commitText()</code>.</li>
+        <li><b>After insert →</b> Voxa calls <code>switchToPreviousInputMethod()</code> (API 28+) so the user's previous keyboard (Gboard / SwiftKey / whatever) is restored. Fallback: <code>requestHideSelf(0)</code> + open input-method picker.</li>
+        <li><b>Done button</b> (top-right of the bottom hairline strip when idle) also calls <code>switchToPreviousInputMethod()</code> directly. for users who opened Voxa but don't want to dictate.</li>
+        <li><b>Long-press mic →</b> cancel/abort current take, no insert, no keyboard switch.</li>
+        <li>The Cancel + Send pill buttons during Recording give an explicit alternative to "tap mic again". useful when amplitude is jittery or the user wants to abort mid-recording.</li>
+      </ul>
+    </div>
+
+    <div class="dir-notes">
+      <b>IME. feature checklist (implementation)</b>
+      <ul>
+        <li>Custom <code>WaveformView</code> extending <code>android.view.View</code> with <code>onDraw(Canvas)</code>. Path with cubic Béziers, double-buffered ring buffer.</li>
+        <li>Amplitude poll loop: <code>Handler.postDelayed</code> every 50 ms → <code>recorder.getMaxAmplitude()</code> → push to buffer → <code>view.postInvalidate()</code>.</li>
+        <li>Counter ticker: separate 100 ms loop updating "MM:SS / 02:00".</li>
+        <li>Auto-stop when counter hits <code>prefs.getMaxDuration()</code>.</li>
+        <li>Switch-back: <code>switchToPreviousInputMethod()</code> in <code>finally</code> after <code>commitText()</code> succeeds. Fail-safe: if returns false, call <code>imm.showInputMethodPicker()</code>.</li>
+        <li>Long-press on mic: <code>setOnLongClickListener</code> → cancel recorder, no transcribe.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ─────────────────────  SETTINGS  ───────────────────── -->
+  <div class="section-head">
+    <h2>3 · Settings · production-grade options</h2>
+    <span class="tag">Many rows, never crammed. generous breathing</span>
+    <span class="info">Scrollable · grouped panels · light theme</span>
+  </div>
+  <div class="grid-2">
+
+    <!-- Settings A -->
+    <div class="tile">
+      <div class="tile-label"><span>Home / Settings · top</span><span>scroll</span></div>
+      <div class="phone qs home">
+        <div class="screen" style="overflow-y:auto">
+          <div class="topbar">
+            <h1>voxa</h1>
+            <span class="pill"><span class="dot"></span>Connected</span>
+          </div>
+          <p class="meta">Dictate anywhere on your phone. Tap the keyboard switcher and pick Voxa, hold to talk, send.</p>
+
+          <div class="h-sec">Keyboard</div>
+          <div class="panel">
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M19 10h.01M7 14h10"/></svg></div>
+              <div class="l"><div class="name">Voxa keyboard</div><div class="sub">Active. Used 2m ago in Messages.</div></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.5 5.5 6 .8-4.3 4.2 1 6L12 16.8 6.8 19.5l1-6L3.5 9.3l6-.8L12 3z"/></svg></div>
+              <div class="l"><div class="name">Set as default keyboard</div><div class="sub">Skip the system picker.</div></div>
+              <span class="chev">›</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h14l-3-3M21 16H7l3 3"/></svg></div>
+              <div class="l"><div class="name">Switch keyboard now</div><div class="sub">Useful for testing.</div></div>
+              <span class="chev">›</span>
+            </div>
+          </div>
+
+          <div class="h-sec">Recording</div>
+          <div class="panel">
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12c0-3 2.2-5 5-5 2 0 3.4 1.2 4.5 2.8C15.6 11.4 17 13 19 13c1.7 0 3-1.3 3-3s-1.3-3-3-3c-2 0-3.4 1.6-4.5 3.2C13.4 11.8 12 13 10 13c-2.8 0-5-2-5-5z"/></svg></div>
+              <div class="l"><div class="name">Max length</div><div class="sub">2:00. Choose Unlimited if you talk longer.</div></div>
+              <span class="v">2:00</span><span class="chev">›</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-6 4 12 3-9 2 4 4-1"/></svg></div>
+              <div class="l"><div class="name">Sample rate</div><div class="sub">Higher means more bandwidth.</div></div>
+              <span class="v">16 kHz</span><span class="chev">›</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3M21 12h-3M9 12h.01M15 12h.01"/></svg></div>
+              <div class="l"><div class="name">Trim silence</div><div class="sub">Auto-stop on sustained quiet.</div></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11V6.5a2.5 2.5 0 0 1 5 0V12a4 4 0 1 1-8 0V8.5"/><path d="M14 13l2 2 4-4"/></svg></div>
+              <div class="l"><div class="name">Hold to talk</div><div class="sub">Long-press mic to record.</div></div>
+              <div class="switch"></div>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg></div>
+              <div class="l"><div class="name">Test microphone</div><div class="sub">Quick 3-second diagnostic.</div></div>
+              <span class="chev">›</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings B (scrolled lower) -->
+    <div class="tile">
+      <div class="tile-label"><span>Home / Settings · lower</span><span>scrolled view</span></div>
+      <div class="phone qs home">
+        <div class="screen">
+          <div class="h-sec" style="margin-top:54px">Transcription</div>
+          <div class="panel">
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+              <div class="l"><div class="name">Language</div></div>
+              <span class="v">English (US)</span><span class="chev">›</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg></div>
+              <div class="l"><div class="name">Model</div><div class="sub">Powered by your ChatGPT account.</div></div>
+              <span class="v">whisper-1</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="1.5" fill="currentColor"/><path d="M11 6h10M11 12h10M11 18h6"/></svg></div>
+              <div class="l"><div class="name">Auto-punctuation</div></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l4-4 4 4M8 3v18M16 17l4 4 4-4" transform="translate(-4 0)"/></svg></div>
+              <div class="l"><div class="name">Filler word cleanup</div><div class="sub">Remove "um", "uh", "like".</div></div>
+              <div class="switch"></div>
+            </div>
+          </div>
+
+          <div class="h-sec">Feedback</div>
+          <div class="panel">
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2l2-7 4 14 3-10 2 5 2-2h3"/></svg></div>
+              <div class="l"><div class="name">Haptic feedback</div><div class="sub">Vibrate on tap, send, and error.</div></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9v6h4l5 4V5L7 9H3z"/><path d="M17 8a5 5 0 0 1 0 8M20 5a9 9 0 0 1 0 14"/></svg></div>
+              <div class="l"><div class="name">Start and stop sound</div></div>
+              <div class="switch"></div>
+            </div>
+          </div>
+
+          <div class="h-sec">Account</div>
+          <div class="panel">
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></div>
+              <div class="l"><div class="name">ChatGPT session</div><div class="sub">Connected. Refreshed 4 min ago.</div></div>
+              <span class="chev">›</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg></div>
+              <div class="l"><div class="name">Refresh session</div></div>
+              <span class="chev">›</span>
+            </div>
+            <div class="row destruct">
+              <div class="icon" style="background:#FCEAEA;color:#E5484D"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/></svg></div>
+              <div class="l"><div class="name">Sign out</div><div class="sub">Clear session and re-link.</div></div>
+              <span class="chev">›</span>
+            </div>
+          </div>
+
+          <div class="h-sec">About</div>
+          <div class="panel">
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg></div>
+              <div class="l"><div class="name">Privacy</div><div class="sub">What Voxa stores and sends.</div></div>
+              <span class="chev">›</span>
+            </div>
+            <div class="row">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16M4 15h16M10 3l-2 18M16 3l-2 18"/></svg></div>
+              <div class="l"><div class="name">Version</div></div>
+              <span class="v">0.1.4 · build 142</span>
+            </div>
+          </div>
+
+          <div class="footer">voxa · dictate anywhere</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dir-notes">
+      <b>Settings. what's in v2</b>
+      <ul>
+        <li><b>Keyboard:</b> Voxa keyboard toggle (with usage hint), set as default, switch in current app.</li>
+        <li><b>Recording:</b> max length, sample rate, trim silence, hold-to-talk, test microphone (3-sec diagnostic).</li>
+        <li><b>Transcription:</b> language, model (whisper-1), auto-punctuation, filler-word cleanup.</li>
+        <li><b>Feedback:</b> haptics, start/stop sound.</li>
+        <li><b>Account:</b> ChatGPT session status, refresh, sign out.</li>
+        <li><b>About:</b> privacy, version.</li>
+      </ul>
+      Generous row-height (54dp), 14dp horizontal panel inset, 1px hair dividers, 30dp circular icon chips. No crammed feel. every row gets room.
+    </div>
+
+    <div class="dir-notes">
+      <b>Token reference (Quiet Sheet)</b>
+      <ul>
+        <li><code>bg</code> #F7F5F0 · warm off-white (not pure white)</li>
+        <li><code>surface</code> #FFFFFF · panel cards</li>
+        <li><code>ink</code> #16161A · near-black</li>
+        <li><code>muted</code> #7A7A82 · secondary text</li>
+        <li><code>hair</code> #E6E2D9 · dividers, borders</li>
+        <li><code>primary</code> #1F4FE0 · deep ink-blue (NOT indigo-500 / Linear-Blue)</li>
+        <li><code>destructive</code> #E5484D · sign-out, cancel</li>
+        <li><code>vu / ok</code> #7FB069 · success/connected dot</li>
+        <li><code>rec</code> #E5484D · IME recording mic state</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ─────────────────────  APP ICON  ───────────────────── -->
+  <div class="section-head">
+    <h2>4 · App icon · six options · monochrome</h2>
+    <span class="tag">White ground, black mark. No mouth.</span>
+    <span class="info">Each shown rounded-square (Play Store), round (adaptive), small (in-app)</span>
+  </div>
+  <p style="color:var(--page-muted);margin:0 0 16px;font-size:13px;line-height:1.6;max-width:820px">Six options, all monochrome. White ground (<code>#FFFFFF</code>), ink-black mark (<code>#16161A</code>). Each gestures at <i>voice</i> through sound, vibration, or the Latin V (<i>vox = voice</i>) without using a mouth glyph. The recommended pick is <b style="color:#fff">A · Wave V</b>: five sound bars whose heights trace the V envelope, so the mark literally <i>is</i> voice forming the brand letter.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+
+    <!-- A. Wave + VOXA wordmark -->
+    <div class="icon-tile" data-key="A">
+      <div class="tile-label"><span>A · Wave + VOXA (Recommended)</span><span style="color:#7FB069">recommended</span></div>
+      <div class="icon-row">
+        <div class="ico-sq" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g fill="#16161A"><rect x="22" y="25" width="6" height="10" rx="3"/><rect x="32" y="20" width="6" height="20" rx="3"/><rect x="42" y="14" width="6" height="32" rx="3"/><rect x="52" y="20" width="6" height="20" rx="3"/><rect x="62" y="25" width="6" height="10" rx="3"/><rect x="72" y="28" width="6" height="4"  rx="2"/></g><text x="50" y="82" text-anchor="middle" font-family="Geist,'SF Pro Display',sans-serif" font-weight="800" font-size="28" letter-spacing="-1.2" fill="#16161A">VOXA</text></svg>
+        </div>
+        <div class="ico-rd" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g fill="#16161A"><rect x="22" y="25" width="6" height="10" rx="3"/><rect x="32" y="20" width="6" height="20" rx="3"/><rect x="42" y="14" width="6" height="32" rx="3"/><rect x="52" y="20" width="6" height="20" rx="3"/><rect x="62" y="25" width="6" height="10" rx="3"/><rect x="72" y="28" width="6" height="4"  rx="2"/></g><text x="50" y="82" text-anchor="middle" font-family="Geist,'SF Pro Display',sans-serif" font-weight="800" font-size="28" letter-spacing="-1.2" fill="#16161A">VOXA</text></svg>
+        </div>
+        <div class="ico-sm" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g fill="#16161A"><rect x="22" y="25" width="6" height="10" rx="3"/><rect x="32" y="20" width="6" height="20" rx="3"/><rect x="42" y="14" width="6" height="32" rx="3"/><rect x="52" y="20" width="6" height="20" rx="3"/><rect x="62" y="25" width="6" height="10" rx="3"/><rect x="72" y="28" width="6" height="4"  rx="2"/></g><text x="50" y="82" text-anchor="middle" font-family="Geist,'SF Pro Display',sans-serif" font-weight="800" font-size="28" letter-spacing="-1.2" fill="#16161A">VOXA</text></svg>
+        </div>
+      </div>
+      <p class="ico-desc">Six sound bars at the top (decorative waveform, not a letterform substitute) with <b>VOXA</b> set in Geist 800 Extra-Bold underneath. The wave reads as "voice", the wordmark reads as the brand. Both elements coexist instead of cleverly merging — simpler at small sizes, no ambiguity.</p>
+    </div>
+
+    <!-- B. Monogram V -->
+    <div class="icon-tile" data-key="B">
+      <div class="tile-label"><span>B · Monogram V</span><span>letterform</span></div>
+      <div class="icon-row">
+        <div class="ico-sq" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><path d="M22 24 L50 78 L78 24" stroke="#16161A" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <div class="ico-rd" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><path d="M22 24 L50 78 L78 24" stroke="#16161A" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <div class="ico-sm" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><path d="M22 24 L50 78 L78 24" stroke="#16161A" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+      </div>
+      <p class="ico-desc">The letter V as one bold stroke with rounded caps. Direct Latin reference (vox = voice). Quietest, most letterform-driven mark. Could be mistaken for a generic V.</p>
+    </div>
+
+    <!-- C. Sonic Pulse -->
+    <div class="icon-tile" data-key="C">
+      <div class="tile-label"><span>C · Sonic pulse</span><span>broadcast</span></div>
+      <div class="icon-row">
+        <div class="ico-sq" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="10" fill="#16161A"/><circle cx="50" cy="50" r="22" stroke="#16161A" stroke-width="3.5" fill="none"/><circle cx="50" cy="50" r="34" stroke="#16161A" stroke-width="2.5" fill="none" opacity=".55"/></svg>
+        </div>
+        <div class="ico-rd" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="10" fill="#16161A"/><circle cx="50" cy="50" r="22" stroke="#16161A" stroke-width="3.5" fill="none"/><circle cx="50" cy="50" r="34" stroke="#16161A" stroke-width="2.5" fill="none" opacity=".55"/></svg>
+        </div>
+        <div class="ico-sm" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="10" fill="#16161A"/><circle cx="50" cy="50" r="22" stroke="#16161A" stroke-width="3.5" fill="none"/><circle cx="50" cy="50" r="34" stroke="#16161A" stroke-width="2.5" fill="none" opacity=".55"/></svg>
+        </div>
+      </div>
+      <p class="ico-desc">A point with two concentric rings, sound projecting outward. Pure abstract symbol for vocal emission. Risk: reads as podcast or AirDrop to some users.</p>
+    </div>
+
+    <!-- D. Sound trace -->
+    <div class="icon-tile" data-key="D">
+      <div class="tile-label"><span>D · Sound trace</span><span>oscilloscope line</span></div>
+      <div class="icon-row">
+        <div class="ico-sq" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><path d="M14 50 Q22 50 24 42 T34 62 T44 28 T54 70 T64 28 T74 60 T86 50" stroke="#16161A" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <div class="ico-rd" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><path d="M14 50 Q22 50 24 42 T34 62 T44 28 T54 70 T64 28 T74 60 T86 50" stroke="#16161A" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <div class="ico-sm" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><path d="M14 50 Q22 50 24 42 T34 62 T44 28 T54 70 T64 28 T74 60 T86 50" stroke="#16161A" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+      </div>
+      <p class="ico-desc">A single flowing waveform stroke. Visual rhyme with the IME's live wave. The mark and the product show the same gesture, which is rare and memorable.</p>
+    </div>
+
+    <!-- E. Tuning fork V -->
+    <div class="icon-tile" data-key="E">
+      <div class="tile-label"><span>E · Tuning fork</span><span>vibration source</span></div>
+      <div class="icon-row">
+        <div class="ico-sq" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g stroke="#16161A" stroke-width="8" stroke-linecap="round" fill="none"><path d="M32 22 V50 a18 18 0 0 0 36 0 V22"/><path d="M50 68 V82"/></g></svg>
+        </div>
+        <div class="ico-rd" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g stroke="#16161A" stroke-width="8" stroke-linecap="round" fill="none"><path d="M32 22 V50 a18 18 0 0 0 36 0 V22"/><path d="M50 68 V82"/></g></svg>
+        </div>
+        <div class="ico-sm" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g stroke="#16161A" stroke-width="8" stroke-linecap="round" fill="none"><path d="M32 22 V50 a18 18 0 0 0 36 0 V22"/><path d="M50 68 V82"/></g></svg>
+        </div>
+      </div>
+      <p class="ico-desc">A tuning fork. The original physical source of pitch. Pure-tone vibration symbol, also vaguely reads as a U/V hybrid. Quietest sound-source metaphor.</p>
+    </div>
+
+    <!-- F. Nested V whisper -->
+    <div class="icon-tile" data-key="F">
+      <div class="tile-label"><span>F · Whisper V</span><span>concentric layers</span></div>
+      <div class="icon-row">
+        <div class="ico-sq" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g stroke="#16161A" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 26 L50 80 L80 26" stroke-width="9"/><path d="M30 22 L50 60 L70 22" stroke-width="5" opacity=".5"/><path d="M38 18 L50 42 L62 18" stroke-width="3.5" opacity=".22"/></g></svg>
+        </div>
+        <div class="ico-rd" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g stroke="#16161A" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 26 L50 80 L80 26" stroke-width="9"/><path d="M30 22 L50 60 L70 22" stroke-width="5" opacity=".5"/><path d="M38 18 L50 42 L62 18" stroke-width="3.5" opacity=".22"/></g></svg>
+        </div>
+        <div class="ico-sm" style="background:#FFFFFF">
+          <svg viewBox="0 0 100 100"><g stroke="#16161A" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 26 L50 80 L80 26" stroke-width="9"/><path d="M30 22 L50 60 L70 22" stroke-width="5" opacity=".5"/><path d="M38 18 L50 42 L62 18" stroke-width="3.5" opacity=".22"/></g></svg>
+        </div>
+      </div>
+      <p class="ico-desc">Three nested V strokes fading inward. Reads as ripple, echo, or whisper. Letterform + sound-decay combined.</p>
+    </div>
+
+  </div>
+
+  <style>
+  .icon-tile{display:flex;flex-direction:column;gap:10px}
+  .icon-row{display:flex;align-items:center;gap:16px}
+  .ico-sq{width:130px;height:130px;border-radius:30px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 6px 14px rgba(0,0,0,.18)}
+  .ico-rd{width:80px;height:80px;border-radius:99px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 4px 10px rgba(0,0,0,.16)}
+  .ico-sm{width:46px;height:46px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 5px rgba(0,0,0,.14)}
+  .ico-sq svg,.ico-rd svg,.ico-sm svg{width:78%;height:78%}
+  .ico-desc{font-size:12.5px;color:var(--page-muted);line-height:1.55;margin:2px 0 0}
+  </style>
+
+  <!-- ─────────────────────  SPLASH  ───────────────────── -->
+  <div class="section-head">
+    <h2>5 · Splash screen · animated brand reveal</h2>
+    <span class="tag">~1.5s · loops in this preview</span>
+    <span class="info">Tap the phone frame to replay the animation</span>
+  </div>
+  <p style="color:var(--page-muted);margin:0 0 16px;font-size:13px;line-height:1.6;max-width:820px">When you open Voxa, the bars rise as if "voice" is shaping the V into existence, then the OXA wordmark settles in below. Total runtime ~1.5s before the auth or home screen takes over. White ground, ink-black mark. Stays calm. No bouncy spring, no over-decoration. The whole point is that the brand mark <i>is</i> a voice waveform, so the launch shows that gesture once.</p>
+
+  <div class="grid-2" style="align-items:start">
+    <div class="tile">
+      <div class="tile-label"><span>Splash · narrative animation</span><span>click to replay</span></div>
+      <div class="phone qs splash" id="splashPhone">
+        <div class="screen" style="background:#FFFFFF;display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:pointer" id="splashScreen">
+          <svg viewBox="0 0 280 160" width="280" height="160" id="splashSvg" style="overflow:visible">
+            <!-- The wave: 9 bars. Stage 1 = dancing live. Stage 2 = settle into V shape (bottom-anchored). Stage 3 = whole group slides left. Same bars throughout. -->
+            <g id="waveGroup" transform="translate(140,80)" opacity="1">
+              <g id="waveBars" fill="#16161A">
+                <rect class="wbar" x="-35"  y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="-27"  y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="-19"  y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="-11"  y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="-3"   y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="5"    y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="13"   y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="21"   y="-3" width="6" height="6" rx="3"/>
+                <rect class="wbar" x="29"   y="-3" width="6" height="6" rx="3"/>
+              </g>
+            </g>
+            <!-- OXA text. fades in after V slides left. Sits tight against the right edge of the bar-V. -->
+            <text id="splashOxa" x="118" y="100" text-anchor="start" font-family="Geist,'SF Pro Display',sans-serif" font-weight="800" font-size="56" letter-spacing="-2.5" fill="#16161A" opacity="0">OXA</text>
+          </svg>
+          <div class="splash-tag" id="splashTag" style="opacity:0">dictate anything from anywhere</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="tile-label" style="margin-bottom:10px"><span>Animation timeline</span><span>~2700 ms total</span></div>
+      <div class="dir-notes" style="line-height:1.85">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--page-hair)">
+              <th style="text-align:left;padding:6px 8px 8px;color:var(--page-fg);font-weight:600">t (ms)</th>
+              <th style="text-align:left;padding:6px 8px 8px;color:var(--page-fg);font-weight:600">event</th>
+              <th style="text-align:left;padding:6px 8px 8px;color:var(--page-fg);font-weight:600">curve</th>
+            </tr>
+          </thead>
+          <tbody style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--page-muted)">
+            <tr><td style="padding:5px 8px">0</td><td style="padding:5px 8px">white screen</td><td style="padding:5px 8px">.</td></tr>
+            <tr><td style="padding:5px 8px">120 to 960</td><td style="padding:5px 8px"><b>Stage 1</b> wave dances live (5 amplitude frames)</td><td style="padding:5px 8px">spring per frame</td></tr>
+            <tr><td style="padding:5px 8px">1050</td><td style="padding:5px 8px"><b>Stage 2</b> same bars rearrange into V shape (tall edges, short middle), bottom-anchored</td><td style="padding:5px 8px">cubic 0.16, 1, 0.3, 1 · 520ms</td></tr>
+            <tr><td style="padding:5px 8px">1700</td><td style="padding:5px 8px"><b>Stage 3</b> V (bars) slides left into wordmark position</td><td style="padding:5px 8px">cubic 0.16, 1, 0.3, 1 · 580ms</td></tr>
+            <tr><td style="padding:5px 8px">2000</td><td style="padding:5px 8px"><b>Stage 4</b> OXA fades in tight beside V (5px gap)</td><td style="padding:5px 8px">cubic 0.16, 1, 0.3, 1</td></tr>
+            <tr><td style="padding:5px 8px">2450</td><td style="padding:5px 8px"><b>Stage 5</b> tagline "dictate anything from anywhere"</td><td style="padding:5px 8px">ease-out 320ms</td></tr>
+            <tr><td style="padding:5px 8px">2700</td><td style="padding:5px 8px">handoff to auth or home (cross-fade 200ms)</td><td style="padding:5px 8px">.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dir-notes" style="margin-top:14px">
+        <b>The narrative</b>
+        <ol>
+          <li><b>Stage 1 (0 to 1000ms) — Voice.</b> Nine bars dance with audio-like amplitudes, centered on the screen. The screen <i>is</i> live voice.</li>
+          <li><b>Stage 2 (1050 to 1600ms) — Bars form the V.</b> The same bars rearrange. They drop to a baseline and their heights resolve into a V outline: tall edges, short middle. The wave <i>becomes</i> the letter V, but the bars themselves are what form it. Nothing fades, nothing is replaced.</li>
+          <li><b>Stage 3 (1700 to 2300ms) — V slides.</b> The bar-V translates left, into the wordmark's V position.</li>
+          <li><b>Stage 4 (2000 to 2450ms) — OXA joins.</b> OXA fades in tight against the V's right edge. ~5px gap. Full VOXA wordmark visible.</li>
+          <li><b>Stage 5 (2450 to 2700ms) — The promise.</b> "dictate anything from anywhere" fades in under the wordmark. Handoff.</li>
+        </ol>
+      </div>
+      <div class="dir-notes" style="margin-top:14px">
+        <b>Android implementation</b>
+        <ul>
+          <li>One <code>Canvas</code> composable draws all 9 bars. Each bar has two values: <code>height</code> and <code>y</code>. <code>animateFloatAsState</code> on each (or <code>updateTransition</code> with a sealed-class state machine: <code>Live</code>, <code>VShape</code>, <code>Settled</code>).</li>
+          <li><b>Stage 1</b>: amplitude state with 5 random frames every 170ms. Centered y formula: <code>y = -h/2</code>.</li>
+          <li><b>Stage 2</b>: target heights = V_SHAPE constant, y formula switches to bottom-anchored: <code>y = baseline - h</code>. Compose interpolates both attributes smoothly.</li>
+          <li><b>Stage 3</b>: <code>animateOffsetAsState</code> on the Canvas's <code>Modifier.offset</code> shifts the whole wave group left.</li>
+          <li><b>Stage 4 to 5</b>: <code>AnimatedVisibility</code> with <code>fadeIn + slideInHorizontally(8dp)</code> for OXA, <code>fadeIn</code> for the tagline.</li>
+          <li>Wrap everything in <code>SplashScreen.setKeepOnScreenCondition</code> while the cookie validates. Skip stages 3 to 5 if validation completes during stage 1.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <style>
+  .splash-tag{font-family:'Geist',sans-serif;font-size:14px;color:#7A7A82;letter-spacing:-0.005em;margin-top:18px;transition:opacity .32s ease-out}
+  #waveGroup{transition:transform .58s cubic-bezier(.16,1,.3,1)}
+  #waveBars rect{transition:y .52s cubic-bezier(.16,1,.3,1), height .52s cubic-bezier(.16,1,.3,1)}
+  #splashOxa{transition:opacity .42s cubic-bezier(.16,1,.3,1), transform .42s cubic-bezier(.16,1,.3,1)}
+  </style>
+
+  <script>
+  (function(){
+    const phone = document.getElementById('splashPhone');
+    const tag = document.getElementById('splashTag');
+    const bars = phone.querySelectorAll('#waveBars rect');
+    const waveGroup = phone.querySelector('#waveGroup');
+    const oxa = phone.querySelector('#splashOxa');
+    const N = bars.length;
+
+    // V shape: tall edges, short middle. Bars are bottom-anchored to local baseline = 20.
+    const V_SHAPE = [48, 36, 26, 16, 6, 16, 26, 36, 48];
+    const BASELINE = 20;  // local y of bar bottoms when forming V (screen y=100 after translate)
+
+    function setCentered(heights){
+      for (let i = 0; i < N; i++) {
+        const h = heights[i];
+        bars[i].setAttribute('height', h);
+        bars[i].setAttribute('y', -h/2);
+      }
+    }
+    function setBottomAnchored(heights){
+      for (let i = 0; i < N; i++) {
+        const h = heights[i];
+        bars[i].setAttribute('height', h);
+        bars[i].setAttribute('y', BASELINE - h);
+      }
+    }
+    function randomAmps(){
+      const arr = [];
+      for (let i = 0; i < N; i++){
+        const base = 14 + Math.random() * 30;
+        const centerBoost = (1 - Math.abs(i - (N-1)/2) / ((N-1)/2)) * 12;
+        arr.push(base + centerBoost);
+      }
+      return arr;
+    }
+    function reset(){
+      setCentered(new Array(N).fill(6));
+      waveGroup.setAttribute('transform','translate(140,80)');
+      oxa.setAttribute('opacity', 0);
+      oxa.setAttribute('transform','translate(8,0)');
+      tag.style.opacity = 0;
+    }
+    function play(){
+      reset();
+
+      // STAGE 1 (120 to 960ms): live wave dances with 5 audio-like amplitude frames
+      let frame = 0;
+      const frameMs = 170;
+      const liveFrames = 5;
+      function nextFrame(){
+        if (frame < liveFrames){
+          setCentered(randomAmps());
+          frame++;
+          setTimeout(nextFrame, frameMs);
+        }
+      }
+      setTimeout(nextFrame, 120);
+
+      // STAGE 2 (1050ms): bars rearrange into V shape (bottom-anchored, tall edges, short middle)
+      setTimeout(() => setBottomAnchored(V_SHAPE), 1050);
+
+      // STAGE 3 (1700ms): V (made of bars) slides left into wordmark position
+      setTimeout(() => waveGroup.setAttribute('transform','translate(78,80)'), 1700);
+
+      // STAGE 4 (2000ms): OXA fades in tight against the V's right edge
+      setTimeout(() => {
+        oxa.setAttribute('opacity', 1);
+        oxa.setAttribute('transform','translate(0,0)');
+      }, 2000);
+
+      // STAGE 5 (2450ms): tagline fades in
+      setTimeout(() => { tag.style.opacity = 1; }, 2450);
+    }
+    play();
+    setInterval(play, 5000);
+    document.getElementById('splashScreen').addEventListener('click', play);
+  })();
+  </script>
+
+  <div style="margin-top:36px;padding:18px;border:1px solid var(--page-hair);border-radius:14px;background:#16161B;font-size:13px;color:var(--page-muted);line-height:1.65">
+    <b style="color:var(--page-fg);font-size:14px">Sign-off check</b>. three things to confirm:
+    <ol style="margin:8px 0 0;padding-left:18px">
+      <li><b>Auth</b>. real ChatGPT login with Google/Microsoft/Apple/email visible + "Sign in with your ChatGPT account to use Voxa" hint?</li>
+      <li><b>IME</b>. compact (38% screen), centered mic when idle, live waveform only when recording, Done under the mic, no emojis, switches back to your previous keyboard on send/Done?</li>
+      <li><b>Settings</b>. six sections including "Unlimited" max length option?</li>
+      <li><b>App icon</b>. pick one of A through F (A = Wave V recommended)</li>
+    </ol>
+    Say <b>"ship it with icon X"</b> and I implement straight into Kotlin + generate launcher PNGs.
+  </div>
+
+  <script>
+  // Wispr-flow-style live waveform. Bézier-smoothed flowing line trace.
+  function startWave(canvas, opts){
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    function resize(){
+      const r = canvas.getBoundingClientRect();
+      canvas.width = r.width * dpr;
+      canvas.height = r.height * dpr;
+      ctx.scale(dpr,dpr);
+    }
+    resize();
+    new ResizeObserver(resize).observe(canvas);
+    const N = 96;
+    const buf = new Array(N).fill(0);
+    let t = 0;
+    function tick(){
+      t += 1;
+      // Synthetic amplitude: low-baseline noise + envelopes simulating speech.
+      const speech = Math.max(0,
+        Math.sin(t/22) * 0.5 + 0.5
+      ) * (0.55 + 0.45*Math.sin(t/14));
+      const transient = Math.random() * 0.35 * (0.4+0.6*Math.sin(t/9));
+      const baseline = 0.04 + Math.random()*0.03;
+      const amp = Math.min(1, baseline + speech*0.55 + transient);
+      buf.shift();
+      buf.push(amp);
+
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      ctx.clearRect(0,0,w,h);
+      // background hint hairline
+      ctx.strokeStyle = 'rgba(22,22,26,0.06)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke();
+
+      function drawLine(color, lineWidth, scale, yOffset){
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (let i=0;i<N;i++){
+          const x = (i/(N-1))*w;
+          const y = h/2 + yOffset + Math.sin(i*0.4 + t*0.08) * buf[i] * scale * h * 0.42 * (i/(N-1));
+          if (i===0) ctx.moveTo(x,y);
+          else {
+            const xp = ((i-1)/(N-1))*w;
+            const yp = h/2 + yOffset + Math.sin((i-1)*0.4 + t*0.08) * buf[i-1] * scale * h * 0.42 * ((i-1)/(N-1));
+            const cx = (xp+x)/2;
+            ctx.quadraticCurveTo(xp,yp,cx,(yp+y)/2);
+          }
+        }
+        ctx.stroke();
+      }
+      drawLine('rgba(31,79,224,0.20)', 6, 1, 0);
+      drawLine('rgba(31,79,224,0.55)', 3, 1, 0);
+      drawLine('#1F4FE0', 1.8, 1, 0);
+
+      requestAnimationFrame(tick);
+    }
+    tick();
+  }
+  document.querySelectorAll('canvas.canvas').forEach(c => startWave(c, {}));
+
+  // Switches toggle locally for interactivity demo
+  document.querySelectorAll('.switch').forEach(s=>s.addEventListener('click',()=>s.classList.toggle('on')));
+
+  // Tap mic in idle tile to demo recording look toggling
+  const imeA = document.getElementById('imeA');
+  imeA.querySelector('.mic').addEventListener('click', () => {
+    imeA.classList.toggle('recording');
+    const isRec = imeA.classList.contains('recording');
+    imeA.querySelector('.kb-top').classList.toggle('recording', isRec);
+    imeA.querySelector('.kb-top .left span').textContent = isRec ? 'Listening' : 'Voxa · ready';
+    if (isRec){
+      const stage = imeA.querySelector('.wave-stage');
+      let c = stage.querySelector('canvas');
+      if (!c){ c = document.createElement('canvas'); c.className='canvas'; stage.appendChild(c); }
+      startWave(c,{});
+    }
+  });
+  </script>
+</div>
+</body>
+</html>
