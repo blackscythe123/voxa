@@ -16,13 +16,13 @@ import helium314.keyboard.latin.utils.DeviceProtectedUtils
  * To roll out a new wave of defaults later, bump [SEED_VERSION] and add the new
  * keys to [applySeed]. Previously-set keys are left alone unless explicitly listed.
  *
- * Captured from the project lead's tuned device on 2026-05-16 via
+ * Captured from the project lead's tuned device, most recent pull 2026-05-16 via
  * `adb shell run-as com.voxa.android cat /data/user_de/0/com.voxa.android/shared_prefs/com.voxa.android_preferences.xml`.
  */
 object VoxaPrefSeed {
 
     private const val SEED_VERSION_KEY = "voxa_seed_version"
-    private const val SEED_VERSION = 1
+    private const val SEED_VERSION = 2
 
     fun applySeed(context: Context) {
         val prefs: SharedPreferences = DeviceProtectedUtils.getSharedPreferences(context)
@@ -31,18 +31,27 @@ object VoxaPrefSeed {
 
         prefs.edit().apply {
             // ── Typing intelligence ───────────────────────────────────
-            putBoolean("more_auto_correction", true)            // aggressive autocorrect
-            putBoolean("suggest_punctuation", false)            // no punct in strip
-            putBoolean("block_potentially_offensive", false)    // allow all suggestions
+            putBoolean("auto_correction", true)                 // silently fix typos on space
+            putBoolean("more_auto_correction", true)            // aggressive correction
+            putBoolean("suggest_punctuation", false)
+            putBoolean("block_potentially_offensive", false)
+            // Recent-copy chip shown in suggestion strip (Gboard-style). This is HeliBoard's
+            // upstream default already, but we set it explicitly so it's auditable in one place.
+            putBoolean("suggest_clipboard_content", true)
 
             // ── Feedback ──────────────────────────────────────────────
             putBoolean("sound_on", true)
             putFloat("keypress_sound_volume", 0.21f)
+            putInt("key_longpress_timeout", 148)                // snappier than the 300ms default
 
             // ── Layout & languages ────────────────────────────────────
-            putBoolean("show_number_row", true)                 // permanent number row
-            putBoolean("show_number_row_hints", true)           // dot hints under digits
+            putBoolean("show_number_row", true)
+            putBoolean("show_number_row_hints", true)
+            putBoolean("show_number_row_in_symbols", false)
+            putBoolean("localized_number_row", false)
             putString("layout_NUMBER_ROW", "number_row")
+            putString("layout_EMOJI_BOTTOM", "emoji_bottom_row_with_action")
+            putInt("language_swipe_distance", 2)
             putString(
                 "enabled_subtypes",
                 "en-GB§SupportTouchPositionCorrection,TrySuppressingImeSwitcher",
@@ -61,12 +70,17 @@ object VoxaPrefSeed {
             )
 
             // ── Special characters ────────────────────────────────────
-            putBoolean("remove_redundant_popups", true)         // tidier accent grids
+            putBoolean("remove_redundant_popups", true)
             putBoolean("long_press_symbols_for_numpad", true)
-            putBoolean("show_emoji_key", true)                  // dedicated 😊 key
+            putBoolean("show_emoji_key", true)
             putBoolean("abc_after_numpad_space", true)
             putBoolean("show_emoji_descriptions", true)
             putBoolean("url_detection", true)
+            putString("emoji_skin_tone", "🏻")
+
+            // ── Gestures on space ─────────────────────────────────────
+            putString("horizontal_space_swipe", "move_cursor")
+            putString("vertical_space_swipe", "switch_language")
 
             // ── Toolbar ───────────────────────────────────────────────
             putString("toolbar_mode", "EXPANDABLE")
@@ -98,8 +112,8 @@ object VoxaPrefSeed {
             // ── Theme ─────────────────────────────────────────────────
             putString("theme_style", "Material")
             putString("icon_style", "Material")
-            putString("theme_colors", "cloudy")
-            putString("theme_colors_night", "ocean")
+            putString("theme_colors", "light")
+            putString("theme_colors_night", "darker")
             putBoolean("theme_auto_day_night", true)
             putBoolean("theme_key_borders", true)
 
@@ -110,6 +124,7 @@ object VoxaPrefSeed {
 
             // ── Misc ──────────────────────────────────────────────────
             putBoolean("save_subtype_per_app", false)
+            putInt("emoji_max_sdk", 34)
 
             // ── Bookkeeping ───────────────────────────────────────────
             putInt(SEED_VERSION_KEY, SEED_VERSION)

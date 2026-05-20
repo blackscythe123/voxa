@@ -33,14 +33,15 @@ private const val LIB_FILE_NAME = "libjni_latinime.so"
 private const val PREF_LIBRARY_CHECKSUM = "lib_checksum"
 
 // HeliBoard's README points users to this exact tag of erkserkserks/openboard
-// for the glide typing native library. Files live under
-// `app/src/main/jniLibs/<abi>/libjni_latinime.so`. We construct the raw URL
-// per device ABI so the user gets the exact right file in one tap.
+// for the glide typing native library. The source file is named
+// `libjni_latinimegoogle.so` (Google's original closed-source build); HeliBoard
+// renames it locally to `libjni_latinime.so` on install. We construct the raw
+// URL per device ABI so the user gets the exact right file in one tap.
 private const val LIB_BASE_URL =
     "https://github.com/erkserkserks/openboard/raw/46fdf2b550035ca69299ce312fa158e7ade36967/app/src/main/jniLibs/"
 
 private fun downloadUrlForAbi(abi: String): String =
-    "${LIB_BASE_URL}${abi}/libjni_latinime.so"
+    "${LIB_BASE_URL}${abi}/libjni_latinimegoogle.so"
 
 @Composable
 fun GestureLibraryScreen(onBack: () -> Unit) {

@@ -18,7 +18,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 must run on release for two reasons:
+            //   1. Without tree-shaking, dex-merger OOMs trying to consume HeliBoard's
+            //      ~30k vendored classes plus Voxa's own code in a single dex.
+            //   2. Smaller APK for sideload.
+            isMinifyEnabled = true
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
