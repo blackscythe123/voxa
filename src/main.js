@@ -197,7 +197,7 @@ function rebuildTrayMenu() {
     {
       label: "Launch on system startup",
       type: "checkbox",
-      checked: app.getLoginItemSettings().openAtLogin,
+      checked: app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin,
       click: (item) => setAutoLaunch(item.checked)
     },
     { type: "separator" },
@@ -457,7 +457,7 @@ ipcMain.handle("open-mic-settings", () => {
   return true;
 });
 
-ipcMain.handle("get-auto-launch", () => app.getLoginItemSettings().openAtLogin);
+ipcMain.handle("get-auto-launch", () => app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin);
 ipcMain.handle("set-auto-launch", (_e, enabled) => { setAutoLaunch(!!enabled); return true; });
 
 // ── OS-level permission bootstrap ──────────────────────────────────────────

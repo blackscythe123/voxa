@@ -52,17 +52,10 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "assets/icon.ico",
       "executableName": "Voxa",
-      "artifactName": "Voxa-${version}-${arch}.${ext}",
       "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
@@ -77,7 +70,8 @@
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "installerHeaderIcon": "assets/icon.ico",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Voxa-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
