@@ -6,11 +6,75 @@
     <title>Voxa</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Lora:ital,wght@0,400..600;1,400..600&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles/tokens.css" />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles/hub.css" />
+    <link rel="stylesheet" href="./styles/history.css" />
+    <link rel="stylesheet" href="./styles/views.css" />
   </head>
   <body>
     <div class="drag-region" aria-hidden="true"></div>
-    <main class="app-container">
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         The Hub shell — sidebar | active view | (optional history drawer)
+         The router (renderer.js) clones the matching <template> into #view,
+         toggles .nav-item.active, and slides #drawer in for history detail.
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="app-shell">
+        <!-- ── Sidebar (persistent across all views) ───────────────────── -->
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <button class="nav-item active" data-view="home" type="button">
+              <!-- house -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </button>
+            <button class="nav-item" data-view="history" type="button">
+              <!-- clock-counter-clockwise -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </button>
+            <button class="nav-item" data-view="microphone" type="button">
+              <!-- microphone -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </button>
+            <button class="nav-item" data-view="shortcuts" type="button">
+              <!-- keyboard -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </button>
+            <button class="nav-item" data-view="settings" type="button">
+              <!-- gear -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </button>
+          </nav>
+          <div class="sidebar-foot">
+            <!-- ChatGPT auth pip — router sets .dot-on / .dot-off / .dot-pending + label -->
+            <div class="sidebar-status" id="authPip"><span class="dot dot-pending"></span>Checking…</div>
+          </div>
+        </aside>
+
+        <!-- ── Active view mounts here ──────────────────────────────────── -->
+        <section id="view" class="content"></section>
+
+        <!-- ── History detail drawer slides in here ─────────────────────── -->
+        <aside class="drawer" id="drawer" hidden></aside>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         VIEW TEMPLATES — the router clones one of these into #view.
+         Static structure only; dynamic text/values left empty to be filled.
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ── HOME ─────────────────────────────────────────────────────────── -->
+    <template id="tpl-home">
       <section class="hero">
         <h1>V<em>oxa</em></h1>
         <p class="tagline">your voice, written down</p>
@@ -18,47 +82,47 @@
         <div class="pen-rule" aria-hidden="true"></div>
       </section>
 
-      <section class="note">
-        <h2><span class="quill">✎</span>Right now</h2>
-        <p class="note-aside">a margin note from the app, refreshed as things happen.</p>
-
-        <div class="status-block">
-          <p id="status">Ready</p>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="num" id="statTodayCount">—</div>
+          <div class="lbl">dictations today</div>
         </div>
-        <p id="detail"></p>
-        <button id="micSettingsBtn" class="secondary-btn" style="display:none; margin-top:14px;">Open Windows mic settings, let's give it permission.</button>
-      </section>
-
-      <section class="note">
-        <h2><span class="quill">✎</span>Sign in once</h2>
-        <p class="note-aside">we hand the cookies over to ChatGPT, and they last weeks. you'll rarely do this twice.</p>
-
-        <div id="authBadge" class="auth-badge auth-unknown">Checking the cabinet…</div>
-        <button id="loginButton" class="primary-btn">Sign in to ChatGPT</button>
-        <button id="settingsButton" class="secondary-btn">Open preferences</button>
-      </section>
-
-      <section class="note">
-        <h2><span class="quill">✎</span>The microphone</h2>
-        <p class="note-aside">pick whichever input Windows knows about. we'll listen through that one.</p>
-
-        <label for="micSelect">Input device</label>
-        <select id="micSelect">
-          <option value="default">Loading the device list…</option>
-        </select>
-        <button id="testMicBtn" class="secondary-btn">Test it. speak softly, the bar should move.</button>
-        <div id="micLevelWrap" style="display:none; margin-top:14px;">
-          <div>
-            <div id="micLevelBar" style="width:0%;"></div>
-          </div>
-          <p id="micLevelText">Listening… say something to confirm.</p>
+        <div class="stat-card">
+          <div class="num" id="statTodayWords">—</div>
+          <div class="lbl">words today</div>
         </div>
-      </section>
+        <div class="stat-card">
+          <div class="num" id="statWeekWords">—</div>
+          <div class="lbl">words this week</div>
+        </div>
+      </div>
 
-      <section class="note">
-        <h2><span class="quill">✎</span>The way it flows</h2>
-        <p class="note-aside">a small recipe in five steps, set in roman numerals like an old book.</p>
+      <div class="card">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9l6-3"/></svg>
+          Right now
+        </h3>
+        <p class="hint">a margin note from the app, refreshed as things happen.</p>
+        <div class="live-panel">
+          <div class="live-status"><span class="dot dot-pending"></span><span id="status">Ready</span></div>
+        </div>
+        <p class="live-detail" id="detail" style="margin-top: 6px;"></p>
+        <div class="auth-badge" id="authBadge">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17.5 19.5 7"/></svg>
+          <span>Checking the cabinet…</span>
+        </div>
+        <button id="loginButton" class="terra-link" type="button" style="display:none;">
+          Sign in to ChatGPT
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
 
+      <div class="card">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h10M4 19h7"/></svg>
+          The way it flows
+        </h3>
+        <p class="hint">a small recipe in five steps, set in roman numerals like an old book.</p>
         <ol class="flow">
           <li>
             Sign in once, up top.
@@ -77,16 +141,377 @@
             <em>no need to talk into the mic like a 1950s detective. just say what's on your mind.</em>
           </li>
           <li>
-            Press <kbd id="stopKbd">Escape</kbd> or tap the strip.
-            <em>your words appear right where the cursor was, freshly transcribed and copied to the clipboard.</em>
+            Press <kbd id="stopKbd">Esc</kbd> or tap the strip.
+            <em>your words appear right where the cursor was, freshly transcribed and copied.</em>
           </li>
         </ol>
-      </section>
+      </div>
 
-      <footer>
-        <p>made for the days you'd rather speak than type.</p>
-      </footer>
-    </main>
+      <a class="terra-link" id="openHistoryLink">
+        Open history
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+      </a>
+    </template>
+
+    <!-- ── HISTORY ──────────────────────────────────────────────────────── -->
+    <template id="tpl-history">
+      <div class="content-head">
+        <h2>History</h2>
+        <p class="sub">everything you've said, kept close to hand</p>
+      </div>
+
+      <div class="search-bar">
+        <!-- magnifying-glass -->
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+        <input id="historySearch" type="text" placeholder="search transcripts, apps, dates…" />
+      </div>
+
+      <!-- failed banner — router fills #lastFailedRows and toggles the section -->
+      <div class="failed-banner" id="lastFailedSection" hidden>
+        <div class="banner-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+          <h3>Last failed dictations</h3>
+          <span class="count" id="lastFailedCount"></span>
+        </div>
+        <div id="lastFailedRows"></div>
+      </div>
+
+      <!-- chronological list — router fills with cloned tpl-history-group blocks -->
+      <div id="historyGroups"></div>
+
+      <!-- empty state — shown when nothing has been dictated yet / no matches -->
+      <div class="group-head" id="historyEmpty" hidden>nothing here yet — press F9 anywhere and say something.</div>
+    </template>
+
+    <!-- ── MICROPHONE ───────────────────────────────────────────────────── -->
+    <template id="tpl-microphone">
+      <div class="content-head">
+        <h2>Microphone</h2>
+        <p class="sub">pick whichever input Windows knows about</p>
+      </div>
+
+      <div class="card">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+          Input device
+        </h3>
+        <p class="hint">we'll listen through this one. unplug it and we'll quietly fall back to the system default.</p>
+        <label class="field-label" for="micSelect">device</label>
+        <select class="mic-select" id="micSelect">
+          <option value="default">Loading the device list…</option>
+        </select>
+
+        <div class="level-wrap" id="micLevelWrap" hidden>
+          <label class="field-label">live level</label>
+          <div class="level-track"><div class="level-bar" id="micLevelBar" style="width:0%;"></div></div>
+          <p class="level-text" id="micLevelText">speak softly, the bar should move</p>
+        </div>
+
+        <button class="test-btn" id="testMicBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2.5-7 4 16 2.5-9H21"/></svg>
+          Test it
+        </button>
+      </div>
+
+      <div class="trouble">
+        <h4>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+          Microphone captured silence
+        </h4>
+        <p>
+          we heard nothing on the last take — the track came back empty. usually that's a muted input,
+          the wrong device selected above, or Windows hasn't granted microphone permission to Voxa yet.
+        </p>
+        <a class="privacy-link" id="micSettingsBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/></svg>
+          Open Windows privacy &rsaquo; Microphone settings
+        </a>
+      </div>
+    </template>
+
+    <!-- ── SHORTCUTS ────────────────────────────────────────────────────── -->
+    <template id="tpl-shortcuts">
+      <div class="content-head">
+        <h2>Shortcuts</h2>
+        <p class="sub">click a field and press whatever combo you'd like — even a single key</p>
+      </div>
+
+      <div class="shortcuts-grid">
+        <div>
+          <div class="hotkey-block">
+            <label class="field-label">start / toggle recording</label>
+            <div class="hotkey-input" id="startHotkeyInput" tabindex="0" role="button">
+              <kbd>F9</kbd>
+              <button class="clear-btn" data-target="start" title="Clear" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              </button>
+            </div>
+            <div class="quick-picks">
+              <button class="chip quick-pick suggested" data-key="F9" data-target="start" type="button">F9</button>
+              <button class="chip quick-pick" data-key="F10" data-target="start" type="button">F10</button>
+              <button class="chip quick-pick" data-key="F11" data-target="start" type="button">F11</button>
+              <button class="chip quick-pick" data-key="Ctrl+Space" data-target="start" type="button">Ctrl+Space</button>
+              <button class="chip quick-pick" data-key="Alt+Shift+V" data-target="start" type="button">Alt+Shift+V</button>
+            </div>
+          </div>
+
+          <div class="hotkey-block">
+            <label class="field-label">stop recording</label>
+            <div class="hotkey-input" id="stopHotkeyInput" tabindex="0" role="button">
+              <kbd>Esc</kbd>
+              <button class="clear-btn" data-target="stop" title="Clear" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              </button>
+            </div>
+            <div class="quick-picks">
+              <button class="chip quick-pick suggested" data-key="Esc" data-target="stop" type="button">Esc</button>
+              <button class="chip quick-pick" data-key="F10" data-target="stop" type="button">F10</button>
+              <button class="chip quick-pick" data-key="Ctrl+Shift+S" data-target="stop" type="button">Ctrl+Shift+S</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <h4>what each key does</h4>
+          <div class="legend-item">
+            <div class="lkey"><kbd>F9</kbd></div>
+            <div class="ldesc">pins the recording strip and starts listening, anywhere on the system.</div>
+          </div>
+          <div class="legend-item">
+            <div class="lkey"><kbd>Esc</kbd></div>
+            <div class="ldesc">stops, transcribes, and drops the words at your cursor.</div>
+          </div>
+          <div class="legend-item">
+            <div class="lkey"><kbd>F9</kbd></div>
+            <div class="ldesc">pressing start again while recording also stops it — same key can do both.</div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ── SETTINGS ─────────────────────────────────────────────────────── -->
+    <template id="tpl-settings">
+      <div class="content-head">
+        <h2>Settings</h2>
+        <p class="sub">a few things you can tune to taste</p>
+      </div>
+
+      <div class="settings-anchors">
+        <span class="anchor-chip" data-anchor="startup">Startup</span>
+        <span class="anchor-chip" data-anchor="recording">Recording strip</span>
+        <span class="anchor-chip" data-anchor="history">History &amp; retention</span>
+        <span class="anchor-chip" data-anchor="account">Account</span>
+        <span class="anchor-chip" data-anchor="about">About</span>
+      </div>
+
+      <!-- Startup -->
+      <div class="card settings-section" data-section="startup">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9"/><path d="M7.5 6.5a7 7 0 1 0 9 0"/></svg>
+          Startup
+        </h3>
+        <p class="hint">when enabled, Voxa wakes up quietly with your system and waits in the tray.</p>
+        <label class="toggle-row" for="autoLaunch">
+          <span class="switch" id="autoLaunch" role="switch" aria-checked="false" tabindex="0"></span>
+          <span>launch on Windows boot</span>
+        </label>
+      </div>
+
+      <!-- Recording strip -->
+      <div class="card settings-section" data-section="recording">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h6V4"/></svg>
+          Recording strip
+        </h3>
+        <p class="hint">where the little paper strip pins itself, and how long it'll wait before tucking away.</p>
+        <div class="two-col">
+          <div>
+            <label class="field-label" for="overlayPosition">overlay position</label>
+            <select class="styled" id="overlayPosition">
+              <option value="top-left">top-left</option>
+              <option value="top-right">top-right</option>
+              <option value="bottom-left">bottom-left</option>
+              <option value="bottom-right">bottom-right</option>
+            </select>
+          </div>
+          <div>
+            <div class="slider-row" style="margin-top: 0">
+              <div class="srhead">
+                <label class="field-label" for="maxRecordingSeconds" style="margin: 0">max recording seconds</label>
+                <span class="srval" id="maxRecordingSecondsVal">60s</span>
+              </div>
+              <input type="range" id="maxRecordingSeconds" min="1" max="11" step="1" value="5" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- History & Retention -->
+      <div class="card settings-section" data-section="history">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+          History &amp; retention
+        </h3>
+        <p class="hint">how long the saved audio lingers, and whether history clears itself when you're done.</p>
+        <div class="slider-row">
+          <div class="srhead">
+            <label class="field-label" for="successAudioRetention" style="margin: 0">successful audio retention</label>
+            <span class="srval" id="successAudioRetentionVal">24h</span>
+          </div>
+          <input type="range" id="successAudioRetention" min="1" max="168" value="24" />
+        </div>
+        <div class="slider-row">
+          <div class="srhead">
+            <label class="field-label" for="failedAudioRetention" style="margin: 0">failed audio retention</label>
+            <span class="srval" id="failedAudioRetentionVal">7d</span>
+          </div>
+          <input type="range" id="failedAudioRetention" min="1" max="30" value="7" />
+        </div>
+        <label class="toggle-row" for="privacyMode">
+          <span class="switch" id="privacyMode" role="switch" aria-checked="false" tabindex="0"></span>
+          <span>privacy mode <span class="tdesc">— auto-delete history at quit</span></span>
+        </label>
+        <label class="toggle-row" for="historyMaxEntries">
+          <span class="switch" id="historyMaxEntries" role="switch" aria-checked="false" tabindex="0"></span>
+          <span>history row cap <span class="tdesc">— off, keep everything</span></span>
+        </label>
+      </div>
+
+      <!-- Account -->
+      <div class="card settings-section" data-section="account">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+          Account
+        </h3>
+        <p class="hint">the ChatGPT session that does the transcribing. cookies last weeks.</p>
+        <div class="session-line" id="accountSession">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17.5 19.5 7"/></svg>
+          <span>Checking the cabinet…</span>
+        </div>
+        <div class="btn-row">
+          <button class="ghost-btn" id="reauthBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+            Re-authenticate
+          </button>
+          <button class="ghost-btn danger" id="signOutBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 12H3"/><path d="M6 8l-4 4 4 4"/></svg>
+            Sign out
+          </button>
+        </div>
+      </div>
+
+      <!-- About -->
+      <div class="card settings-section" data-section="about">
+        <h3>
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/></svg>
+          About
+        </h3>
+        <div class="about-line">Voxa <span class="ver" id="appVersion">—</span></div>
+        <div class="about-line">
+          <a id="openLogsBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3l2 2.5h9a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+            Open logs folder
+          </a>
+        </div>
+        <div class="about-line">
+          <a id="openDataBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3l2 2.5h9a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+            Open data folder
+          </a>
+        </div>
+      </div>
+    </template>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         ROW / GROUP / DETAIL TEMPLATES — cloned per item by the router.
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <!-- one time-group: header + its rows container -->
+    <template id="tpl-history-group">
+      <div class="history-group">
+        <h3 class="group-header group-head"></h3>
+        <div class="group-rows"></div>
+      </div>
+    </template>
+
+    <!-- one history row — root carries data-id; status dot class set by router -->
+    <template id="tpl-history-row">
+      <div class="history-row hist-row" data-id="">
+        <span class="dot row-dot"></span>
+        <div class="rtext">
+          <div class="preview row-transcript"></div>
+          <div class="meta row-meta"></div>
+        </div>
+        <button class="row-menu row-menu-btn" type="button" title="More">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+        </button>
+      </div>
+    </template>
+
+    <!-- one failed row with inline retry -->
+    <template id="tpl-failed-row">
+      <div class="failed-row" data-id="">
+        <span class="dot dot-off row-dot"></span>
+        <div class="ftext">
+          <div class="preview row-transcript"></div>
+          <div class="meta row-meta"></div>
+        </div>
+        <button class="retry-btn failed-retry-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+          Retry
+        </button>
+      </div>
+    </template>
+
+    <!-- history detail drawer body — cloned into #drawer -->
+    <template id="tpl-drawer-detail">
+      <div class="drawer-head">
+        <button class="drawer-icon-btn" id="drawerBack" type="button" title="Back">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg>
+        </button>
+        <button class="drawer-icon-btn" id="drawerClose" type="button" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+        <span class="status-badge" id="drawerBadge"><span class="dot"></span></span>
+      </div>
+      <div class="drawer-body">
+        <p class="transcript" id="drawerTranscript"></p>
+
+        <div class="audio-block">
+          <label>recorded audio</label>
+          <audio controls id="drawerAudio"></audio>
+        </div>
+
+        <div class="meta-grid" id="drawerMeta"></div>
+
+        <div class="error-box" id="drawerError" hidden>
+          <div class="etitle">what went wrong</div>
+          <div class="emsg"></div>
+        </div>
+      </div>
+      <div class="drawer-actions">
+        <button class="action-btn" id="drawerCopy" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          Copy
+        </button>
+        <button class="action-btn" id="drawerReinsert" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10 4 15l5 5"/><path d="M4 15h11a5 5 0 0 0 5-5V5"/></svg>
+          Re-insert
+        </button>
+        <button class="action-btn primary" id="drawerRetry" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+          Retry
+        </button>
+        <button class="action-btn" id="drawerReveal" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3l2 2.5h9a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+          Reveal audio
+        </button>
+        <button class="action-btn danger" id="drawerDelete" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M9 6V4h6v2"/><path d="M6 6l1 14h10l1-14"/></svg>
+          Delete
+        </button>
+      </div>
+    </template>
 
     <script src="./renderer.js"></script>
   </body>

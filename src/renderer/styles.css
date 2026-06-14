@@ -338,17 +338,15 @@ body::after {
   border: none;
   background: transparent;
 }
-.auth-badge::before {
-  content: "✎";
-  color: var(--ink-3);
-  font-style: normal;
-}
-
-.auth-ok::before { content: "✓"; color: var(--sage); }
+/* The Hub auth badge carries its own inline VoxaIcon SVG, so the old
+   glyph pseudo-elements (✎ ✓ ✕ …) are suppressed — they'd double up with
+   the SVG and violate the no-emoji rule. Text-colour states are kept. */
+.auth-badge::before { content: none; }
+.auth-ok::before { content: none; }
 .auth-ok      { color: var(--sage); }
-.auth-none::before { content: "✕"; color: var(--signal-off); }
+.auth-none::before { content: none; }
 .auth-none    { color: var(--signal-off); }
-.auth-unknown::before { content: "…"; color: var(--ink-3); }
+.auth-unknown::before { content: none; }
 
 /* ════════════════════════════════════════════════════════════════════════
    Buttons — pen-on-paper feel

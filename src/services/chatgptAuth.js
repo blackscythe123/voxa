@@ -29,6 +29,16 @@ function hasCookies() {
   return fs.existsSync(getCookiesPath());
 }
 
+function logout() {
+  // Drop the saved session so the next dictation forces a fresh login.
+  try {
+    if (fs.existsSync(getCookiesPath())) fs.unlinkSync(getCookiesPath());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function loadCookies() {
   try {
     return JSON.parse(fs.readFileSync(getCookiesPath(), "utf8"));
@@ -242,6 +252,7 @@ async function validateSession() {
 
 module.exports = {
   hasCookies,
+  logout,
   validateSession,
   loginWithBrowserWindow,
   refreshAccessToken,

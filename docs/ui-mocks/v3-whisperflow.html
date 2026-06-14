@@ -1,0 +1,2280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voxa — Hub (v3 WhisperFlow mockup)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Lora:ital,wght@0,400..600;1,400..600&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ════════════════════════════════════════════════════════════════════
+         Voxa Hub — v3 "WhisperFlow"
+         A Wispr-Flow-style five-section sidebar Hub keeping Voxa's
+         "writer's desk by a sunlit window" parchment aesthetic.
+         This is a stacked design-review artifact: every view is laid out
+         vertically, separated by // LABEL dividers.
+         ════════════════════════════════════════════════════════════════════ */
+
+      :root {
+        --paper: #faf6f0;
+        --paper-warm: #f3eadb;
+        --vellum: #fffbf4;
+        --rule: #e8dcc7;
+        --rule-soft: #efe5d2;
+        --ink: #2d2418;
+        --ink-2: #6b5c40;
+        --ink-3: #a89880;
+        --ink-faint: #c9b994;
+        --terra: #c4632a;
+        --terra-warm: #d97c3f;
+        --terra-deep: #a14c1d;
+        --sage: #5a7d5a;
+        --sage-warm: #7a9a7a;
+        --signal-on: #5a7d5a;
+        --signal-off: #b34a3f;
+        --signal-warn: #c89c3f;
+        --signal-pending: #c4632a;
+        --ease: cubic-bezier(0.32, 0, 0.32, 1);
+        --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+        --sidebar-w: 240px;
+        --drawer-w: 380px;
+        --row-h: 72px;
+        --section-gap: 32px;
+        --shadow-card: 0 1px 0 var(--rule), 0 12px 28px -18px rgba(45, 36, 24, 0.18);
+        --shadow-drawer: -20px 0 60px -30px rgba(45, 36, 24, 0.28);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        background: var(--paper);
+        color: var(--ink);
+        font-family: "Lora", Georgia, serif;
+        font-size: 15px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        min-height: 100%;
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      /* ── The lamplit warmth (a soft radial off the top-left, like a window) ─ */
+      body {
+        background:
+          radial-gradient(ellipse 900px 700px at 18% 4%, rgba(255, 244, 220, 0.7) 0%, rgba(255, 244, 220, 0) 55%),
+          radial-gradient(ellipse 800px 600px at 82% 96%, rgba(196, 99, 42, 0.04) 0%, transparent 60%),
+          var(--paper);
+        background-attachment: fixed;
+        padding-bottom: 80px;
+      }
+
+      /* ── Subtle paper grain (ported verbatim from src/renderer/styles.css) ── */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 1;
+        opacity: 0.55;
+        mix-blend-mode: multiply;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.14 0 0 0 0 0.09 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      }
+
+      ::selection {
+        background: rgba(196, 99, 42, 0.22);
+        color: var(--ink);
+      }
+
+      ::-webkit-scrollbar {
+        width: 11px;
+        height: 11px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(45, 36, 24, 0.12);
+        border-radius: 999px;
+        border: 3px solid transparent;
+        background-clip: padding-box;
+        transition: background 0.2s var(--ease);
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(196, 99, 42, 0.45);
+        background-clip: padding-box;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--terra);
+        outline-offset: 3px;
+        border-radius: 10px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      svg {
+        display: block;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         Dev review dividers — between stacked views
+         ════════════════════════════════════════════════════════════════════ */
+      .dev-divider {
+        position: relative;
+        z-index: 10;
+        max-width: 1180px;
+        margin: 56px auto 24px;
+        padding: 0 24px;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .dev-divider::after {
+        content: "";
+        flex: 1;
+        height: 0;
+        border-top: 1.5px dotted var(--ink-faint);
+      }
+      .dev-divider:first-of-type {
+        margin-top: 28px;
+      }
+      .dev-intro {
+        max-width: 1180px;
+        margin: 36px auto 0;
+        padding: 0 24px;
+        position: relative;
+        z-index: 10;
+      }
+      .dev-intro h1 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 30px;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+        font-variation-settings: "opsz" 72, "SOFT" 50;
+      }
+      .dev-intro h1 em {
+        color: var(--terra);
+      }
+      .dev-intro p {
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 14px;
+        color: var(--ink-2);
+        margin-top: 6px;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         The Hub shell — sidebar | content | (optional drawer)
+         ════════════════════════════════════════════════════════════════════ */
+      .hub {
+        position: relative;
+        z-index: 10;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+      .hub-frame {
+        display: flex;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: 20px;
+        overflow: hidden;
+        box-shadow: var(--shadow-card);
+        min-height: 720px;
+      }
+
+      /* ── Sidebar ──────────────────────────────────────────────────────── */
+      .sidebar {
+        width: var(--sidebar-w);
+        flex-shrink: 0;
+        background: linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 100%);
+        border-right: 1px solid var(--rule);
+        padding: 26px 16px 20px;
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        display: flex;
+        align-items: baseline;
+        gap: 0;
+        padding: 4px 10px 22px;
+      }
+      .sidebar-brand .mark {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 28px;
+        letter-spacing: -0.04em;
+        color: var(--ink);
+        font-variation-settings: "opsz" 72, "SOFT" 50;
+      }
+      .sidebar-brand .mark em {
+        color: var(--terra);
+        font-style: italic;
+      }
+      .nav {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 12px;
+        border-radius: 11px;
+        color: var(--ink-2);
+        cursor: pointer;
+        position: relative;
+        transition: background 0.2s var(--ease), color 0.2s var(--ease);
+      }
+      .nav-item .label {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .nav-item svg {
+        width: 19px;
+        height: 19px;
+        flex-shrink: 0;
+        stroke: currentColor;
+      }
+      .nav-item:hover {
+        background: rgba(196, 99, 42, 0.06);
+        color: var(--ink);
+      }
+      .nav-item.active {
+        background: var(--vellum);
+        color: var(--terra);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 4px 14px -8px rgba(45, 36, 24, 0.18);
+      }
+      .nav-item.active::before {
+        content: "";
+        position: absolute;
+        left: -16px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 3px;
+        height: 22px;
+        border-radius: 999px;
+        background: var(--terra);
+      }
+      .sidebar-foot {
+        margin-top: auto;
+        padding: 14px 12px 4px;
+        border-top: 1px dashed var(--rule);
+      }
+      .sidebar-status {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .dot-pending {
+        background: var(--signal-pending);
+        box-shadow: 0 0 0 3px rgba(196, 99, 42, 0.14);
+      }
+      .dot-on {
+        background: var(--signal-on);
+      }
+      .dot-off {
+        background: var(--signal-off);
+      }
+      .dot-warn {
+        background: var(--signal-warn);
+      }
+      .dot-empty {
+        background: var(--ink-3);
+      }
+
+      /* ── Content column ───────────────────────────────────────────────── */
+      .content {
+        flex: 1;
+        min-width: 0;
+        padding: 38px 44px 44px;
+        overflow: hidden;
+      }
+      .content-head {
+        margin-bottom: 28px;
+      }
+      .content-head h2 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 30px;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+        font-variation-settings: "opsz" 72, "SOFT" 50;
+      }
+      .content-head .sub {
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 14px;
+        color: var(--ink-3);
+        margin-top: 2px;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         HOME
+         ════════════════════════════════════════════════════════════════════ */
+      .hero {
+        text-align: center;
+        padding: 18px 0 8px;
+      }
+      .hero .pen-rule {
+        position: relative;
+        height: 16px;
+        margin: 4px 0 22px;
+      }
+      .hero .pen-rule::before {
+        content: "";
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 180px;
+        height: 1.4px;
+        background: linear-gradient(90deg, transparent 0%, var(--terra) 18%, var(--terra) 82%, transparent 100%);
+        border-radius: 999px;
+      }
+      .hero .pen-rule::after {
+        content: "";
+        position: absolute;
+        top: 4px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--terra);
+        opacity: 0.85;
+      }
+      .hero h1 {
+        font-family: "Fraunces", Georgia, serif;
+        font-size: 72px;
+        font-weight: 500;
+        font-style: italic;
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+        color: var(--ink);
+        margin-bottom: 12px;
+        font-variation-settings: "opsz" 144, "SOFT" 50;
+      }
+      .hero h1 em {
+        font-style: italic;
+        color: var(--terra);
+      }
+      .hero .tagline {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 20px;
+        color: var(--ink-2);
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+        margin-bottom: 4px;
+      }
+      .hero .aside {
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 14px;
+        color: var(--ink-3);
+      }
+
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin: 30px 0 22px;
+      }
+      .stat-card {
+        background: var(--vellum);
+        border: 1px solid var(--rule);
+        border-radius: 16px;
+        padding: 20px 22px 18px;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 22px -16px rgba(45, 36, 24, 0.16);
+      }
+      .stat-card .num {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 400;
+        font-size: 46px;
+        line-height: 1;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+        font-variation-settings: "opsz" 144, "SOFT" 80;
+      }
+      .stat-card .num em {
+        color: var(--terra);
+        font-style: italic;
+      }
+      .stat-card .lbl {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-top: 10px;
+      }
+
+      .card {
+        background: var(--vellum);
+        border: 1px solid var(--rule);
+        border-radius: 16px;
+        padding: 22px 24px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 22px -16px rgba(45, 36, 24, 0.14);
+      }
+      .card h3 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 19px;
+        color: var(--ink);
+        margin-bottom: 4px;
+        font-variation-settings: "opsz" 36, "SOFT" 50;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .card h3 svg {
+        width: 18px;
+        height: 18px;
+        stroke: var(--terra);
+      }
+      .card .hint {
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 13px;
+        color: var(--ink-3);
+        margin-bottom: 14px;
+      }
+
+      .live-panel {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+      .live-status {
+        font-family: "Fraunces", Georgia, serif;
+        font-size: 30px;
+        font-weight: 400;
+        font-style: italic;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .live-detail {
+        font-family: "Lora", serif;
+        font-size: 14px;
+        font-style: italic;
+        color: var(--ink-2);
+      }
+
+      .auth-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: "Lora", serif;
+        font-size: 13.5px;
+        font-style: italic;
+        color: var(--sage);
+        margin-top: 14px;
+      }
+      .auth-badge svg {
+        width: 15px;
+        height: 15px;
+        stroke: var(--sage);
+      }
+
+      .flow {
+        list-style: none;
+        counter-reset: step;
+      }
+      .flow li {
+        counter-increment: step;
+        position: relative;
+        padding: 13px 4px 13px 56px;
+        font-family: "Lora", serif;
+        font-size: 14.5px;
+        color: var(--ink);
+        line-height: 1.6;
+        border-bottom: 1px dashed var(--rule);
+      }
+      .flow li:last-child {
+        border-bottom: none;
+      }
+      .flow li::before {
+        content: counter(step, lower-roman) ".";
+        position: absolute;
+        left: 8px;
+        top: 13px;
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 17px;
+        font-weight: 500;
+        color: var(--terra);
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+        width: 36px;
+        text-align: right;
+      }
+      .flow li em {
+        font-style: italic;
+        color: var(--ink-2);
+        font-size: 13px;
+        display: block;
+        margin-top: 2px;
+        line-height: 1.5;
+      }
+      .flow li em::before {
+        content: "·";
+        margin-right: 8px;
+        color: var(--terra);
+        font-style: normal;
+        font-weight: 600;
+      }
+
+      kbd {
+        display: inline-block;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+        font-weight: 500;
+        font-style: normal;
+        padding: 2px 8px;
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        color: var(--terra);
+        margin: 0 3px;
+        vertical-align: 1px;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+      }
+
+      .terra-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 16px;
+        color: var(--terra);
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+        margin-top: 6px;
+        cursor: pointer;
+        transition: color 0.2s var(--ease), gap 0.2s var(--ease);
+      }
+      .terra-link svg {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+      }
+      .terra-link:hover {
+        color: var(--terra-deep);
+        gap: 10px;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         HISTORY
+         ════════════════════════════════════════════════════════════════════ */
+      .search-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-bottom: 1px solid var(--ink-3);
+        border-radius: 12px 12px 5px 5px;
+        padding: 12px 16px;
+        margin-bottom: 24px;
+        transition: all 0.25s var(--ease);
+      }
+      .search-bar:focus-within {
+        background: var(--vellum);
+        border-bottom-color: var(--terra);
+        border-bottom-width: 2px;
+      }
+      .search-bar svg {
+        width: 18px;
+        height: 18px;
+        stroke: var(--ink-3);
+        flex-shrink: 0;
+      }
+      .search-bar input {
+        flex: 1;
+        border: none;
+        background: transparent;
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 15px;
+        color: var(--ink);
+        outline: none;
+      }
+      .search-bar input::placeholder {
+        color: var(--ink-faint);
+      }
+
+      /* ── Failed banner — soft paper-warm wash, dotted top rule ───────── */
+      .failed-banner {
+        background:
+          linear-gradient(180deg, rgba(196, 99, 42, 0.05) 0%, rgba(243, 234, 219, 0.55) 100%);
+        border: 1px solid var(--rule-soft);
+        border-top: 1.5px dotted var(--terra);
+        border-radius: 4px 4px 16px 16px;
+        padding: 18px 22px 14px;
+        margin-bottom: 30px;
+      }
+      .failed-banner .banner-head {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 12px;
+      }
+      .failed-banner .banner-head svg {
+        width: 17px;
+        height: 17px;
+        stroke: var(--signal-off);
+      }
+      .failed-banner .banner-head h3 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 17px;
+        color: var(--ink);
+        font-variation-settings: "opsz" 36, "SOFT" 50;
+      }
+      .failed-banner .banner-head .count {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+        color: var(--signal-off);
+        margin-left: auto;
+        text-transform: uppercase;
+      }
+      .failed-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 11px 8px;
+        border-bottom: 1px dashed var(--rule);
+      }
+      .failed-row:last-child {
+        border-bottom: none;
+      }
+      .failed-row .ftext {
+        flex: 1;
+        min-width: 0;
+      }
+      .failed-row .ftext .preview {
+        font-family: "Lora", serif;
+        font-size: 14px;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .failed-row .ftext .meta {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        color: var(--ink-3);
+        letter-spacing: 0.02em;
+        margin-top: 3px;
+      }
+      .retry-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid var(--terra);
+        color: var(--terra);
+        border-radius: 999px;
+        padding: 6px 14px;
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        font-variation-settings: "opsz" 24, "SOFT" 100;
+        transition: all 0.25s var(--ease);
+      }
+      .retry-btn svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+      }
+      .retry-btn:hover {
+        background: var(--terra);
+        color: var(--vellum);
+        border-color: var(--terra-deep);
+      }
+
+      /* ── Time-grouped chronological list ─────────────────────────────── */
+      .group-head {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 400;
+        font-size: 22px;
+        color: var(--ink-2);
+        letter-spacing: -0.01em;
+        text-transform: lowercase;
+        margin: 26px 0 6px;
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+      }
+      .group-head:first-of-type {
+        margin-top: 4px;
+      }
+      .hist-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: var(--row-h);
+        padding: 13px 12px;
+        border-bottom: 1px solid var(--rule-soft);
+        border-left: 3px solid transparent;
+        cursor: pointer;
+        transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+      }
+      .hist-row:hover {
+        background: rgba(196, 99, 42, 0.05);
+      }
+      .hist-row.selected {
+        background: var(--paper-warm);
+        border-left-color: var(--terra);
+      }
+      .hist-row .dot {
+        margin-top: 0;
+      }
+      .hist-row .rtext {
+        flex: 1;
+        min-width: 0;
+      }
+      .hist-row .preview {
+        font-family: "Lora", serif;
+        font-size: 14.5px;
+        color: var(--ink);
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .hist-row .preview.empty {
+        font-style: italic;
+        color: var(--ink-3);
+      }
+      .hist-row .meta {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        color: var(--ink-3);
+        letter-spacing: 0.02em;
+        margin-top: 5px;
+      }
+      .row-menu {
+        flex-shrink: 0;
+        background: transparent;
+        border: none;
+        color: var(--ink-3);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 8px;
+        transition: all 0.2s var(--ease);
+      }
+      .row-menu svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+      }
+      .row-menu:hover {
+        background: rgba(196, 99, 42, 0.08);
+        color: var(--terra);
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         HISTORY DETAIL DRAWER
+         ════════════════════════════════════════════════════════════════════ */
+      .drawer-demo {
+        display: flex;
+        gap: 0;
+      }
+      .drawer-demo .content {
+        flex: 1;
+      }
+      .drawer {
+        width: var(--drawer-w);
+        flex-shrink: 0;
+        background: var(--vellum);
+        border-left: 1px solid var(--rule);
+        box-shadow: var(--shadow-drawer);
+        display: flex;
+        flex-direction: column;
+      }
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 20px 22px 16px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .drawer-icon-btn {
+        background: transparent;
+        border: 1px solid var(--rule);
+        color: var(--ink-2);
+        width: 34px;
+        height: 34px;
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s var(--ease);
+      }
+      .drawer-icon-btn svg {
+        width: 17px;
+        height: 17px;
+        stroke: currentColor;
+      }
+      .drawer-icon-btn:hover {
+        border-color: var(--terra);
+        color: var(--terra);
+        background: rgba(196, 99, 42, 0.05);
+      }
+      .status-badge {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 5px 11px;
+        border-radius: 999px;
+      }
+      .status-badge.ok {
+        color: var(--sage);
+        background: rgba(90, 125, 90, 0.1);
+      }
+      .status-badge.failed {
+        color: var(--signal-off);
+        background: rgba(179, 74, 63, 0.1);
+      }
+      .drawer-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 22px;
+      }
+      .drawer-body .transcript {
+        font-family: "Lora", serif;
+        font-size: 16px;
+        line-height: 1.7;
+        color: var(--ink);
+        user-select: text;
+        margin-bottom: 20px;
+      }
+      .audio-block {
+        margin-bottom: 20px;
+      }
+      .audio-block label {
+        display: block;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-bottom: 8px;
+      }
+      audio {
+        width: 100%;
+        height: 38px;
+        accent-color: var(--terra);
+        filter: sepia(0.28) saturate(1.5) hue-rotate(-12deg);
+      }
+      .meta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1px;
+        background: var(--rule-soft);
+        border: 1px solid var(--rule-soft);
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 20px;
+      }
+      .meta-grid .cell {
+        background: var(--vellum);
+        padding: 11px 14px;
+      }
+      .meta-grid .k {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .meta-grid .v {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 13px;
+        color: var(--ink);
+        margin-top: 3px;
+      }
+      .error-box {
+        background: var(--vellum);
+        border: 1px solid var(--rule-soft);
+        border-left: 3px solid var(--signal-off);
+        border-radius: 4px 12px 12px 4px;
+        padding: 14px 16px;
+        margin-bottom: 20px;
+      }
+      .error-box .etitle {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--signal-off);
+        margin-bottom: 6px;
+      }
+      .error-box .emsg {
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 14px;
+        color: var(--ink);
+      }
+      .drawer-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 16px 22px;
+        border-top: 1px solid var(--rule);
+        background: linear-gradient(180deg, rgba(255, 251, 244, 0) 0%, var(--vellum) 60%);
+      }
+      .action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: transparent;
+        border: 1px solid var(--rule);
+        color: var(--ink-2);
+        border-radius: 9px;
+        padding: 7px 11px;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition: all 0.2s var(--ease);
+      }
+      .action-btn svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+      }
+      .action-btn:hover {
+        border-color: var(--terra);
+        color: var(--terra);
+        background: rgba(196, 99, 42, 0.05);
+      }
+      .action-btn.danger:hover {
+        border-color: var(--signal-off);
+        color: var(--signal-off);
+        background: rgba(179, 74, 63, 0.06);
+      }
+      .action-btn.primary {
+        background: var(--terra);
+        border-color: var(--terra-deep);
+        color: var(--vellum);
+      }
+      .action-btn.primary:hover {
+        background: var(--terra-warm);
+        color: var(--vellum);
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         MICROPHONE
+         ════════════════════════════════════════════════════════════════════ */
+      .field-label {
+        display: block;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        font-style: italic;
+        color: var(--ink-3);
+        margin: 0 0 8px;
+        letter-spacing: 0.04em;
+      }
+      select.mic-select,
+      select.styled,
+      input.num {
+        width: 100%;
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-bottom: 1px solid var(--ink-3);
+        color: var(--ink);
+        border-radius: 10px 10px 4px 4px;
+        padding: 11px 14px;
+        font-size: 14px;
+        font-family: "Lora", serif;
+        transition: all 0.25s var(--ease);
+      }
+      select.mic-select,
+      select.styled {
+        appearance: none;
+        padding-right: 38px;
+        font-style: italic;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 5l4 4 4-4' stroke='%23c4632a' stroke-width='1.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        cursor: pointer;
+      }
+      select.mic-select:hover,
+      select.styled:hover,
+      input.num:hover {
+        background-color: var(--vellum);
+        border-bottom-color: var(--terra);
+      }
+      select.mic-select:focus,
+      select.styled:focus,
+      input.num:focus {
+        outline: none;
+        border-bottom: 2px solid var(--terra);
+        background-color: var(--vellum);
+      }
+
+      .level-wrap {
+        margin: 20px 0 8px;
+      }
+      .level-track {
+        height: 14px;
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .level-bar {
+        height: 100%;
+        width: 62%;
+        background: linear-gradient(90deg, var(--sage) 0%, var(--terra) 100%);
+        border-radius: 999px;
+      }
+      .level-text {
+        margin-top: 9px;
+        font-family: "Lora", serif;
+        font-size: 13px;
+        font-style: italic;
+        color: var(--ink-2);
+      }
+
+      .test-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: transparent;
+        border: 1px solid var(--rule);
+        color: var(--ink-2);
+        border-radius: 12px;
+        padding: 11px 18px;
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 14.5px;
+        font-weight: 500;
+        cursor: pointer;
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+        transition: all 0.25s var(--ease);
+        margin-top: 14px;
+      }
+      .test-btn svg {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+      }
+      .test-btn:hover {
+        border-color: var(--terra);
+        color: var(--terra);
+        background: rgba(196, 99, 42, 0.04);
+      }
+
+      .trouble {
+        background: linear-gradient(180deg, rgba(200, 156, 63, 0.06) 0%, var(--vellum) 100%);
+        border: 1px solid var(--rule-soft);
+        border-left: 3px solid var(--signal-warn);
+        border-radius: 4px 12px 12px 4px;
+        padding: 16px 18px;
+        margin-top: 18px;
+      }
+      .trouble h4 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 15px;
+        color: var(--ink);
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .trouble h4 svg {
+        width: 16px;
+        height: 16px;
+        stroke: var(--signal-warn);
+      }
+      .trouble p {
+        font-family: "Lora", serif;
+        font-size: 13.5px;
+        color: var(--ink-2);
+        margin-bottom: 8px;
+      }
+      .privacy-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        color: var(--terra);
+        cursor: pointer;
+      }
+      .privacy-link svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+      }
+      .privacy-link:hover {
+        color: var(--terra-deep);
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         SHORTCUTS
+         ════════════════════════════════════════════════════════════════════ */
+      .shortcuts-grid {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 28px;
+        align-items: start;
+      }
+      .hotkey-block {
+        margin-bottom: 22px;
+      }
+      .hotkey-input {
+        display: flex;
+        align-items: center;
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-bottom: 2px solid var(--ink-3);
+        border-radius: 12px 12px 5px 5px;
+        padding: 16px 18px;
+        font-size: 15px;
+        color: var(--ink);
+        cursor: pointer;
+        transition: all 0.25s var(--ease);
+        min-height: 56px;
+        font-family: "Lora", serif;
+      }
+      .hotkey-input:hover {
+        background: var(--vellum);
+        border-bottom-color: var(--terra);
+      }
+      .hotkey-input.recording {
+        background: var(--vellum);
+        border-bottom-color: var(--terra);
+        animation: capture-blink 1.2s ease-in-out infinite;
+      }
+      @keyframes capture-blink {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(196, 99, 42, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 4px rgba(196, 99, 42, 0.1);
+        }
+      }
+      .hotkey-input .clear-btn {
+        margin-left: auto;
+        background: transparent;
+        border: none;
+        color: var(--ink-3);
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 6px;
+        display: flex;
+        transition: all 0.2s var(--ease);
+      }
+      .hotkey-input .clear-btn svg {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+      }
+      .hotkey-input .clear-btn:hover {
+        background: rgba(179, 74, 63, 0.1);
+        color: var(--signal-off);
+      }
+      .hotkey-input kbd {
+        font-size: 14px;
+        padding: 4px 11px;
+      }
+      .quick-picks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 12px;
+      }
+      .chip {
+        background: transparent;
+        border: 1px solid var(--rule);
+        color: var(--ink-2);
+        border-radius: 999px;
+        padding: 5px 13px;
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 12.5px;
+        cursor: pointer;
+        transition: all 0.2s var(--ease);
+      }
+      .chip:hover {
+        border-color: var(--terra);
+        color: var(--terra);
+        background: rgba(196, 99, 42, 0.05);
+      }
+      .chip.suggested {
+        background: rgba(196, 99, 42, 0.08);
+        border-color: var(--terra);
+        color: var(--terra);
+      }
+      .legend {
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-radius: 16px;
+        padding: 20px 22px;
+      }
+      .legend h4 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 16px;
+        color: var(--ink);
+        margin-bottom: 14px;
+        font-variation-settings: "opsz" 36, "SOFT" 50;
+      }
+      .legend-item {
+        display: flex;
+        gap: 12px;
+        padding: 9px 0;
+        border-bottom: 1px dashed var(--rule);
+      }
+      .legend-item:last-child {
+        border-bottom: none;
+      }
+      .legend-item .lkey {
+        flex-shrink: 0;
+        width: 56px;
+      }
+      .legend-item .ldesc {
+        font-family: "Lora", serif;
+        font-size: 13px;
+        color: var(--ink-2);
+        line-height: 1.45;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+         SETTINGS
+         ════════════════════════════════════════════════════════════════════ */
+      .settings-anchors {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 22px;
+      }
+      .anchor-chip {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+        border: 1px solid var(--rule);
+        border-radius: 999px;
+        padding: 6px 13px;
+        cursor: pointer;
+        transition: all 0.2s var(--ease);
+      }
+      .anchor-chip:hover {
+        border-color: var(--terra);
+        color: var(--terra);
+      }
+      .settings-section {
+        margin-bottom: 16px;
+      }
+      .settings-section h3 {
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 19px;
+        color: var(--ink);
+        margin-bottom: 4px;
+        font-variation-settings: "opsz" 36, "SOFT" 50;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .settings-section h3 svg {
+        width: 18px;
+        height: 18px;
+        stroke: var(--terra);
+      }
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 14.5px;
+        color: var(--ink);
+        padding: 6px 0;
+      }
+      .toggle-row .tdesc {
+        font-style: italic;
+        font-size: 12.5px;
+        color: var(--ink-3);
+      }
+      /* Pill toggle */
+      .switch {
+        position: relative;
+        width: 42px;
+        height: 24px;
+        flex-shrink: 0;
+        background: var(--paper-warm);
+        border: 1px solid var(--rule);
+        border-radius: 999px;
+        transition: all 0.25s var(--ease);
+      }
+      .switch::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--ink-3);
+        transition: all 0.25s var(--ease);
+      }
+      .switch.on {
+        background: rgba(196, 99, 42, 0.18);
+        border-color: var(--terra);
+      }
+      .switch.on::after {
+        left: 20px;
+        background: var(--terra);
+      }
+
+      .slider-row {
+        margin: 14px 0;
+      }
+      .slider-row .srhead {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 8px;
+      }
+      .slider-row .srhead .srval {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12.5px;
+        color: var(--terra);
+      }
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--terra);
+        height: 4px;
+      }
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .session-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: "Lora", serif;
+        font-style: italic;
+        font-size: 14px;
+        color: var(--ink-2);
+        margin-bottom: 14px;
+      }
+      .session-line svg {
+        width: 16px;
+        height: 16px;
+        stroke: var(--sage);
+      }
+      .btn-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .ghost-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: transparent;
+        border: 1px solid var(--rule);
+        color: var(--ink-2);
+        border-radius: 11px;
+        padding: 9px 15px;
+        font-family: "Fraunces", Georgia, serif;
+        font-style: italic;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        font-variation-settings: "opsz" 36, "SOFT" 100;
+        transition: all 0.25s var(--ease);
+      }
+      .ghost-btn svg {
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+      }
+      .ghost-btn:hover {
+        border-color: var(--terra);
+        color: var(--terra);
+        background: rgba(196, 99, 42, 0.04);
+      }
+      .ghost-btn.danger:hover {
+        border-color: var(--signal-off);
+        color: var(--signal-off);
+        background: rgba(179, 74, 63, 0.05);
+      }
+      .about-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+        color: var(--ink-2);
+        padding: 7px 0;
+        border-bottom: 1px dashed var(--rule);
+      }
+      .about-line:last-child {
+        border-bottom: none;
+      }
+      .about-line .ver {
+        color: var(--terra);
+      }
+      .about-line a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--terra);
+        cursor: pointer;
+      }
+      .about-line a svg {
+        width: 13px;
+        height: 13px;
+        stroke: currentColor;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dev-intro">
+      <h1>V<em>oxa</em> Hub &middot; design review</h1>
+      <p>
+        v3 "WhisperFlow" — all five Hub views stacked vertically for review. Each block below is one
+        viewport of the production 1180px Hub window. Not the shipping layout; the divider labels are
+        navigation aids for reviewers only.
+      </p>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         1. HOME
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="dev-divider">// HOME</div>
+    <div class="hub">
+      <div class="hub-frame">
+        <!-- sidebar -->
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <div class="nav-item active">
+              <!-- house -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </div>
+            <div class="nav-item">
+              <!-- clock-counter-clockwise -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </div>
+            <div class="nav-item">
+              <!-- microphone -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </div>
+            <div class="nav-item">
+              <!-- keyboard -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </div>
+            <div class="nav-item">
+              <!-- gear -->
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="sidebar-status"><span class="dot dot-pending"></span>Ready</div>
+          </div>
+        </aside>
+
+        <!-- content -->
+        <main class="content">
+          <section class="hero">
+            <h1>V<em>oxa</em></h1>
+            <p class="tagline">your voice, written down</p>
+            <p class="aside">quietly, the moment you stop talking</p>
+            <div class="pen-rule" aria-hidden="true"></div>
+          </section>
+
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="num">1<em>4</em></div>
+              <div class="lbl">dictations today</div>
+            </div>
+            <div class="stat-card">
+              <div class="num">2,318</div>
+              <div class="lbl">words today</div>
+            </div>
+            <div class="stat-card">
+              <div class="num">11,907</div>
+              <div class="lbl">words this week</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9l6-3"/></svg>
+              Right now
+            </h3>
+            <p class="hint">a margin note from the app, refreshed as things happen.</p>
+            <div class="live-panel">
+              <div class="live-status"><span class="dot dot-pending"></span>Ready</div>
+            </div>
+            <p class="live-detail" style="margin-top: 6px;">listening on “Yeti Stereo Microphone” — press F9 anywhere to begin.</p>
+            <div class="auth-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17.5 19.5 7"/></svg>
+              Signed in to ChatGPT · 6 days ago
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h10M4 19h7"/></svg>
+              The way it flows
+            </h3>
+            <p class="hint">a small recipe in five steps, set in roman numerals like an old book.</p>
+            <ol class="flow">
+              <li>
+                Sign in once, up top.
+                <em>cookies last weeks. most people do this on the first run and never again.</em>
+              </li>
+              <li>
+                Click into any text field, anywhere on the system.
+                <em>a chat box, a code editor, an email, the address bar. anywhere a cursor will rest.</em>
+              </li>
+              <li>
+                Press <kbd>F9</kbd> to begin.
+                <em>a small paper strip pins itself to the corner. that's the timer.</em>
+              </li>
+              <li>
+                Speak naturally.
+                <em>no need to talk into the mic like a 1950s detective. just say what's on your mind.</em>
+              </li>
+              <li>
+                Press <kbd>Esc</kbd> or tap the strip.
+                <em>your words appear right where the cursor was, freshly transcribed and copied.</em>
+              </li>
+            </ol>
+          </div>
+
+          <a class="terra-link">
+            Open history
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+          </a>
+        </main>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         2. HISTORY
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="dev-divider">// HISTORY</div>
+    <div class="hub">
+      <div class="hub-frame">
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </div>
+            <div class="nav-item active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="sidebar-status"><span class="dot dot-pending"></span>Ready</div>
+          </div>
+        </aside>
+
+        <main class="content">
+          <div class="content-head">
+            <h2>History</h2>
+            <p class="sub">everything you've said, kept close to hand</p>
+          </div>
+
+          <div class="search-bar">
+            <!-- magnifying-glass -->
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+            <input type="text" placeholder="search transcripts, apps, dates…" />
+          </div>
+
+          <!-- failed banner -->
+          <div class="failed-banner">
+            <div class="banner-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+              <h3>Last failed dictations</h3>
+              <span class="count">3 unsent · audio saved</span>
+            </div>
+            <div class="failed-row">
+              <span class="dot dot-off"></span>
+              <div class="ftext">
+                <div class="preview">can you push the hotfix branch before standup, I'll review it right after</div>
+                <div class="meta">2 min ago · 0:09 · Slack</div>
+              </div>
+              <button class="retry-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+                Retry
+              </button>
+            </div>
+            <div class="failed-row">
+              <span class="dot dot-off"></span>
+              <div class="ftext">
+                <div class="preview">TODO: handle the null device id case when the default mic gets unplugged mid-recording</div>
+                <div class="meta">18 min ago · 0:14 · VS Code</div>
+              </div>
+              <button class="retry-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+                Retry
+              </button>
+            </div>
+            <div class="failed-row">
+              <span class="dot dot-off"></span>
+              <div class="ftext">
+                <div class="preview">reminder to call the dentist back about rescheduling thursday's appointment</div>
+                <div class="meta">today, 9:51 am · 0:06 · Notes</div>
+              </div>
+              <button class="retry-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+                Retry
+              </button>
+            </div>
+          </div>
+
+          <!-- chronological list -->
+          <div class="group-head">today</div>
+          <div class="hist-row selected">
+            <span class="dot dot-on"></span>
+            <div class="rtext">
+              <div class="preview">Hey team, just shipped the v3 hub redesign to the preview channel — the new sidebar lives now, would love eyes on the history drawer before we cut a release.</div>
+              <div class="meta">11:42 am · 0:21 · Slack</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+          <div class="hist-row">
+            <span class="dot dot-on"></span>
+            <div class="rtext">
+              <div class="preview">// transcribe webm/opus straight into Whisper, then patch the duration header so the model doesn't truncate the tail of long clips</div>
+              <div class="meta">10:58 am · 0:17 · VS Code</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+          <div class="hist-row">
+            <span class="dot dot-empty"></span>
+            <div class="rtext">
+              <div class="preview empty">no words captured — the mic stayed silent the whole time</div>
+              <div class="meta">9:33 am · 0:03 · Chrome</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+
+          <div class="group-head">yesterday</div>
+          <div class="hist-row">
+            <span class="dot dot-on"></span>
+            <div class="rtext">
+              <div class="preview">Subject: Re: contract renewal — happy to extend through Q3, can we hop on a quick call Thursday to walk through the new scope?</div>
+              <div class="meta">Fri, 5:14 pm · 0:19 · Outlook</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+          <div class="hist-row">
+            <span class="dot dot-warn"></span>
+            <div class="rtext">
+              <div class="preview">Slow morning. Rain on the skylight. Wrote three paragraphs of the thing I keep avoiding, then made tea and reread them. They're not terrible.</div>
+              <div class="meta">Fri, 8:02 am · 0:33 · Journal</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+
+          <div class="group-head">this week</div>
+          <div class="hist-row">
+            <span class="dot dot-on"></span>
+            <div class="rtext">
+              <div class="preview">groceries: oat milk, the good sourdough, lemons, something green for once, and coffee before we run out and I turn feral</div>
+              <div class="meta">Tue, May 28 · 0:11 · Notes</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+
+          <div class="group-head">older</div>
+          <div class="hist-row">
+            <span class="dot dot-on"></span>
+            <div class="rtext">
+              <div class="preview">commit message: fix(overlay) — inject WebM duration so Whisper stops eating the last second of audio on short clips</div>
+              <div class="meta">May 21 · 0:08 · Terminal</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         3. HISTORY DETAIL DRAWER (failed example)
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="dev-divider">// HISTORY DETAIL DRAWER</div>
+    <div class="hub">
+      <div class="hub-frame">
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </div>
+            <div class="nav-item active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="sidebar-status"><span class="dot dot-pending"></span>Ready</div>
+          </div>
+        </aside>
+
+        <!-- narrowed content + drawer -->
+        <main class="content" style="padding-right: 28px;">
+          <div class="content-head">
+            <h2>History</h2>
+            <p class="sub">one failed row, opened</p>
+          </div>
+          <div class="group-head">today</div>
+          <div class="hist-row selected">
+            <span class="dot dot-off"></span>
+            <div class="rtext">
+              <div class="preview">can you push the hotfix branch before standup, I'll review it right after</div>
+              <div class="meta">2 min ago · 0:09 · Slack</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+          <div class="hist-row">
+            <span class="dot dot-on"></span>
+            <div class="rtext">
+              <div class="preview">// transcribe webm/opus straight into Whisper, then patch the duration header</div>
+              <div class="meta">10:58 am · 0:17 · VS Code</div>
+            </div>
+            <button class="row-menu">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/></svg>
+            </button>
+          </div>
+        </main>
+
+        <!-- the drawer -->
+        <aside class="drawer">
+          <div class="drawer-head">
+            <button class="drawer-icon-btn" title="Back">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg>
+            </button>
+            <button class="drawer-icon-btn" title="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+            <span class="status-badge failed"><span class="dot dot-off"></span>Failed</span>
+          </div>
+          <div class="drawer-body">
+            <p class="transcript">
+              can you push the hotfix branch before standup, I'll review it right after
+            </p>
+
+            <div class="audio-block">
+              <label>recorded audio</label>
+              <audio controls src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="></audio>
+            </div>
+
+            <div class="meta-grid">
+              <div class="cell"><div class="k">model</div><div class="v">whisper-1</div></div>
+              <div class="cell"><div class="k">status</div><div class="v" style="color: var(--signal-off)">failed</div></div>
+              <div class="cell"><div class="k">duration</div><div class="v">0:09</div></div>
+              <div class="cell"><div class="k">words</div><div class="v">13</div></div>
+              <div class="cell"><div class="k">retries</div><div class="v">2</div></div>
+              <div class="cell"><div class="k">latency</div><div class="v">—</div></div>
+            </div>
+
+            <div class="error-box">
+              <div class="etitle">what went wrong</div>
+              <div class="emsg">couldn't reach ChatGPT — saved, try again</div>
+            </div>
+          </div>
+          <div class="drawer-actions">
+            <button class="action-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              Copy
+            </button>
+            <button class="action-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10 4 15l5 5"/><path d="M4 15h11a5 5 0 0 0 5-5V5"/></svg>
+              Re-insert
+            </button>
+            <button class="action-btn primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+              Retry
+            </button>
+            <button class="action-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3l2 2.5h9a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+              Reveal audio
+            </button>
+            <button class="action-btn danger">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M9 6V4h6v2"/><path d="M6 6l1 14h10l1-14"/></svg>
+              Delete
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         4. MICROPHONE
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="dev-divider">// MICROPHONE</div>
+    <div class="hub">
+      <div class="hub-frame">
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </div>
+            <div class="nav-item active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="sidebar-status"><span class="dot dot-pending"></span>Ready</div>
+          </div>
+        </aside>
+
+        <main class="content">
+          <div class="content-head">
+            <h2>Microphone</h2>
+            <p class="sub">pick whichever input Windows knows about</p>
+          </div>
+
+          <div class="card">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              Input device
+            </h3>
+            <p class="hint">we'll listen through this one. unplug it and we'll quietly fall back to the system default.</p>
+            <label class="field-label">device</label>
+            <select class="mic-select">
+              <option>Yeti Stereo Microphone (Blue Microphones)</option>
+              <option>Default — System input</option>
+              <option>Headset Microphone (Realtek Audio)</option>
+              <option>MacBook Pro Microphone</option>
+            </select>
+
+            <div class="level-wrap">
+              <label class="field-label">live level</label>
+              <div class="level-track"><div class="level-bar"></div></div>
+              <p class="level-text">speak softly, the bar should move</p>
+            </div>
+
+            <button class="test-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2.5-7 4 16 2.5-9H21"/></svg>
+              Test it
+            </button>
+          </div>
+
+          <div class="trouble">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+              Microphone captured silence
+            </h4>
+            <p>
+              we heard nothing on the last take — the track came back empty. usually that's a muted input,
+              the wrong device selected above, or Windows hasn't granted microphone permission to Voxa yet.
+            </p>
+            <a class="privacy-link">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/></svg>
+              Open Windows privacy &rsaquo; Microphone settings
+            </a>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         5. SHORTCUTS
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="dev-divider">// SHORTCUTS</div>
+    <div class="hub">
+      <div class="hub-frame">
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </div>
+            <div class="nav-item active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="sidebar-status"><span class="dot dot-pending"></span>Ready</div>
+          </div>
+        </aside>
+
+        <main class="content">
+          <div class="content-head">
+            <h2>Shortcuts</h2>
+            <p class="sub">click a field and press whatever combo you'd like — even a single key</p>
+          </div>
+
+          <div class="shortcuts-grid">
+            <div>
+              <div class="hotkey-block">
+                <label class="field-label">start / toggle recording</label>
+                <div class="hotkey-input">
+                  <kbd>F9</kbd>
+                  <button class="clear-btn" title="Clear">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+                  </button>
+                </div>
+                <div class="quick-picks">
+                  <button class="chip suggested">F9</button>
+                  <button class="chip">F10</button>
+                  <button class="chip">F11</button>
+                  <button class="chip">Ctrl+Space</button>
+                  <button class="chip">Alt+Shift+V</button>
+                </div>
+              </div>
+
+              <div class="hotkey-block">
+                <label class="field-label">stop recording</label>
+                <div class="hotkey-input">
+                  <kbd>Esc</kbd>
+                  <button class="clear-btn" title="Clear">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+                  </button>
+                </div>
+                <div class="quick-picks">
+                  <button class="chip suggested">Esc</button>
+                  <button class="chip">F10</button>
+                  <button class="chip">Ctrl+Shift+S</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="legend">
+              <h4>what each key does</h4>
+              <div class="legend-item">
+                <div class="lkey"><kbd>F9</kbd></div>
+                <div class="ldesc">pins the recording strip and starts listening, anywhere on the system.</div>
+              </div>
+              <div class="legend-item">
+                <div class="lkey"><kbd>Esc</kbd></div>
+                <div class="ldesc">stops, transcribes, and drops the words at your cursor.</div>
+              </div>
+              <div class="legend-item">
+                <div class="lkey"><kbd>F9</kbd></div>
+                <div class="ldesc">pressing start again while recording also stops it — same key can do both.</div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         6. SETTINGS
+         ════════════════════════════════════════════════════════════════════ -->
+    <div class="dev-divider">// SETTINGS</div>
+    <div class="hub">
+      <div class="hub-frame">
+        <aside class="sidebar">
+          <div class="sidebar-brand"><span class="mark">V<em>oxa</em></span></div>
+          <nav class="nav">
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span class="label">Home</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              <span class="label">History</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></svg>
+              <span class="label">Microphone</span>
+            </div>
+            <div class="nav-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span class="label">Shortcuts</span>
+            </div>
+            <div class="nav-item active">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></svg>
+              <span class="label">Settings</span>
+            </div>
+          </nav>
+          <div class="sidebar-foot">
+            <div class="sidebar-status"><span class="dot dot-pending"></span>Ready</div>
+          </div>
+        </aside>
+
+        <main class="content">
+          <div class="content-head">
+            <h2>Settings</h2>
+            <p class="sub">a few things you can tune to taste</p>
+          </div>
+
+          <div class="settings-anchors">
+            <span class="anchor-chip">Startup</span>
+            <span class="anchor-chip">Recording strip</span>
+            <span class="anchor-chip">History &amp; retention</span>
+            <span class="anchor-chip">Account</span>
+            <span class="anchor-chip">About</span>
+          </div>
+
+          <!-- Startup -->
+          <div class="card settings-section">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9"/><path d="M7.5 6.5a7 7 0 1 0 9 0"/></svg>
+              Startup
+            </h3>
+            <p class="hint">when enabled, Voxa wakes up quietly with your system and waits in the tray.</p>
+            <label class="toggle-row">
+              <span class="switch on"></span>
+              <span>launch on Windows boot</span>
+            </label>
+          </div>
+
+          <!-- Recording strip -->
+          <div class="card settings-section">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h6V4"/></svg>
+              Recording strip
+            </h3>
+            <p class="hint">where the little paper strip pins itself, and how long it'll wait before tucking away.</p>
+            <div class="two-col">
+              <div>
+                <label class="field-label">overlay position</label>
+                <select class="styled">
+                  <option>top-left</option>
+                  <option selected>top-right</option>
+                  <option>bottom-left</option>
+                  <option>bottom-right</option>
+                </select>
+              </div>
+              <div>
+                <div class="slider-row" style="margin-top: 0">
+                  <div class="srhead">
+                    <label class="field-label" style="margin: 0">max recording seconds</label>
+                    <span class="srval">60s</span>
+                  </div>
+                  <input type="range" min="10" max="180" value="60" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- History & Retention -->
+          <div class="card settings-section">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/></svg>
+              History &amp; retention
+            </h3>
+            <p class="hint">how long the saved audio lingers, and whether history clears itself when you're done.</p>
+            <div class="slider-row">
+              <div class="srhead">
+                <label class="field-label" style="margin: 0">successful audio retention</label>
+                <span class="srval">24h</span>
+              </div>
+              <input type="range" min="1" max="168" value="24" />
+            </div>
+            <div class="slider-row">
+              <div class="srhead">
+                <label class="field-label" style="margin: 0">failed audio retention</label>
+                <span class="srval">7d</span>
+              </div>
+              <input type="range" min="1" max="30" value="7" />
+            </div>
+            <label class="toggle-row">
+              <span class="switch"></span>
+              <span>privacy mode <span class="tdesc">— auto-delete history at quit</span></span>
+            </label>
+            <label class="toggle-row">
+              <span class="switch"></span>
+              <span>history row cap <span class="tdesc">— off, keep everything</span></span>
+            </label>
+          </div>
+
+          <!-- Account -->
+          <div class="card settings-section">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+              Account
+            </h3>
+            <p class="hint">the ChatGPT session that does the transcribing. cookies last weeks.</p>
+            <div class="session-line">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17.5 19.5 7"/></svg>
+              Signed in · session 6d old
+            </div>
+            <div class="btn-row">
+              <button class="ghost-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>
+                Re-authenticate
+              </button>
+              <button class="ghost-btn danger">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 12H3"/><path d="M6 8l-4 4 4 4"/></svg>
+                Sign out
+              </button>
+            </div>
+          </div>
+
+          <!-- About -->
+          <div class="card settings-section">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/></svg>
+              About
+            </h3>
+            <div class="about-line">Voxa <span class="ver">v0.1.0</span></div>
+            <div class="about-line">
+              <a>
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3l2 2.5h9a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+                Open logs folder
+              </a>
+            </div>
+            <div class="about-line">
+              <a>
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3l2 2.5h9a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+                Open data folder
+              </a>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

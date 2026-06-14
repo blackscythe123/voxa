@@ -1,0 +1,57 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Voxa — Design Tokens  (OWNS: the single source of truth for design tokens)
+   ────────────────────────────────────────────────────────────────────────
+   Extracted verbatim from docs/ui-mocks/v3-whisperflow.html (the approved
+   "WhisperFlow" Hub mockup). This file owns:
+     • the Google Fonts @import (Fraunces / Lora / IBM Plex Mono)
+     • the complete :root token set — colour, ink, marginalia, status
+       signals, easing curves, AND the Hub layout vars
+       (--sidebar-w, --drawer-w, --row-h, --section-gap, --shadow-card,
+        --shadow-drawer).
+   Nothing here invents new values; every token is copied from the mockup.
+   Load this BEFORE hub.css and history.css — they consume these vars.
+   The shared typography / paper-grain / hero / .note system continues to
+   live in src/renderer/styles.css; this layers the Hub tokens on top.
+   ════════════════════════════════════════════════════════════════════════ */
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Lora:ital,wght@0,400..600;1,400..600&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap");
+
+:root {
+  /* ── The desk (paper, lamp, ink) ──────────────────────────────────── */
+  --paper: #faf6f0;       /* cream — the page */
+  --paper-warm: #f3eadb;  /* aged margin */
+  --vellum: #fffbf4;      /* a fresh sheet on top */
+  --rule: #e8dcc7;        /* hairline rules */
+  --rule-soft: #efe5d2;   /* lighter rule */
+
+  /* ── Ink (everything readable) ────────────────────────────────────── */
+  --ink: #2d2418;         /* warm dark brown — body text */
+  --ink-2: #6b5c40;       /* faded brown — secondary */
+  --ink-3: #a89880;       /* annotation pencil — tertiary */
+  --ink-faint: #c9b994;   /* placeholder / disabled */
+
+  /* ── Marginalia & accents ─────────────────────────────────────────── */
+  --terra: #c4632a;       /* terracotta — primary accent */
+  --terra-warm: #d97c3f;  /* lighter terracotta — hover */
+  --terra-deep: #a14c1d;  /* burnt terracotta — pressed */
+  --sage: #5a7d5a;        /* binding-cloth sage — secondary */
+  --sage-warm: #7a9a7a;   /* sage hover */
+
+  /* ── Status semantics ─────────────────────────────────────────────── */
+  --signal-on: #5a7d5a;       /* sage — success / logged-in */
+  --signal-off: #b34a3f;      /* warm rust — error */
+  --signal-warn: #c89c3f;     /* mustard — warning */
+  --signal-pending: #c4632a;  /* terracotta — pending */
+
+  /* ── Curves ───────────────────────────────────────────────────────── */
+  --ease: cubic-bezier(0.32, 0, 0.32, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Hub layout ───────────────────────────────────────────────────── */
+  --sidebar-w: 240px;
+  --drawer-w: 380px;
+  --row-h: 72px;
+  --section-gap: 32px;
+  --shadow-card: 0 1px 0 var(--rule), 0 12px 28px -18px rgba(45, 36, 24, 0.18);
+  --shadow-drawer: -20px 0 60px -30px rgba(45, 36, 24, 0.28);
+}

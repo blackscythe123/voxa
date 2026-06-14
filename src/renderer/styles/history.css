@@ -1,0 +1,557 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Voxa — History View  (OWNS: everything History-specific)
+   ────────────────────────────────────────────────────────────────────────
+   Extracted from docs/ui-mocks/v3-whisperflow.html. This file owns:
+     • .search-bar
+     • .failed-banner ("Last failed dictations" — paper-warm wash, dotted
+       terra top rule) + .failed-row + .retry-btn
+     • .group-head (Fraunces italic lowercase time-group headers)
+     • .hist-row (72px row, status dot, 2-line transcript preview, Plex-Mono
+       meta, .row-menu 3-dot, hover terra-tint, .selected terra left-rule)
+     • the detail-drawer internals (.drawer-head, .drawer-icon-btn,
+       .status-badge, .drawer-body, .transcript, .audio-block, audio tint,
+       .meta-grid, .error-box, .drawer-actions, .action-btn)
+     • the row context menu (.row-context-menu)
+     • toast notifications (.toast-stack / .toast — slide up, bottom-right)
+   Status-dot COLOUR variants (.dot-on/off/warn/pending/empty) live in
+   hub.css since dots are shared; this file styles their History usage only.
+   Tokens come from tokens.css; the slide-in .drawer shell from hub.css.
+
+   NOTE on toasts: the v3 mockup contains no toast block. Per the
+   no-invented-styling rule, the toast below is composed ONLY from the
+   mockup's existing primitives — vellum surface, --rule border, terra
+   left-rule (as on .error-box / .hist-row.selected), the --shadow-drawer
+   depth family, IBM Plex Mono / Lora type, and the --ease curve. No new
+   colours, radii or motion vocabulary were introduced.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════════════
+   Search bar
+   ════════════════════════════════════════════════════════════════════════ */
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ink-3);
+  border-radius: 12px 12px 5px 5px;
+  padding: 12px 16px;
+  margin-bottom: 24px;
+  transition: all 0.25s var(--ease);
+}
+.search-bar:focus-within {
+  background: var(--vellum);
+  border-bottom-color: var(--terra);
+  border-bottom-width: 2px;
+}
+.search-bar svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--ink-3);
+  flex-shrink: 0;
+}
+.search-bar input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+}
+.search-bar input::placeholder {
+  color: var(--ink-faint);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Failed banner — soft paper-warm wash, dotted terra top rule
+   ════════════════════════════════════════════════════════════════════════ */
+.failed-banner {
+  background: linear-gradient(180deg, rgba(196, 99, 42, 0.05) 0%, rgba(243, 234, 219, 0.55) 100%);
+  border: 1px solid var(--rule-soft);
+  border-top: 1.5px dotted var(--terra);
+  border-radius: 4px 4px 16px 16px;
+  padding: 18px 22px 14px;
+  margin-bottom: 30px;
+}
+.failed-banner .banner-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+.failed-banner .banner-head svg {
+  width: 17px;
+  height: 17px;
+  stroke: var(--signal-off);
+}
+.failed-banner .banner-head h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 17px;
+  color: var(--ink);
+  font-variation-settings: "opsz" 36, "SOFT" 50;
+}
+.failed-banner .banner-head .count {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--signal-off);
+  margin-left: auto;
+  text-transform: uppercase;
+}
+.failed-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 8px;
+  border-bottom: 1px dashed var(--rule);
+}
+.failed-row:last-child {
+  border-bottom: none;
+}
+.failed-row .ftext {
+  flex: 1;
+  min-width: 0;
+}
+.failed-row .ftext .preview {
+  font-family: "Lora", serif;
+  font-size: 14px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.failed-row .ftext .meta {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  margin-top: 3px;
+}
+.retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--terra);
+  color: var(--terra);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-variation-settings: "opsz" 24, "SOFT" 100;
+  transition: all 0.25s var(--ease);
+}
+.retry-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+.retry-btn:hover {
+  background: var(--terra);
+  color: var(--vellum);
+  border-color: var(--terra-deep);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Time-grouped chronological list
+   ════════════════════════════════════════════════════════════════════════ */
+.group-head {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--ink-2);
+  letter-spacing: -0.01em;
+  text-transform: lowercase;
+  margin: 26px 0 6px;
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+}
+.group-head:first-of-type {
+  margin-top: 4px;
+}
+.hist-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: var(--row-h);
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.hist-row:hover {
+  background: rgba(196, 99, 42, 0.05);
+}
+.hist-row.selected {
+  background: var(--paper-warm);
+  border-left-color: var(--terra);
+}
+.hist-row .dot {
+  margin-top: 0;
+}
+.hist-row .rtext {
+  flex: 1;
+  min-width: 0;
+}
+.hist-row .preview {
+  font-family: "Lora", serif;
+  font-size: 14.5px;
+  color: var(--ink);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hist-row .preview.empty {
+  font-style: italic;
+  color: var(--ink-3);
+}
+.hist-row .meta {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  margin-top: 5px;
+}
+.row-menu {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: all 0.2s var(--ease);
+}
+.row-menu svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+}
+.row-menu:hover {
+  background: rgba(196, 99, 42, 0.08);
+  color: var(--terra);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   History detail drawer — internals
+   (the slide-in .drawer shell itself lives in hub.css)
+   ════════════════════════════════════════════════════════════════════════ */
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.drawer-icon-btn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+.drawer-icon-btn svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+}
+.drawer-icon-btn:hover {
+  border-color: var(--terra);
+  color: var(--terra);
+  background: rgba(196, 99, 42, 0.05);
+}
+.status-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  border-radius: 999px;
+}
+.status-badge.ok {
+  color: var(--sage);
+  background: rgba(90, 125, 90, 0.1);
+}
+.status-badge.failed {
+  color: var(--signal-off);
+  background: rgba(179, 74, 63, 0.1);
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px;
+}
+.drawer-body .transcript {
+  font-family: "Lora", serif;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--ink);
+  user-select: text;
+  margin-bottom: 20px;
+}
+.audio-block {
+  margin-bottom: 20px;
+}
+.audio-block label {
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.drawer-body audio {
+  width: 100%;
+  height: 38px;
+  accent-color: var(--terra);
+  filter: sepia(0.28) saturate(1.5) hue-rotate(-12deg);
+}
+.meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--rule-soft);
+  border: 1px solid var(--rule-soft);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.meta-grid .cell {
+  background: var(--vellum);
+  padding: 11px 14px;
+}
+.meta-grid .k {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.meta-grid .v {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 3px;
+}
+.error-box {
+  background: var(--vellum);
+  border: 1px solid var(--rule-soft);
+  border-left: 3px solid var(--signal-off);
+  border-radius: 4px 12px 12px 4px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.error-box .etitle {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--signal-off);
+  margin-bottom: 6px;
+}
+.error-box .emsg {
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink);
+}
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--rule);
+  background: linear-gradient(180deg, rgba(255, 251, 244, 0) 0%, var(--vellum) 60%);
+}
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+.action-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+.action-btn:hover {
+  border-color: var(--terra);
+  color: var(--terra);
+  background: rgba(196, 99, 42, 0.05);
+}
+.action-btn.danger:hover {
+  border-color: var(--signal-off);
+  color: var(--signal-off);
+  background: rgba(179, 74, 63, 0.06);
+}
+.action-btn.primary {
+  background: var(--terra);
+  border-color: var(--terra-deep);
+  color: var(--vellum);
+}
+.action-btn.primary:hover {
+  background: var(--terra-warm);
+  color: var(--vellum);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Row context menu — the popover raised by the .row-menu 3-dot button.
+   Built from mockup primitives: vellum sheet, --rule border, --shadow-card
+   depth, Plex-Mono labels, terra/signal-off hover tints (matches .action-btn
+   hover vocabulary). No new visual language introduced.
+   ════════════════════════════════════════════════════════════════════════ */
+.row-context-menu {
+  position: absolute;
+  z-index: 45;
+  min-width: 168px;
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-card);
+}
+.row-context-menu[hidden] {
+  display: none;
+}
+.row-context-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+.row-context-menu .menu-item svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  flex-shrink: 0;
+}
+.row-context-menu .menu-item:hover {
+  background: rgba(196, 99, 42, 0.07);
+  color: var(--terra);
+}
+.row-context-menu .menu-item.danger:hover {
+  background: rgba(179, 74, 63, 0.07);
+  color: var(--signal-off);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Toast notifications — slide up from the bottom-right
+   Composed from mockup primitives only (vellum sheet, --rule border, terra
+   left-rule as on .error-box / selected rows, --shadow-drawer depth, Plex
+   Mono / Lora type, --ease curve). The mockup defined no toast; nothing new
+   is invented here beyond assembling those existing pieces.
+   ════════════════════════════════════════════════════════════════════════ */
+.toast-stack {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 260px;
+  max-width: 360px;
+  padding: 13px 16px;
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--terra);
+  border-radius: 4px 12px 12px 4px;
+  box-shadow: var(--shadow-drawer);
+  transform: translateY(120%);
+  opacity: 0;
+  transition: transform 280ms var(--ease), opacity 280ms var(--ease);
+}
+.toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+.toast svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  stroke: var(--terra);
+  margin-top: 1px;
+}
+.toast .toast-title {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 3px;
+}
+.toast .toast-msg {
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.toast.ok {
+  border-left-color: var(--signal-on);
+}
+.toast.ok svg {
+  stroke: var(--signal-on);
+}
+.toast.error {
+  border-left-color: var(--signal-off);
+}
+.toast.error svg {
+  stroke: var(--signal-off);
+}
+.toast.warn {
+  border-left-color: var(--signal-warn);
+}
+.toast.warn svg {
+  stroke: var(--signal-warn);
+}

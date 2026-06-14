@@ -250,7 +250,7 @@
       const stopBtn = document.getElementById("stopBtn");
 
       let mediaRecorder = null;
-      let recordingChunks = [];
+      let currentId = null;
       let recordingStartTime = 0;
       let timerHandle;
       let seconds = 0;
@@ -260,25 +260,12 @@
         return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
       }
 
-      // Patches the Duration field inside the WebM SegmentInformation block so
-      // Whisper gets an accurate duration (MediaRecorder leaves it as 0 / missing).
-      // Scans for EBML element 0x4489 (Duration) with 8-byte float size marker 0x88.
-      function injectWebMDuration(buffer, durationMs) {
-        const arr = new Uint8Array(buffer);
-        for (let i = 0; i < arr.length - 12; i++) {
-          if (arr[i] === 0x44 && arr[i + 1] === 0x89 && arr[i + 2] === 0x88) {
-            new DataView(buffer).setFloat64(i + 3, durationMs, false);
-            break;
-          }
-        }
-        return buffer;
-      }
-
       async function startRecording(payload) {
-        maxSecs = payload?.maxRecordingSeconds ?? 120;
-        const deviceId = payload?.inputDeviceId || "default";
+        currentId = payload?.id ?? null;
+        maxSecs = payload?.maxRecordingSeconds ?? payload?.maxSeconds ?? 120;
+        const deviceId = payload?.inputDeviceId ?? payload?.deviceId ?? "default";
+        const startedAt = payload?.startedAt ?? Date.now();
         seconds = 0;
-        recordingChunks = [];
         timerEl.textContent = "00:00";
 
         const audioConstraints = {
@@ -297,7 +284,18 @@
           : "audio/webm";
 
         mediaRecorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordingChunks.push(e.data); };
+
+        // Open the on-disk write-stream in main BEFORE we start capturing, so the
+        // very first chunk has somewhere to land. Streamed audio is durable the
+        // instant recording begins — it survives a crash and can be retried.
+        await window.voiceBridge?.recordingStartMeta({ id: currentId, startedAt });
+
+        mediaRecorder.ondataavailable = async (e) => {
+          if (e.data.size > 0) {
+            const buf = await e.data.arrayBuffer();
+            window.voiceBridge?.recordingChunk({ id: currentId, chunk: Array.from(new Uint8Array(buf)) });
+          }
+        };
         mediaRecorder.start(250);
         recordingStartTime = Date.now();
         stopBtn.disabled = false;
@@ -306,7 +304,8 @@
         timerHandle = setInterval(() => {
           seconds += 1;
           timerEl.textContent = formatTime(seconds);
-          if (seconds >= maxSecs) stopRecording();
+          // maxSecs <= 0 means "no limit" — record until the user stops.
+          if (maxSecs > 0 && seconds >= maxSecs) stopRecording();
         }, 1000);
       }
 
@@ -316,6 +315,7 @@
         stopBtn.disabled = true;
 
         const durationMs = Date.now() - recordingStartTime;
+        const finalizeId = currentId;
 
         await new Promise((resolve) => {
           mediaRecorder.onstop = resolve;
@@ -323,15 +323,14 @@
         });
         mediaRecorder.stream.getTracks().forEach((t) => t.stop());
 
-        console.log(`[overlay] webm/opus recorded ${recordingChunks.length} chunks  duration: ${durationMs}ms`);
-
-        let buffer = await new Blob(recordingChunks, { type: "audio/webm" }).arrayBuffer();
-        buffer = injectWebMDuration(buffer, durationMs);
+        console.log(`[overlay] webm/opus stream finalize id=${finalizeId}  duration: ${durationMs}ms`);
 
         mediaRecorder = null;
-        recordingChunks = [];
+        currentId = null;
 
-        await window.voiceBridge.finalizeRecording(Array.from(new Uint8Array(buffer)), "audio/webm");
+        // Audio is already on disk via streamed chunks; main patches the EBML
+        // duration on the file (audioStore.injectDuration) during finalize.
+        await window.voiceBridge?.finalizeRecording({ id: finalizeId, durationMs, mimeType: "audio/webm" });
       }
 
       window.voiceBridge.onStartRecording((payload) => {

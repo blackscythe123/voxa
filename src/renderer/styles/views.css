@@ -1,0 +1,660 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Voxa — Per-View Controls & Content  (OWNS: the styling DROPPED by the
+   first extraction pass — every per-view control + content rule that is NOT
+   structural chrome (hub.css), History (history.css), tokens (tokens.css),
+   or the shared typography/paper system (styles.css)).
+   ────────────────────────────────────────────────────────────────────────
+   Extracted verbatim from docs/ui-mocks/v3-whisperflow.html. This file owns:
+     • the GLOBAL inline-SVG default  — `svg { display:block }` (mockup ~L128).
+       THIS IS THE CRITICAL FIX: without it, inline section/control SVGs are
+       laid out inline and (lacking width/height) balloon to fill their card.
+     • Home extras   — .stats-row, .stat-card .num/.lbl, .card h3 (+ svg),
+                        .card .hint, .live-panel/.live-status/.live-detail,
+                        .auth-badge (mockup variant), .terra-link (+ svg)
+     • Microphone    — .field-label, select.mic-select/.styled/input.num,
+                        .level-wrap/.level-track/.level-bar/.level-text,
+                        .test-btn (+ svg), .trouble (+ h4/svg/p),
+                        .privacy-link (+ svg)
+     • Shortcuts     — .shortcuts-grid, .hotkey-block, .hotkey-input
+                        (+ hover/.recording + @keyframes capture-blink),
+                        .clear-btn (+ svg), .hotkey-input kbd, .quick-picks,
+                        .chip (+ hover/.suggested), .legend (+ h4/-item/-key/-desc)
+     • Settings      — .settings-anchors, .anchor-chip, .settings-section
+                        (+ h3 / h3 svg), .toggle-row (+ .tdesc), .switch pill
+                        toggle (+ .on / [aria-checked=true] state + knob),
+                        .slider-row/.srhead/.srval, input[type=range], .two-col,
+                        .session-line (+ svg), .btn-row, .ghost-btn
+                        (+ svg / .danger), .about-line (+ .ver / a / a svg)
+
+   NOT duplicated here (owned elsewhere, the existing rule wins):
+     • :root tokens + font @import .......... tokens.css
+     • .app-shell/.sidebar/.nav/#view/.content-head/.card/.stat-card/.dot/.drawer ... hub.css
+     • all History (.search-bar … .action-btn, context menu, toast) ... history.css
+     • .hero/.pen-rule/.flow/kbd/paper-grain/.note ... styles.css
+   Load this AFTER history.css so it can layer on top.
+   Tokens come from tokens.css; mockup values copied pixel-for-pixel.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════════════
+   Global inline-SVG default — THE CRITICAL FIX
+   Every inline <svg> that isn't otherwise sized inherits a sane block default
+   here (verbatim from the mockup). Section-heading / control SVGs are then
+   sized by their own per-selector svg rules below; this prevents any unsized
+   SVG from defaulting to a 1:1 box that fills its card (the ~1500px bug).
+   ════════════════════════════════════════════════════════════════════════ */
+svg {
+  display: block;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   HOME — stats row, card headings, the "Right now" live panel, links
+   (.card / .stat-card surfaces themselves live in hub.css)
+   ════════════════════════════════════════════════════════════════════════ */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 30px 0 22px;
+}
+.stat-card .num {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 46px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  font-variation-settings: "opsz" 144, "SOFT" 80;
+}
+.stat-card .num em {
+  color: var(--terra);
+  font-style: italic;
+}
+.stat-card .lbl {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 10px;
+}
+
+.card h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 19px;
+  color: var(--ink);
+  margin-bottom: 4px;
+  font-variation-settings: "opsz" 36, "SOFT" 50;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.card h3 svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--terra);
+}
+.card .hint {
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+}
+
+.live-panel {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.live-status {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 30px;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.live-detail {
+  font-family: "Lora", serif;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--ink-2);
+}
+
+/* The mockup's Hub .auth-badge — svg checkmark + sage italic. Note: a
+   DIFFERENT .auth-badge (✎ pseudo-element variant) lives in styles.css for the
+   old single-column layout; in the Hub the badge carries an inline <svg>, so
+   this Hub variant is required and intentionally overrides it for #authBadge. */
+.auth-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Lora", serif;
+  font-size: 13.5px;
+  font-style: italic;
+  color: var(--sage);
+  margin-top: 14px;
+}
+.auth-badge svg {
+  width: 15px;
+  height: 15px;
+  stroke: var(--sage);
+}
+
+.terra-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: 16px;
+  color: var(--terra);
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+  margin-top: 6px;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), gap 0.2s var(--ease);
+}
+.terra-link svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+}
+.terra-link:hover {
+  color: var(--terra-deep);
+  gap: 10px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   MICROPHONE — field labels, styled selects, level meter, test button,
+   the "captured silence" trouble note, privacy link
+   ════════════════════════════════════════════════════════════════════════ */
+.field-label {
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--ink-3);
+  margin: 0 0 8px;
+  letter-spacing: 0.04em;
+}
+select.mic-select,
+select.styled,
+input.num {
+  width: 100%;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ink-3);
+  color: var(--ink);
+  border-radius: 10px 10px 4px 4px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-family: "Lora", serif;
+  transition: all 0.25s var(--ease);
+}
+select.mic-select,
+select.styled {
+  appearance: none;
+  padding-right: 38px;
+  font-style: italic;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 5l4 4 4-4' stroke='%23c4632a' stroke-width='1.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  cursor: pointer;
+}
+select.mic-select:hover,
+select.styled:hover,
+input.num:hover {
+  background-color: var(--vellum);
+  border-bottom-color: var(--terra);
+}
+select.mic-select:focus,
+select.styled:focus,
+input.num:focus {
+  outline: none;
+  border-bottom: 2px solid var(--terra);
+  background-color: var(--vellum);
+}
+
+.level-wrap {
+  margin: 20px 0 8px;
+}
+.level-track {
+  height: 14px;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.level-bar {
+  height: 100%;
+  width: 62%;
+  background: linear-gradient(90deg, var(--sage) 0%, var(--terra) 100%);
+  border-radius: 999px;
+}
+.level-text {
+  margin-top: 9px;
+  font-family: "Lora", serif;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink-2);
+}
+
+.test-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: 14.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+  transition: all 0.25s var(--ease);
+  margin-top: 14px;
+}
+.test-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+}
+.test-btn:hover {
+  border-color: var(--terra);
+  color: var(--terra);
+  background: rgba(196, 99, 42, 0.04);
+}
+
+.trouble {
+  background: linear-gradient(180deg, rgba(200, 156, 63, 0.06) 0%, var(--vellum) 100%);
+  border: 1px solid var(--rule-soft);
+  border-left: 3px solid var(--signal-warn);
+  border-radius: 4px 12px 12px 4px;
+  padding: 16px 18px;
+  margin-top: 18px;
+}
+.trouble h4 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--ink);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.trouble h4 svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--signal-warn);
+}
+.trouble p {
+  font-family: "Lora", serif;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+.privacy-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--terra);
+  cursor: pointer;
+}
+.privacy-link svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+.privacy-link:hover {
+  color: var(--terra-deep);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SHORTCUTS — hotkey capture field, quick-pick chips, legend
+   ════════════════════════════════════════════════════════════════════════ */
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.hotkey-block {
+  margin-bottom: 22px;
+}
+.hotkey-input {
+  display: flex;
+  align-items: center;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-bottom: 2px solid var(--ink-3);
+  border-radius: 12px 12px 5px 5px;
+  padding: 16px 18px;
+  font-size: 15px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.25s var(--ease);
+  min-height: 56px;
+  font-family: "Lora", serif;
+}
+.hotkey-input:hover {
+  background: var(--vellum);
+  border-bottom-color: var(--terra);
+}
+.hotkey-input.recording {
+  background: var(--vellum);
+  border-bottom-color: var(--terra);
+  animation: capture-blink 1.2s ease-in-out infinite;
+}
+@keyframes capture-blink {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(196, 99, 42, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(196, 99, 42, 0.1);
+  }
+}
+.hotkey-input .clear-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  transition: all 0.2s var(--ease);
+}
+.hotkey-input .clear-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+}
+.hotkey-input .clear-btn:hover {
+  background: rgba(179, 74, 63, 0.1);
+  color: var(--signal-off);
+}
+.hotkey-input kbd {
+  font-size: 14px;
+  padding: 4px 11px;
+}
+.quick-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.chip {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+.chip:hover {
+  border-color: var(--terra);
+  color: var(--terra);
+  background: rgba(196, 99, 42, 0.05);
+}
+.chip.suggested {
+  background: rgba(196, 99, 42, 0.08);
+  border-color: var(--terra);
+  color: var(--terra);
+}
+.legend {
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  padding: 20px 22px;
+}
+.legend h4 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 16px;
+  color: var(--ink);
+  margin-bottom: 14px;
+  font-variation-settings: "opsz" 36, "SOFT" 50;
+}
+.legend-item {
+  display: flex;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.legend-item:last-child {
+  border-bottom: none;
+}
+.legend-item .lkey {
+  flex-shrink: 0;
+  width: 56px;
+}
+.legend-item .ldesc {
+  font-family: "Lora", serif;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SETTINGS — anchor chips, sections, pill toggles, sliders, account, about
+   ════════════════════════════════════════════════════════════════════════ */
+.settings-anchors {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.anchor-chip {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 6px 13px;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+.anchor-chip:hover {
+  border-color: var(--terra);
+  color: var(--terra);
+}
+.settings-section {
+  margin-bottom: 16px;
+}
+.settings-section h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 19px;
+  color: var(--ink);
+  margin-bottom: 4px;
+  font-variation-settings: "opsz" 36, "SOFT" 50;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.settings-section h3 svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--terra);
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 14.5px;
+  color: var(--ink);
+  padding: 6px 0;
+}
+.toggle-row .tdesc {
+  font-style: italic;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+/* Pill toggle. The mockup drives the "on" look via .switch.on; the production
+   templates (index.html) drive it via role="switch" aria-checked="true", which
+   the router flips. Both selectors map to the SAME mockup declarations so the
+   look is identical no matter which the router sets. No new values invented. */
+.switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  transition: all 0.25s var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition: all 0.25s var(--ease);
+}
+.switch.on,
+.switch[aria-checked="true"] {
+  background: rgba(196, 99, 42, 0.18);
+  border-color: var(--terra);
+}
+.switch.on::after,
+.switch[aria-checked="true"]::after {
+  left: 20px;
+  background: var(--terra);
+}
+
+.slider-row {
+  margin: 14px 0;
+}
+.slider-row .srhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.slider-row .srhead .srval {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--terra);
+}
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--terra);
+  height: 4px;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.session-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-2);
+  margin-bottom: 14px;
+}
+.session-line svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--sage);
+}
+.btn-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  border-radius: 11px;
+  padding: 9px 15px;
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-variation-settings: "opsz" 36, "SOFT" 100;
+  transition: all 0.25s var(--ease);
+}
+.ghost-btn svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+}
+.ghost-btn:hover {
+  border-color: var(--terra);
+  color: var(--terra);
+  background: rgba(196, 99, 42, 0.04);
+}
+.ghost-btn.danger:hover {
+  border-color: var(--signal-off);
+  color: var(--signal-off);
+  background: rgba(179, 74, 63, 0.05);
+}
+.about-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--ink-2);
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.about-line:last-child {
+  border-bottom: none;
+}
+.about-line .ver {
+  color: var(--terra);
+}
+.about-line a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--terra);
+  cursor: pointer;
+}
+.about-line a svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+}

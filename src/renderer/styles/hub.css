@@ -1,0 +1,239 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Voxa — Hub Layout Chrome  (OWNS: the app shell + sidebar + view + drawer)
+   ────────────────────────────────────────────────────────────────────────
+   Extracted from docs/ui-mocks/v3-whisperflow.html. This file owns the
+   structural chrome shared by every Hub view:
+     • .app-shell  — sidebar | view | drawer grid
+     • .sidebar    — 240px vellum rail, .nav / .nav-item (40px, Phosphor SVG
+                     + IBM Plex Mono uppercase labels, terra active left-rule),
+                     .sidebar-brand, .sidebar-foot, .sidebar-status, .dot
+     • #view       — scrolling content container, .content-head
+     • .drawer     — 380px right slide-in (transform + 280ms --ease, hidden
+                     by default; .open reveals it)
+     • .card / .stat-card shadows shared across views
+   Mockup values are copied pixel-for-pixel. The review-only "dev-divider"
+   styling is intentionally NOT ported (it was a mockup-stacking aid).
+   Tokens come from tokens.css; shared typography/.note from styles.css.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════════════
+   The Hub shell — sidebar | view | (right) drawer
+   In the mockup this was .hub-frame (a flex row). In production it is the
+   full-window app shell. Same surface, border, radius and card shadow.
+   ════════════════════════════════════════════════════════════════════════ */
+.app-shell {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  background: var(--paper);
+  min-height: 100vh;
+  overflow: hidden;
+  /* Reserve the 40px title-bar band (matches titleBarOverlay height in
+     main.js) so the native Windows min/max/close controls don't overlap
+     the sidebar / #view content. border-box keeps the padding inside
+     100vh, so no extra scroll is introduced. */
+  box-sizing: border-box;
+  padding-top: 40px;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 100%);
+  border-right: 1px solid var(--rule);
+  padding: 26px 16px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 4px 10px 22px;
+}
+.sidebar-brand .mark {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  font-variation-settings: "opsz" 72, "SOFT" 50;
+}
+.sidebar-brand .mark em {
+  color: var(--terra);
+  font-style: italic;
+}
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease);
+}
+.nav-item .label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.nav-item svg {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  stroke: currentColor;
+}
+.nav-item:hover {
+  background: rgba(196, 99, 42, 0.06);
+  color: var(--ink);
+}
+.nav-item.active {
+  background: var(--vellum);
+  color: var(--terra);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 4px 14px -8px rgba(45, 36, 24, 0.18);
+}
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--terra);
+}
+.sidebar-foot {
+  margin-top: auto;
+  padding: 14px 12px 4px;
+  border-top: 1px dashed var(--rule);
+}
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ── Status dots (shared: sidebar foot, history rows, drawer badge) ────── */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-pending {
+  background: var(--signal-pending);
+  box-shadow: 0 0 0 3px rgba(196, 99, 42, 0.14);
+}
+.dot-on {
+  background: var(--signal-on);
+}
+.dot-off {
+  background: var(--signal-off);
+}
+.dot-warn {
+  background: var(--signal-warn);
+}
+.dot-empty {
+  background: var(--ink-3);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   View — the scrolling content column
+   (mockup: .content). In production this is #view, the per-route container.
+   ════════════════════════════════════════════════════════════════════════ */
+#view,
+.view {
+  flex: 1;
+  min-width: 0;
+  padding: 38px 44px 44px;
+  overflow-y: auto;
+}
+.content-head {
+  margin-bottom: 28px;
+}
+.content-head h2 {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 30px;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  font-variation-settings: "opsz" 72, "SOFT" 50;
+}
+.content-head .sub {
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Cards — shared surface for Home stats, Right-now / flow panels, Settings
+   sections. Same vellum + rule + inset-highlight shadow as the mockup.
+   ════════════════════════════════════════════════════════════════════════ */
+.card {
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 22px -16px rgba(45, 36, 24, 0.14);
+}
+.stat-card {
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  padding: 20px 22px 18px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 22px -16px rgba(45, 36, 24, 0.16);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Drawer — 380px right slide-in panel
+   The mockup rendered it as a static third column inside .hub-frame. In
+   production it is a fixed right-edge panel that slides in over the view.
+   Hidden by default (off-screen via transform); .open reveals it with the
+   280ms --ease curve called for in the brief. The internal surface, border,
+   and --shadow-drawer are copied verbatim from the mockup .drawer.
+   ════════════════════════════════════════════════════════════════════════ */
+.drawer {
+  position: fixed;
+  /* Start below the 40px title-bar band (matches titleBarOverlay height in
+     main.js) so the drawer header (status badge / back / close) clears the
+     native Windows window controls. bottom:0 keeps it spanning 40px→bottom. */
+  top: 40px;
+  right: 0;
+  bottom: 0;
+  width: var(--drawer-w);
+  flex-shrink: 0;
+  z-index: 40;
+  background: var(--vellum);
+  border-left: 1px solid var(--rule);
+  box-shadow: var(--shadow-drawer);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 280ms var(--ease);
+}
+.drawer.open {
+  transform: translateX(0);
+}
+.drawer[hidden] {
+  display: none;
+}
