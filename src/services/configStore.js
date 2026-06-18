@@ -6,8 +6,11 @@ const defaults = {
   overlayPosition: "bottom-right",
   maxRecordingSeconds: 300,
   inputDeviceId: "default",
-  successAudioRetentionHours: 24,
+  // 0 = keep successful audio (so past dictations stay playable). Disk use is
+  // bounded by audioMaxMB, which evicts the oldest audio when exceeded.
+  successAudioRetentionHours: 0,
   failedAudioRetentionDays: 7,
+  audioMaxMB: 2048,
   historyMaxEntries: 0,
   privacyMode: false,
   showLastFailedSection: true,
@@ -17,6 +20,7 @@ const defaults = {
 const numericMinZeroKeys = [
   "successAudioRetentionHours",
   "failedAudioRetentionDays",
+  "audioMaxMB",
   "historyMaxEntries",
   "lastFailedBannerCap"
 ];
@@ -31,6 +35,15 @@ function coerceNumericMinZero(key, value) {
 
 const store = new Store({ name: "preferences", defaults });
 
+// One-time upgrade: earlier builds defaulted success-audio retention to 24h,
+// which silently deleted past audio. Now we keep it. Flip the old default to
+// "keep" once, so existing users get playable history without digging into
+// Settings. A user who deliberately set a non-24 value is left untouched.
+if (!store.get("retentionMigratedV2") && store.get("successAudioRetentionHours") === 24) {
+  store.set("successAudioRetentionHours", 0);
+}
+store.set("retentionMigratedV2", true);
+
 function getPreferences() {
   return {
     startHotkey: store.get("startHotkey"),
@@ -40,6 +53,7 @@ function getPreferences() {
     inputDeviceId: store.get("inputDeviceId"),
     successAudioRetentionHours: store.get("successAudioRetentionHours"),
     failedAudioRetentionDays: store.get("failedAudioRetentionDays"),
+    audioMaxMB: store.get("audioMaxMB"),
     historyMaxEntries: store.get("historyMaxEntries"),
     privacyMode: store.get("privacyMode"),
     showLastFailedSection: store.get("showLastFailedSection"),

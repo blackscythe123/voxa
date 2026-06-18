@@ -255,6 +255,11 @@
       let timerHandle;
       let seconds = 0;
       let maxSecs = 120;
+      // Serializes chunk reads + sends in strict event order. The async
+      // ondataavailable handler used to race: a later chunk's arrayBuffer()
+      // could resolve first and get written before the header chunk, producing
+      // a corrupt WebM (header not at byte 0). This chain guarantees order.
+      let chunkChain = Promise.resolve();
 
       function formatTime(s) {
         return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
@@ -290,11 +295,16 @@
         // instant recording begins — it survives a crash and can be retried.
         await window.voiceBridge?.recordingStartMeta({ id: currentId, startedAt });
 
-        mediaRecorder.ondataavailable = async (e) => {
-          if (e.data.size > 0) {
+        chunkChain = Promise.resolve();
+        const recId = currentId;
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size === 0) return;
+          // Append to the chain so each chunk is read AND sent strictly in the
+          // order the events fired — never reordered by async timing.
+          chunkChain = chunkChain.then(async () => {
             const buf = await e.data.arrayBuffer();
-            window.voiceBridge?.recordingChunk({ id: currentId, chunk: Array.from(new Uint8Array(buf)) });
-          }
+            await window.voiceBridge?.recordingChunk({ id: recId, chunk: Array.from(new Uint8Array(buf)) });
+          }).catch((err) => console.error("[overlay] chunk send failed", err));
         };
         mediaRecorder.start(250);
         recordingStartTime = Date.now();
@@ -322,6 +332,10 @@
           mediaRecorder.stop();
         });
         mediaRecorder.stream.getTracks().forEach((t) => t.stop());
+
+        // Drain every queued chunk (including the final dataavailable) BEFORE
+        // telling main to finalize, so the on-disk file is complete and ordered.
+        await chunkChain;
 
         console.log(`[overlay] webm/opus stream finalize id=${finalizeId}  duration: ${durationMs}ms`);
 

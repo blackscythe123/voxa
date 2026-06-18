@@ -299,22 +299,36 @@ function getPurgeCandidates({ successHrs, failedDays } = {}) {
   const successCutoff = now - hrs * HOUR_MS;
   const failedCutoff = now - days * DAY_MS;
 
+  // successHrs <= 0 means "keep success audio" — never time-purge it (disk-cap
+  // purging handles space). Failed/empty audio still expires after failedDays.
   return rows
     .filter((r) => r.audio_filename != null && r.audio_purged_at == null)
     .filter((r) =>
-      (r.status === "ok" && r.created_at <= successCutoff) ||
+      (hrs > 0 && r.status === "ok" && r.created_at <= successCutoff) ||
       ((r.status === "failed" || r.status === "empty") && r.created_at <= failedCutoff)
     )
     .map(clone);
 }
 
+// Success rows whose audio is still on disk, oldest first — used by the
+// disk-cap purge to evict the oldest audio when the folder grows too large.
+function getSuccessAudioSorted() {
+  ensureOpen();
+  return rows
+    .filter((r) => r.status === "ok" && r.audio_filename != null && r.audio_purged_at == null)
+    .sort((a, b) => a.created_at - b.created_at)
+    .map((r) => ({ id: r.id, audio_bytes: r.audio_bytes || 0, created_at: r.created_at }));
+}
+
 function getRecentFailures(limit = 5) {
   ensureOpen();
   const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 5;
+  // Only real failures with retryable audio. "empty" (no speech) rows are not
+  // failures and must not appear in the retry banner.
   return rows
     .filter(
       (r) =>
-        (r.status === "failed" || r.status === "empty") &&
+        r.status === "failed" &&
         r.audio_filename != null &&
         r.audio_purged_at == null
     )
@@ -369,6 +383,7 @@ module.exports = {
   getOrphanPending,
   getPurgeCandidates,
   getRecentFailures,
+  getSuccessAudioSorted,
   purgeAllSuccessAudio,
   deleteAllSuccess
 };

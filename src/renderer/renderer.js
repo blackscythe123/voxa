@@ -311,22 +311,66 @@
   }
 
   function applyAuthPip(auth) {
-    const pip = byId("authPip");
-    if (!pip) return;
-    const dot = pip.querySelector(".dot") || (() => {
-      const d = document.createElement("span");
-      d.className = "dot";
-      pip.prepend(d);
-      return d;
-    })();
-    dot.className = "dot " + (auth.signedIn ? "dot-on" : "dot-off");
-    // replace label text node (keep the dot element)
-    const label = auth.signedIn ? (auth.email ? `signed in · ${auth.email}` : "signed in") : "signed out";
-    // wipe text nodes after the dot
-    Array.from(pip.childNodes).forEach((n) => {
-      if (n.nodeType === Node.TEXT_NODE) n.remove();
-    });
-    pip.appendChild(document.createTextNode(label));
+    // Update the sidebar profile's status dot + fallback label.
+    const dotEl = document.querySelector("#profileAvatar .dot");
+    if (dotEl) dotEl.className = "dot " + (auth.signedIn ? "dot-on" : "dot-off");
+    const nameEl = byId("profileName");
+    const emailEl = byId("profileEmail");
+    if (!auth.signedIn) {
+      if (nameEl) setText(nameEl, "Signed out");
+      if (emailEl) setText(emailEl, "");
+    } else if (nameEl && /checking/i.test(nameEl.textContent || "")) {
+      setText(nameEl, "Signed in");
+    }
+  }
+
+  function applyProfileIdentity(account) {
+    if (!account) return;
+    const nameEl = byId("profileName");
+    const emailEl = byId("profileEmail");
+    const avatar = byId("profileAvatar");
+    if (nameEl) setText(nameEl, account.name || account.email || "Signed in");
+    if (emailEl) setText(emailEl, account.email || "");
+    if (avatar && account.image) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      img.onload = () => { avatar.innerHTML = ""; avatar.appendChild(img); };
+      img.onerror = () => { /* keep the dot fallback */ };
+      img.src = account.image;
+    }
+  }
+
+  // Sidebar profile (bottom-left): identity + Sign out / Re-authenticate.
+  async function mountProfile() {
+    const auth = normalizeAuth(await call("getAuthStatus"));
+    applyAuthPip(auth);
+    if (auth.signedIn) {
+      const account = await call("getAccountInfo");
+      applyProfileIdentity(account);
+    }
+    const reauth = byId("reauthBtnSidebar");
+    if (reauth && !reauth.dataset.wired) {
+      reauth.dataset.wired = "1";
+      reauth.addEventListener("click", async () => {
+        reauth.disabled = true;
+        const res = await call("loginChatGPT");
+        reauth.disabled = false;
+        await mountProfile();
+        const ok = !!(res && (res.signedIn || res.ok));
+        toast(ok ? "re-authenticated" : "sign-in didn't complete", ok ? "ok" : "error");
+      });
+    }
+    const signOut = byId("signOutBtnSidebar");
+    if (signOut && !signOut.dataset.wired) {
+      signOut.dataset.wired = "1";
+      signOut.addEventListener("click", async () => {
+        if (!window.confirm("Sign out of ChatGPT? You'll need to sign in again to transcribe.")) return;
+        await call("signOut");
+        await mountProfile();
+        toast("signed out", "ok");
+      });
+    }
   }
 
   function applyAuthBadge(auth) {
@@ -349,6 +393,7 @@
     const auth = normalizeAuth(await call("getAuthStatus"));
     applyAuthPip(auth);
     applyAuthBadge(auth);
+    if (auth.signedIn) call("getAccountInfo").then(applyProfileIdentity);
     return auth;
   }
 
@@ -445,10 +490,11 @@
   // ════════════════════════════════════════════════════════════════════════
   // HISTORY
   // ════════════════════════════════════════════════════════════════════════
-  let historyState = null; // { view, search, prefs, debounceTimer }
+  let historyState = null; // { view, search, prefs, debounceTimer, loaded }
+  const HISTORY_PAGE_SIZE = 50;
 
   async function mountHistory(view) {
-    historyState = { view, search: "", prefs: {}, debounceTimer: null };
+    historyState = { view, search: "", prefs: {}, debounceTimer: null, loaded: HISTORY_PAGE_SIZE };
     historyState.prefs = (await call("getPreferences")) || {};
 
     // search box w/ 200ms debounce
@@ -458,6 +504,7 @@
         window.clearTimeout(historyState.debounceTimer);
         historyState.debounceTimer = window.setTimeout(() => {
           historyState.search = searchInput.value.trim();
+          historyState.loaded = HISTORY_PAGE_SIZE; // reset paging on a new search
           renderHistoryList();
         }, 200);
       });
@@ -547,8 +594,9 @@
     const emptyEl = byId("historyEmpty", view);
     if (!groupsHost) return;
 
+    const loaded = historyState.loaded || HISTORY_PAGE_SIZE;
     const res =
-      (await call("historyList", { limit: 200, offset: 0, search: search || undefined })) || {};
+      (await call("historyList", { limit: loaded, offset: 0, search: search || undefined })) || {};
     const rows = Array.isArray(res.rows) ? res.rows : [];
     const total = res.total != null ? res.total : rows.length;
 
@@ -592,6 +640,20 @@
         rowsContainer.appendChild(buildHistoryRow(row, rowTpl));
       }
       groupsHost.appendChild(groupNode);
+    }
+
+    // Windowed paging: if more rows exist than we've loaded, offer "Load more".
+    if (total > rows.length) {
+      const remaining = total - rows.length;
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "load-more-btn";
+      more.textContent = `Load more (${remaining} older)`;
+      more.addEventListener("click", () => {
+        historyState.loaded = (historyState.loaded || HISTORY_PAGE_SIZE) + HISTORY_PAGE_SIZE;
+        renderHistoryList();
+      });
+      groupsHost.appendChild(more);
     }
   }
 
@@ -639,7 +701,7 @@
       case "failed":
         return "— transcription failed";
       case "empty":
-        return "— silence, nothing captured";
+        return "— no speech detected";
       case "pending":
         return "— transcribing…";
       default:
@@ -664,7 +726,9 @@
   }
 
   function canRetry(row) {
-    return !!row.audio_filename && !row.audio_purged_at;
+    // Only real failures with audio still on disk. Never offer Retry for an
+    // empty/"no speech" row — re-sending silence is pointless.
+    return row.status === "failed" && !!row.audio_filename && !row.audio_purged_at;
   }
 
   // ── Row context menu ─────────────────────────────────────────────────────
@@ -703,7 +767,7 @@
     menu.className = "row-context-menu";
 
     menu.appendChild(menuItem("Copy", "M9 9h11v11H9zM5 15V5a2 2 0 0 1 2-2h10", () => handleCopy(row.id)));
-    menu.appendChild(menuItem("Re-insert", "M9 10 4 15l5 5M4 15h11a5 5 0 0 0 5-5V5", () => handleReinsert(row.id)));
+    menu.appendChild(menuItem("Paste into focused app", "M9 10 4 15l5 5M4 15h11a5 5 0 0 0 5-5V5", () => handleReinsert(row.id)));
     const retryItem = menuItem("Retry", "M21 12a9 9 0 1 1-2.6-6.4M21 3v4.5h-4.5", () => handleRetry(row.id));
     if (!canRetry(row)) {
       retryItem.disabled = true;
@@ -775,7 +839,7 @@
       const bdot = badge.querySelector(".dot");
       if (bdot) bdot.className = "dot " + dotClassFor(row.status);
       // append status label text
-      const labelMap = { ok: "Saved", failed: "Failed", empty: "Empty", pending: "Pending" };
+      const labelMap = { ok: "Saved", failed: "Failed", empty: "No speech", pending: "Pending" };
       Array.from(badge.childNodes).forEach((n) => {
         if (n.nodeType === Node.TEXT_NODE) n.remove();
       });
@@ -785,39 +849,62 @@
     // transcript
     setText(byId("drawerTranscript", drawer), row.transcript || previewText(row));
 
-    // audio — only if still on disk
+    // audio — play it if still on disk; otherwise say so plainly (don't show a
+    // dead player). audio_purged_at set = cleared to save space; null filename
+    // = never captured (e.g. a crash mid-recording).
     const audio = byId("drawerAudio", drawer);
     const audioBlock = audio ? audio.closest(".audio-block") : null;
+    const goneNote = byId("drawerAudioGone", drawer);
     const audioAvailable = row.audio_filename && !row.audio_purged_at;
-    if (audio) {
+    if (audio && audioBlock) {
       audio.removeAttribute("src");
+      audioBlock.hidden = false;
+      const showGone = (msg) => {
+        audio.hidden = true;
+        if (goneNote) { goneNote.hidden = false; setText(goneNote, msg); }
+      };
+      const showPlayer = () => {
+        audio.hidden = false;
+        if (goneNote) goneNote.hidden = true;
+      };
       if (audioAvailable) {
-        if (audioBlock) audioBlock.hidden = false;
+        showPlayer();
         call("historyAudioData", row.id).then((dataUrl) => {
-          // Guard against the drawer having moved on to another row meanwhile.
-          if (!dataUrl) { if (audioBlock) audioBlock.hidden = true; return; }
           if (drawer.dataset.id && drawer.dataset.id !== String(row.id)) return;
+          if (!dataUrl) { showGone("audio no longer available"); return; }
           audio.src = dataUrl;
           audio.load();
           fixInfiniteDuration(audio);
         });
-      } else if (audioBlock) {
-        audioBlock.hidden = true;
+      } else if (!row.audio_filename) {
+        showGone("no audio was captured for this recording");
+      } else {
+        showGone("audio no longer available — it was cleared to save space");
       }
     }
 
     // meta grid
     fillMetaGrid(byId("drawerMeta", drawer), row);
 
-    // error box
+    // error box — red "what went wrong" for real failures; a calm neutral note
+    // for "no speech" (an empty/silent recording is not an error).
     const errorBox = byId("drawerError", drawer);
     if (errorBox) {
+      const etitle = errorBox.querySelector(".etitle");
+      const emsg = errorBox.querySelector(".emsg");
       if (row.status === "failed") {
         errorBox.hidden = false;
-        const emsg = errorBox.querySelector(".emsg");
+        errorBox.classList.remove("info");
+        if (etitle) setText(etitle, "WHAT WENT WRONG");
         setText(emsg, row.error_message || errorCopy(row.error_kind));
+      } else if (row.status === "empty") {
+        errorBox.hidden = false;
+        errorBox.classList.add("info");
+        if (etitle) setText(etitle, "NO SPEECH DETECTED");
+        setText(emsg, "There was no audio to transcribe — check that your microphone isn't muted or set to the wrong device.");
       } else {
         errorBox.hidden = true;
+        errorBox.classList.remove("info");
       }
     }
 
@@ -970,8 +1057,8 @@
 
   async function handleReinsert(id) {
     const res = await call("historyReinsert", id);
-    if (res === undefined || (res && res.ok !== false)) toast("re-inserted", "ok");
-    else toast("couldn't re-insert", "error");
+    if (res === undefined || (res && res.ok !== false)) toast("pasted into focused app", "ok");
+    else toast("couldn't paste — copy it instead", "error");
   }
 
   async function handleReveal(id) {
@@ -1368,7 +1455,8 @@
       (v) => Number(v) >= 11 ? "no limit" : `${v} min`,
       (v) => v >= 11 ? 0 : v * 60
     );
-    wireSlider("successAudioRetention", "successAudioRetentionVal", "successAudioRetentionHours", prefs.successAudioRetentionHours, (v) => `${v}h`);
+    wireSlider("successAudioRetention", "successAudioRetentionVal", "successAudioRetentionHours", prefs.successAudioRetentionHours,
+      (v) => Number(v) === 0 ? "keep" : (Number(v) >= 24 ? `${Math.round(v / 24)}d` : `${v}h`));
     wireSlider("failedAudioRetention", "failedAudioRetentionVal", "failedAudioRetentionDays", prefs.failedAudioRetentionDays, (v) => `${v}d`);
 
     // privacy mode + history cap toggles
@@ -1485,8 +1573,8 @@
       }
     });
 
-    // initial auth pip in the sidebar foot, before any route mounts it
-    refreshAuth();
+    // sidebar profile (identity + sign out / re-auth), persistent across routes
+    mountProfile();
 
     route("home");
   }

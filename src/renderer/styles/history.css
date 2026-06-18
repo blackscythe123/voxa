@@ -378,6 +378,39 @@
   font-size: 14px;
   color: var(--ink);
 }
+/* "No speech" is informational, not an error — use a calm amber rule. */
+.error-box.info {
+  border-left-color: var(--signal-warn);
+}
+.error-box.info .etitle {
+  color: var(--signal-warn);
+}
+
+/* Drawer note when audio is genuinely gone (purged / never captured). */
+.audio-gone {
+  font-family: "Lora", serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-3);
+  padding: 6px 2px;
+}
+
+/* History "Load more" pager button. */
+.load-more-btn {
+  display: block;
+  margin: 18px auto 8px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.load-more-btn:hover { background: rgba(196, 99, 42, 0.06); color: var(--terra); }
 .drawer-actions {
   display: flex;
   flex-wrap: wrap;

@@ -33,6 +33,7 @@ function logout() {
   // Drop the saved session so the next dictation forces a fresh login.
   try {
     if (fs.existsSync(getCookiesPath())) fs.unlinkSync(getCookiesPath());
+    clearAccount();
     return true;
   } catch {
     return false;
@@ -112,7 +113,44 @@ async function refreshAccessToken() {
     throw new Error("No access token returned. If you see WARNING_BANNER, login first.");
   }
 
+  // Cache the signed-in identity (name/email/avatar/plan) — NOT tokens — so the
+  // profile can be shown. The session response already carries this.
+  cacheAccount(data);
+
   return data.accessToken;
+}
+
+// ── Account identity (display only — never stores tokens) ──────────────────
+let accountInfo = null;
+function getAccountPath() {
+  return path.join(app.getPath("userData"), "chatgpt-account.json");
+}
+function cacheAccount(data) {
+  const u = (data && data.user) || {};
+  const a = (data && data.account) || {};
+  const info = {
+    name: u.name || null,
+    email: u.email || null,
+    image: u.image || u.picture || null,
+    planType: a.planType || null
+  };
+  if (!info.name && !info.email && !info.image) return; // nothing useful
+  accountInfo = info;
+  try { fs.writeFileSync(getAccountPath(), JSON.stringify(info), "utf8"); } catch { /* best effort */ }
+}
+function loadAccountFromDisk() {
+  try { return JSON.parse(fs.readFileSync(getAccountPath(), "utf8")); } catch { return null; }
+}
+function clearAccount() {
+  accountInfo = null;
+  try { if (fs.existsSync(getAccountPath())) fs.unlinkSync(getAccountPath()); } catch { /* best effort */ }
+}
+// Best-effort: refresh from the live session, but fall back to the last known
+// identity so the profile still renders offline / when the session expired.
+async function getAccountInfo() {
+  try { await refreshAccessToken(); } catch { /* keep cached */ }
+  if (!accountInfo) accountInfo = loadAccountFromDisk();
+  return accountInfo;
 }
 
 function loginWithBrowserWindow() {
@@ -256,5 +294,6 @@ module.exports = {
   validateSession,
   loginWithBrowserWindow,
   refreshAccessToken,
-  transcribeAudio
+  transcribeAudio,
+  getAccountInfo
 };

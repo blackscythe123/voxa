@@ -74,6 +74,9 @@ function loadServices() {
 //   fetch errors / aborts / timeouts         -> network/timeout
 function classifyError(message) {
   const m = (message || "").toLowerCase();
+  // An empty transcript means the audio had no speech (muted/silent mic) — a
+  // "no speech" outcome, not a real failure, and never worth retrying.
+  if (m.includes("empty transcript") || m.includes("no speech")) return "no_speech";
   if (m.includes("microphone captured silence") || m.includes("silence")) return "silence";
   if (
     m.includes("session expired") ||
@@ -660,7 +663,25 @@ ipcMain.handle("finalize-recording", async (_event, ...args) => {
 
   try {
     const transcript = await chatgptAuth.transcribeAudio(buf, mimeType);
-    if (!transcript) throw new Error("Empty transcript returned.");
+
+    // Empty transcript = ChatGPT processed the audio but heard no speech
+    // (almost always a muted/silent mic). This is NOT an error, and Retry is
+    // pointless — re-sending silence yields the same empty result.
+    if (!transcript || !transcript.trim()) {
+      historyStore.finalize({
+        id, status: "empty", transcript: null,
+        errorKind: "no_speech",
+        errorMessage: "No speech detected — check that your microphone isn't muted.",
+        durationMs: durationMs || 0, wordCount: 0,
+        audioFilename, audioBytes
+      });
+      mainWindow?.webContents.send("history-changed", { id, kind: "update" });
+      activeDictationId = null;
+      setRecordingState(false);
+      if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+      notifyMain("ready", "No speech detected — check that your mic isn't muted.");
+      return { ok: false, empty: true };
+    }
 
     const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length;
 
@@ -698,7 +719,7 @@ ipcMain.handle("finalize-recording", async (_event, ...args) => {
     try {
       historyStore.finalize({
         id,
-        status: errorKind === "silence" ? "empty" : "failed",
+        status: (errorKind === "silence" || errorKind === "no_speech") ? "empty" : "failed",
         transcript: null,
         errorKind,
         errorMessage: msg,
@@ -833,7 +854,7 @@ ipcMain.handle("history-retry", async (_e, id) => {
     const kind = classifyError(err.message);
     historyStore.markRetry({
       id,
-      status: kind === "silence" ? "empty" : "failed",
+      status: (kind === "silence" || kind === "no_speech") ? "empty" : "failed",
       transcript: null,
       errorKind: kind,
       errorMessage: err.message
@@ -865,6 +886,11 @@ ipcMain.handle("login-chatgpt", async () => {
 ipcMain.handle("get-auth-status", async () => {
   loadServices();
   return chatgptAuth.validateSession();
+});
+
+ipcMain.handle("get-account-info", async () => {
+  loadServices();
+  try { return await chatgptAuth.getAccountInfo(); } catch { return null; }
 });
 
 ipcMain.handle("get-preferences", () => {

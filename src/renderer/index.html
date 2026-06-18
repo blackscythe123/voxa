@@ -56,8 +56,20 @@
             </button>
           </nav>
           <div class="sidebar-foot">
-            <!-- ChatGPT auth pip — router sets .dot-on / .dot-off / .dot-pending + label -->
-            <div class="sidebar-status" id="authPip"><span class="dot dot-pending"></span>Checking…</div>
+            <!-- Signed-in ChatGPT profile — router fills name/email/avatar -->
+            <div class="profile" id="profileBox">
+              <div class="profile-id">
+                <span class="avatar" id="profileAvatar"><span class="dot dot-pending"></span></span>
+                <div class="profile-text">
+                  <span class="profile-name" id="profileName">Checking…</span>
+                  <span class="profile-email" id="profileEmail"></span>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <button class="profile-btn" id="reauthBtnSidebar" type="button" title="Sign in to ChatGPT again to refresh your session">Re-authenticate</button>
+                <button class="profile-btn danger" id="signOutBtnSidebar" type="button" title="Clear the saved ChatGPT session">Sign out</button>
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -358,7 +370,7 @@
             <label class="field-label" for="successAudioRetention" style="margin: 0">successful audio retention</label>
             <span class="srval" id="successAudioRetentionVal">24h</span>
           </div>
-          <input type="range" id="successAudioRetention" min="1" max="168" value="24" />
+          <input type="range" id="successAudioRetention" min="0" max="168" value="0" />
         </div>
         <div class="slider-row">
           <div class="srhead">
@@ -480,6 +492,7 @@
         <div class="audio-block">
           <label>recorded audio</label>
           <audio controls id="drawerAudio"></audio>
+          <p class="audio-gone" id="drawerAudioGone" hidden>audio no longer available</p>
         </div>
 
         <div class="meta-grid" id="drawerMeta"></div>
@@ -494,9 +507,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
           Copy
         </button>
-        <button class="action-btn" id="drawerReinsert" type="button">
+        <button class="action-btn" id="drawerReinsert" type="button" title="Paste this transcript into whatever app/field has focus right now">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10 4 15l5 5"/><path d="M4 15h11a5 5 0 0 0 5-5V5"/></svg>
-          Re-insert
+          Paste into focused app
         </button>
         <button class="action-btn primary" id="drawerRetry" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v4.5h-4.5"/></svg>

@@ -26,7 +26,9 @@
   z-index: 10;
   display: flex;
   background: var(--paper);
-  min-height: 100vh;
+  /* Fixed to the viewport height (not min-height) so the sidebar stays put and
+     only #view scrolls internally — the whole window must not scroll. */
+  height: 100vh;
   overflow: hidden;
   /* Reserve the 40px title-bar band (matches titleBarOverlay height in
      main.js) so the native Windows min/max/close controls don't overlap
@@ -115,9 +117,49 @@
 }
 .sidebar-foot {
   margin-top: auto;
-  padding: 14px 12px 4px;
+  padding: 14px 10px 4px;
   border-top: 1px dashed var(--rule);
 }
+
+/* ── Sidebar profile (signed-in ChatGPT identity + actions) ────────────── */
+.profile { display: flex; flex-direction: column; gap: 10px; }
+.profile-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.profile .avatar {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.profile .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-text { display: flex; flex-direction: column; min-width: 0; }
+.profile-name {
+  font-family: "Lora", Georgia, serif;
+  font-size: 13px; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.profile-email {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.profile-actions { display: flex; gap: 6px; }
+.profile-btn {
+  flex: 1;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--vellum);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 7px 4px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.profile-btn:hover { background: rgba(196, 99, 42, 0.06); color: var(--terra); border-color: var(--terra-warm); }
+.profile-btn.danger:hover { color: var(--signal-off); border-color: var(--signal-off); background: rgba(179, 74, 63, 0.06); }
+.profile-btn:disabled { opacity: 0.5; cursor: default; }
 .sidebar-status {
   display: flex;
   align-items: center;
@@ -161,6 +203,7 @@
 .view {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   padding: 38px 44px 44px;
   overflow-y: auto;
 }

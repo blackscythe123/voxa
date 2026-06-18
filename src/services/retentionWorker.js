@@ -4,8 +4,9 @@ const configStore = require("./configStore");
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
-const DEFAULT_SUCCESS_HOURS = 24;
+const DEFAULT_SUCCESS_HOURS = 0; // keep successful audio by default
 const DEFAULT_FAILED_DAYS = 7;
+const DEFAULT_AUDIO_MAX_MB = 2048;
 
 let intervalHandle = null;
 let started = false;
@@ -26,8 +27,9 @@ function readPrefs() {
     prefs.failedAudioRetentionDays,
     DEFAULT_FAILED_DAYS
   );
+  const audioMaxMB = numberOrDefault(prefs.audioMaxMB, DEFAULT_AUDIO_MAX_MB);
   const privacyMode = Boolean(prefs.privacyMode);
-  return { successAudioRetentionHours, failedAudioRetentionDays, privacyMode };
+  return { successAudioRetentionHours, failedAudioRetentionDays, audioMaxMB, privacyMode };
 }
 
 function numberOrDefault(value, fallback) {
@@ -78,6 +80,34 @@ async function runOnce() {
         errors.push({ id: row.id, error: message });
         log("warn", `purge failed for id=${row.id}: ${message}`);
       }
+    }
+
+    // Disk-cap purge: keep total success audio under audioMaxMB by evicting the
+    // oldest first. This is what bounds disk now that success audio is kept.
+    try {
+      const capBytes = prefs.audioMaxMB > 0 ? prefs.audioMaxMB * 1024 * 1024 : Infinity;
+      if (Number.isFinite(capBytes)) {
+        const successRows = historyStore.getSuccessAudioSorted() || []; // oldest first
+        let total = successRows.reduce((s, r) => s + (r.audio_bytes || 0), 0);
+        let evicted = 0;
+        for (const r of successRows) {
+          if (total <= capBytes) break;
+          try {
+            await audioStore.deleteFile(r.id);
+            historyStore.markAudioPurged(r.id);
+            total -= r.audio_bytes || 0;
+            purgedCount += 1;
+            evicted += 1;
+          } catch (err) {
+            errors.push({ id: r.id, error: String((err && err.message) || err) });
+          }
+        }
+        if (evicted > 0) {
+          log("log", `disk-cap: evicted ${evicted} oldest clips to stay under ${prefs.audioMaxMB}MB`);
+        }
+      }
+    } catch (err) {
+      log("error", "disk-cap purge failed", err);
     }
 
     log("log", `run end: purged=${purgedCount} errors=${errors.length}`);
