@@ -1,24 +1,36 @@
 # Voxa
 
-A cross-platform desktop app that captures voice input, transcribes it using ChatGPT, and automatically inserts the text into any active text field.
+A cross-platform voice-to-text assistant. The desktop app captures speech on a global hotkey, transcribes it through ChatGPT, and pastes the result into whatever app is focused. An Android keyboard lives in [`voxa-kotlin/`](voxa-kotlin/).
+
+**Current version:** 0.2.4
 
 ## Features
 
-- **System-wide hotkey listening** — Press your configured hotkey from anywhere (VS Code, Word, browser, etc.)
-- **Voice recording overlay** — Small floating widget shows recording timer
-- **ChatGPT transcription** — Uses ChatGPT's backend API for accurate speech-to-text
-- **Auto-insert** — Transcribed text automatically typed into the active text field
-- **Configurable settings** — User hotkeys, overlay position, max recording duration
-- **Background operation** — Runs in system tray; no window clutter
+### Desktop
+
+- **System-wide hotkey** — Start and stop recording from any app (default: `F9` to start, `Escape` to stop)
+- **Recording overlay** — Small floating widget with a live timer
+- **ChatGPT transcription** — Uses ChatGPT's backend Whisper API for speech-to-text
+- **Auto-paste** — Transcript is copied to the clipboard and pasted into the focused field (Windows: `Ctrl+V` via SendKeys; other platforms: clipboard fallback)
+- **Hub UI** — Home, History, Microphone, Shortcuts, and Settings in one window
+- **Dictation history** — Browse past transcripts with source app labels, word counts, and pagination
+- **Audio retention** — Replay saved recordings; configurable retention and disk limits
+- **Retry** — Re-transcribe failed dictations from stored audio
+- **Unlimited recording** — No hard cap on session length (configurable max duration in Settings)
+- **Background operation** — Runs in the system tray with optional launch at login
+
+### Android keyboard
+
+The [`voxa-kotlin/`](voxa-kotlin/) tree contains a HeliBoard-based IME with an in-keyboard mic for voice input on Android. See [`voxa-kotlin/CLAUDE.md`](voxa-kotlin/CLAUDE.md) for build notes.
 
 ## Installation
 
-1. Clone or download this repository
-2. Navigate to the folder:
+1. Clone this repository:
    ```bash
-   cd Voxa
+   git clone https://github.com/blackscythe123/voxa.git
+   cd voxa
    ```
-3. Install dependencies:
+2. Install dependencies:
    ```bash
    npm install
    ```
@@ -29,106 +41,126 @@ A cross-platform desktop app that captures voice input, transcribes it using Cha
 npm start
 ```
 
-This launches the Electron app in the background. You should see a system tray icon appear.
+The app opens the Hub window and adds a system tray icon. You can close the window and keep dictating from the tray.
 
 ## Setup
 
-1. **Right-click the tray icon** → Select `Login to ChatGPT`
-   - A browser window opens automatically
-   - Complete your ChatGPT login (2FA, CAPTCHA, etc.)
-   - Once logged in, the app captures your session and closes the browser
-   - Session token is stored locally on your machine
+1. **Sign in to ChatGPT**
+   - Open **Settings** in the Hub (or right-click the tray icon → **Login to ChatGPT**)
+   - A browser window opens for ChatGPT login (2FA, CAPTCHA, etc.)
+   - Once signed in, your session is saved locally and the browser closes
 
-2. **Configure hotkeys** (optional):
-   - Right-click tray → `Preferences`
-   - Set your start hotkey (default: `Ctrl+Shift+R`)
-   - Set your stop hotkey (default: `Escape`)
-   - Choose overlay position (top-left, top-right, bottom-left, bottom-right)
-   - Click **Save**
+2. **Configure hotkeys and audio** (optional)
+   - **Shortcuts** — Set start/stop hotkeys and overlay position
+   - **Microphone** — Choose input device
+   - **Settings** — Retention limits, privacy mode, launch at login, and recording duration
 
 ## Usage
 
 1. Click into any text field (VS Code, Google Docs, Word, Slack, etc.)
-2. Press your start hotkey
+2. Press your start hotkey (`F9` by default)
 3. The recording overlay appears with a timer
 4. Speak naturally
-5. Press stop hotkey or click the **Stop** button
-6. Wait 1–3 seconds for transcription
-7. Transcript is automatically typed into the text field
+5. Press the stop hotkey or click **Stop**
+6. Wait a few seconds for transcription
+7. The transcript is pasted into the focused field (or left on the clipboard if paste fails)
+
+Open **History** in the Hub to review, replay audio, copy text, or retry failed dictations.
+
+## Building installers
+
+```bash
+npm run build:win     # Windows NSIS installer
+npm run build:mac     # macOS DMG + zip
+npm run build:linux   # Linux AppImage + deb
+npm run build:all     # All platforms
+```
+
+Output lands in `dist/`.
 
 ## Architecture
 
 ```
 src/
-├── main.js                      # Electron main process (hotkey, tray, IPC)
+├── main.js                      # Electron main process (hotkeys, tray, IPC, dictation pipeline)
 ├── preload.js                   # Secure preload bridge
 ├── services/
-│   ├── chatgptAuth.js           # Playwright login + transcription API
-│   ├── configStore.js           # Local preferences storage
-│   └── textInserter.js          # Text insertion via keyboard simulation
+│   ├── chatgptAuth.js           # ChatGPT login + transcription API
+│   ├── configStore.js           # Local preferences (electron-store)
+│   ├── historyStore.js          # Dictation history (JSON on disk)
+│   ├── audioStore.js            # Saved recording files
+│   ├── retentionWorker.js       # Audio/history cleanup by retention policy
+│   ├── sourceApp.js             # Foreground app detection for history labels
+│   └── textInserter.js          # Clipboard + paste into focused window
 └── renderer/
-    ├── index.html               # Recording overlay UI
-    ├── preferences.html         # Settings window
-    ├── renderer.js              # Overlay logic + audio capture
-    └── styles.css               # Overlay styling
+    ├── index.html               # Hub shell (sidebar + routed views)
+    ├── overlay.html             # Recording overlay
+    ├── renderer.js              # Hub router, audio capture, history UI
+    └── styles/                  # tokens, hub, history, views
 ```
 
 ## Dependencies
 
 - **Electron** — Desktop app framework
-- **Playwright** — Headless browser for ChatGPT authentication
-- **@nut-tree-fork/nut-js** — Keyboard text insertion
 - **electron-store** — Local preference persistence
+
+Dictation history and audio are stored under the app's user data directory (`history.json` and an `audio/` folder).
 
 ## Notes
 
 ### Security
-- ChatGPT session tokens are stored in your app's local user data folder
-- Audio is transmitted to ChatGPT's servers for transcription
-- No data is sent to third-party services beyond ChatGPT
+
+- ChatGPT session cookies are stored in the app's local user data folder
+- Audio is sent to ChatGPT's servers for transcription
+- **Privacy mode** (Settings) skips writing history and audio to disk
 
 ### Limitations
-- Text insertion uses simulated keyboard typing (not native clipboard paste yet)
-- Password fields are intentionally excluded from cursor detection for security
+
+- Automatic paste is implemented on Windows; macOS and Linux rely on clipboard + manual paste
+- Password fields are excluded from paste targets where possible
 - ChatGPT's internal API endpoints may change; updates may be required
 
 ### Troubleshooting
 
 **Hotkey not working?**
 - Check for conflicts with system hotkeys or other apps
-- Try a different hotkey in Preferences
+- Try a different hotkey in **Shortcuts**
 
 **Recording but no transcription?**
-- Verify ChatGPT login via tray menu
-- Check internet connection
-- ChatGPT API may be rate-limited or down
+- Sign in again via Settings or the tray menu
+- Check your internet connection
+- ChatGPT may be rate-limited or temporarily unavailable
 
 **Microphone not working?**
 - Grant microphone permission when prompted
-- Check system audio settings
-- Try another app (voicenotes, Discord) to confirm mic works
+- Pick the correct device under **Microphone**
+- Confirm the mic works in another app
 
 **Text not inserting?**
-- Ensure cursor is actively in a text field (click the field first)
-- Try clicking elsewhere and re-focusing the target field
-- Some password fields intentionally block text insertion
+- Click the target field before dictating
+- On non-Windows platforms, paste manually from the clipboard (`Ctrl+V` / `Cmd+V`)
+- Some secure fields block programmatic paste
+
+**History or audio missing?**
+- History requires a successful `npm install` with no errors loading history services
+- Check retention settings in **Settings** (success audio defaults to kept indefinitely, bounded by disk cap)
 
 ## Development
 
-To modify the code:
 1. Edit files in `src/`
 2. Restart the app (`npm start`)
-3. Changes to main process require full app restart
+3. Main-process changes require a full restart
 
-To rebuild and package:
+Regenerate tray/app icons after asset changes:
+
 ```bash
-npm run build   # (when configured)
+npm run icons
 ```
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
 
 ## Support
 
-For issues or feature requests, please open an issue in the repository.
+For issues or feature requests, open an issue on [GitHub](https://github.com/blackscythe123/voxa).
