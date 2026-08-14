@@ -231,7 +231,7 @@ async function transcribeAudio(audioBuffer, mimeType = "audio/webm") {
     const peak = peakAmplitudeFromWav(buf);
     if (peak !== null && peak < 100) {
       throw new Error(
-        "Microphone captured silence. Check Windows mic permissions for desktop apps " +
+        "Microphone captured silence. Check mic permissions for desktop apps " +
         "(click 'Open Mic Settings' below) and verify the correct input device is set as default."
       );
     }
