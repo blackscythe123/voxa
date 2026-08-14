@@ -1,5 +1,24 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Inlined rather than required from ./services/acceleratorLabel — sandboxed
+// preload (Electron's default since v20 with contextIsolation) can only
+// require a small allowlist of Electron/Node built-ins, not local relative
+// files, so a require() here throws at call time. Keep this in sync with
+// formatAcceleratorLabel() in src/services/acceleratorLabel.js, which main.js
+// (unsandboxed) still requires directly.
+function formatAcceleratorLabel(accel, platform = process.platform) {
+  if (!accel) return "";
+  const isMac = platform === "darwin";
+  return accel
+    .split("+")
+    .map((token) => {
+      if (token === "CommandOrControl") return isMac ? "Cmd" : "Ctrl";
+      if (token === "Super") return isMac ? "Cmd" : "Win";
+      return token;
+    })
+    .join("+");
+}
+
 contextBridge.exposeInMainWorld("voiceBridge", {
   onStartRecording: (cb) => ipcRenderer.on("start-recording", (_e, payload) => cb(payload)),
   onStopRecording: (cb) => ipcRenderer.on("stop-recording", () => cb()),
@@ -45,5 +64,5 @@ contextBridge.exposeInMainWorld("voiceBridge", {
     ipcRenderer.on("navigate", listener);
     return () => ipcRenderer.removeListener("navigate", listener);
   },
-  formatHotkeyLabel: (accel) => require("./services/acceleratorLabel").formatAcceleratorLabel(accel)
+  formatHotkeyLabel: (accel) => formatAcceleratorLabel(accel)
 });
