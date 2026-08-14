@@ -412,6 +412,7 @@
         <button type="button" class="chip suggested" data-key="F9">F9, easy reach</button>
         <button type="button" class="chip" data-key="F8">F8</button>
         <button type="button" class="chip" data-key="CommandOrControl+Space">Ctrl+Space</button>
+        <button type="button" class="chip" data-key="Alt+Space">Alt+Space</button>
         <button type="button" class="chip" data-key="Alt+Shift+V">Alt+Shift+V</button>
       </div>
 
@@ -473,6 +474,14 @@
 
       const state = { startHotkey: "", stopHotkey: "" };
 
+      // Static quick-pick chip labels are authored as "Ctrl+..." in the HTML;
+      // relabel them per-platform (e.g. "Cmd+Space" on macOS) on load.
+      document.querySelectorAll(".chip[data-key]").forEach((chip) => {
+        if (chip.dataset.key.includes("CommandOrControl")) {
+          chip.textContent = window.voiceBridge.formatHotkeyLabel(chip.dataset.key);
+        }
+      });
+
       function renderHotkey(target) {
         const input = target === "start" ? els.startInput : els.stopInput;
         const value = state[target + "Hotkey"];
@@ -480,7 +489,7 @@
         if (!value) {
           display.innerHTML = '<span class="placeholder">Click and press a key…</span>';
         } else {
-          const parts = value.split("+").map((p) => `<kbd>${p}</kbd>`).join("");
+          const parts = window.voiceBridge.formatHotkeyLabel(value).split("+").map((p) => `<kbd>${p}</kbd>`).join("");
           display.innerHTML = parts;
         }
         // sync chip highlighting
@@ -537,7 +546,7 @@
           if (tokens.length === 0) {
             display.innerHTML = '<span class="placeholder">Press any key or combo… releasing saves it</span>';
           } else {
-            display.innerHTML = tokens.map((t) => `<kbd>${t.replace(/CommandOrControl/g, "Ctrl")}</kbd>`).join("");
+            display.innerHTML = tokens.map((t) => `<kbd>${window.voiceBridge.formatHotkeyLabel(t)}</kbd>`).join("");
           }
         };
 

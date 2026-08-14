@@ -44,5 +44,6 @@ contextBridge.exposeInMainWorld("voiceBridge", {
     const listener = (_e, payload) => cb(payload);
     ipcRenderer.on("navigate", listener);
     return () => ipcRenderer.removeListener("navigate", listener);
-  }
+  },
+  formatHotkeyLabel: (accel) => require("./services/acceleratorLabel").formatAcceleratorLabel(accel)
 });

@@ -2,6 +2,9 @@ const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { app, BrowserWindow, globalShortcut, ipcMain, shell, Tray, Menu, nativeImage, Notification, systemPreferences, clipboard } = require("electron");
+const { formatAcceleratorLabel } = require("./services/acceleratorLabel");
+
+const PASTE_KEY_LABEL = process.platform === "darwin" ? "Cmd+V" : "Ctrl+V";
 
 // historyStore pulls in better-sqlite3 (a native module). If that binary isn't
 // built for the current Electron ABI (fresh clone before `npm install` runs the
@@ -242,6 +245,9 @@ function createPreferencesWindow() {
 // ── System tray — keeps app alive in background ────────────────────────────
 function createTray() {
   const trayImage = nativeImage.createFromPath(TRAY_ICON_PATH);
+  // Template images auto-adapt to light/dark menu bars on macOS; the asset
+  // is already monochrome-with-alpha, it just needs to be flagged as one.
+  if (process.platform === "darwin") trayImage.setTemplateImage(true);
   tray = new Tray(trayImage);
   tray.setToolTip("Voxa, voice to text");
   rebuildTrayMenu();
@@ -257,7 +263,7 @@ function rebuildTrayMenu() {
   if (!tray) return;
   loadServices();
   const prefs = configStore.getPreferences();
-  const startKey = prefs.startHotkey?.replace(/CommandOrControl/g, "Ctrl") || "F9";
+  const startKey = formatAcceleratorLabel(prefs.startHotkey) || "F9";
 
   const menu = Menu.buildFromTemplate([
     { label: `Start recording  (${startKey})`, click: () => startRecording() },
@@ -332,8 +338,8 @@ function notifyOS(title, body, { onClick } = {}) {
 function notifyExternalError(message) {
   const m = (message || "").toLowerCase();
   if (m.includes("microphone") || m.includes("silence") || m.includes("silent")) {
-    notifyOS("Voxa couldn't hear you", "The microphone captured silence. Click here, then open Windows mic settings.", {
-      onClick: () => shell.openExternal("ms-settings:privacy-microphone")
+    notifyOS("Voxa couldn't hear you", "The microphone captured silence. Click here to open mic settings.", {
+      onClick: () => openMicSettings()
     });
   } else if (m.includes("session") || m.includes("login") || m.includes("403") || m.includes("401") || m.includes("not logged in")) {
     notifyOS("Voxa needs you to sign in again", "Your ChatGPT session expired. Click to open Voxa and sign in.");
@@ -442,7 +448,12 @@ async function startRecording() {
   activeDictationId = id;
 
   placeOverlay(prefs.overlayPosition);
-  overlayWindow.show();
+  // showInactive() (not show()) — on macOS, show() activates the owning app,
+  // which raises ALL of the app's windows (including mainWindow, if it's
+  // open in the background) in front of whatever app you were dictating
+  // into. showInactive() displays the overlay without stealing focus or
+  // activating Voxa, so the target app stays frontmost.
+  overlayWindow.showInactive();
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
   overlayWindow.moveTop();
   overlayWindow.webContents.send("start-recording", {
@@ -558,8 +569,8 @@ ipcMain.handle("finalize-recording", async (_event, ...args) => {
       if (insert.pasted) {
         notifyMain("success", preview);
       } else if (insert.clipboard) {
-        notifyMain("success", "Copied to clipboard — press Ctrl+V to paste it.");
-        notifyOS("Voxa couldn't auto-paste", "Your transcript is on the clipboard — press Ctrl+V where you want it.");
+        notifyMain("success", `Copied to clipboard — press ${PASTE_KEY_LABEL} to paste it.`);
+        notifyOS("Voxa couldn't auto-paste", `Your transcript is on the clipboard — press ${PASTE_KEY_LABEL} where you want it.`);
       } else {
         notifyMain("error", "Couldn't paste or copy — open History to copy it manually.");
         notifyOS("Voxa couldn't deliver the transcript", "Open Voxa → History to copy it.");
@@ -703,8 +714,8 @@ ipcMain.handle("finalize-recording", async (_event, ...args) => {
     if (insert.pasted) {
       notifyMain("success", preview);
     } else if (insert.clipboard) {
-      notifyMain("success", "Copied to clipboard — press Ctrl+V to paste it.");
-      notifyOS("Voxa couldn't auto-paste", "Your transcript is on the clipboard — press Ctrl+V where you want it.");
+      notifyMain("success", `Copied to clipboard — press ${PASTE_KEY_LABEL} to paste it.`);
+      notifyOS("Voxa couldn't auto-paste", `Your transcript is on the clipboard — press ${PASTE_KEY_LABEL} where you want it.`);
     } else {
       notifyMain("error", "Couldn't paste or copy — open History to copy it manually.");
       notifyOS("Voxa couldn't deliver the transcript", "Open Voxa → History to copy it.");
@@ -843,8 +854,8 @@ ipcMain.handle("history-retry", async (_e, id) => {
     if (insert.pasted) {
       notifyMain("success", preview);
     } else if (insert.clipboard) {
-      notifyMain("success", "Copied to clipboard — press Ctrl+V to paste it.");
-      notifyOS("Voxa couldn't auto-paste", "Your transcript is on the clipboard — press Ctrl+V where you want it.");
+      notifyMain("success", `Copied to clipboard — press ${PASTE_KEY_LABEL} to paste it.`);
+      notifyOS("Voxa couldn't auto-paste", `Your transcript is on the clipboard — press ${PASTE_KEY_LABEL} where you want it.`);
     } else {
       notifyMain("error", "Couldn't paste or copy — open History to copy it manually.");
       notifyOS("Voxa couldn't deliver the transcript", "Open Voxa → History to copy it.");
@@ -906,10 +917,9 @@ ipcMain.handle("save-preferences", (_event, payload) => {
   return next;
 });
 
-ipcMain.handle("open-settings", () => createPreferencesWindow());
-ipcMain.handle("open-mic-settings", () => {
-  // Each OS has its own deep-link to the microphone privacy pane. Falling
-  // back to a docs page would feel evasive, so we route to the right pane.
+// Each OS has its own deep-link to the microphone privacy pane. Falling
+// back to a docs page would feel evasive, so we route to the right pane.
+function openMicSettings() {
   if (process.platform === "win32") {
     return shell.openExternal("ms-settings:privacy-microphone");
   }
@@ -921,7 +931,10 @@ ipcMain.handle("open-mic-settings", () => {
   const { exec } = require("node:child_process");
   exec("gnome-control-center microphone || gnome-control-center sound || xdg-open settings://privacy/microphone || true");
   return true;
-});
+}
+
+ipcMain.handle("open-settings", () => createPreferencesWindow());
+ipcMain.handle("open-mic-settings", () => openMicSettings());
 
 ipcMain.handle("get-auto-launch", () => app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin);
 ipcMain.handle("set-auto-launch", (_e, enabled) => { setAutoLaunch(!!enabled); return true; });

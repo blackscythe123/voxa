@@ -8,10 +8,10 @@ A cross-platform voice-to-text assistant. The desktop app captures speech on a g
 
 ### Desktop
 
-- **System-wide hotkey** — Start and stop recording from any app (default: `F9` to start, `Escape` to stop)
+- **System-wide hotkey** — Start and stop recording from any app (default: `F9` to start on Windows/Linux, `Alt+Space` on macOS — F9 collides with Mission Control on many Mac keyboards; `Escape` to stop everywhere)
 - **Recording overlay** — Small floating widget with a live timer
 - **ChatGPT transcription** — Uses ChatGPT's backend Whisper API for speech-to-text
-- **Auto-paste** — Transcript is copied to the clipboard and pasted into the focused field (Windows: `Ctrl+V` via SendKeys; other platforms: clipboard fallback)
+- **Auto-paste** — Transcript is copied to the clipboard and pasted into the focused field (Windows: `Ctrl+V` via SendKeys; macOS: `Cmd+V` via System Events, requires Accessibility permission; Linux: clipboard fallback)
 - **Hub UI** — Home, History, Microphone, Shortcuts, and Settings in one window
 - **Dictation history** — Browse past transcripts with source app labels, word counts, and pagination
 - **Audio retention** — Replay saved recordings; configurable retention and disk limits
@@ -58,7 +58,7 @@ The app opens the Hub window and adds a system tray icon. You can close the wind
 ## Usage
 
 1. Click into any text field (VS Code, Google Docs, Word, Slack, etc.)
-2. Press your start hotkey (`F9` by default)
+2. Press your start hotkey (`F9` by default on Windows/Linux, `Alt+Space` on macOS)
 3. The recording overlay appears with a timer
 4. Speak naturally
 5. Press the stop hotkey or click **Stop**
@@ -116,7 +116,8 @@ Dictation history and audio are stored under the app's user data directory (`his
 
 ### Limitations
 
-- Automatic paste is implemented on Windows; macOS and Linux rely on clipboard + manual paste
+- Automatic paste is implemented on Windows and macOS (macOS requires Accessibility permission — Voxa will prompt on first launch); Linux relies on clipboard + manual paste
+- macOS builds are unsigned and not notarized — Gatekeeper will flag the app as from an "unidentified developer" on first launch (see Troubleshooting below)
 - Password fields are excluded from paste targets where possible
 - ChatGPT's internal API endpoints may change; updates may be required
 
@@ -138,8 +139,12 @@ Dictation history and audio are stored under the app's user data directory (`his
 
 **Text not inserting?**
 - Click the target field before dictating
-- On non-Windows platforms, paste manually from the clipboard (`Ctrl+V` / `Cmd+V`)
+- On macOS, grant Accessibility permission (System Settings → Privacy & Security → Accessibility) — without it, auto-paste silently falls back to clipboard-only
+- On Linux, paste manually from the clipboard (`Ctrl+V`)
 - Some secure fields block programmatic paste
+
+**macOS says the app is from an "unidentified developer"?**
+- The app isn't notarized (no Apple Developer account). Right-click the app in Finder and choose **Open**, or run `xattr -cr /Applications/Voxa.app` in Terminal, then launch normally.
 
 **History or audio missing?**
 - History requires a successful `npm install` with no errors loading history services
