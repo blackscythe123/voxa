@@ -474,10 +474,13 @@
 
       const state = { startHotkey: "", stopHotkey: "" };
 
-      // Static quick-pick chip labels are authored as "Ctrl+..." in the HTML;
-      // relabel them per-platform (e.g. "Cmd+Space" on macOS) on load.
+      // Static quick-pick chip labels are authored as "CommandOrControl+..."/
+      // "Alt+..." in the HTML; relabel them per-platform (e.g. "Cmd+Space",
+      // "Option+Space" on macOS) on load. Chips with no translatable token
+      // (F9, Escape, "F9, easy reach") are left untouched so any extra hint
+      // text survives.
       document.querySelectorAll(".chip[data-key]").forEach((chip) => {
-        if (chip.dataset.key.includes("CommandOrControl")) {
+        if (/\b(CommandOrControl|Alt|Super)\b/.test(chip.dataset.key)) {
           chip.textContent = window.voiceBridge.formatHotkeyLabel(chip.dataset.key);
         }
       });

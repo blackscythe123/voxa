@@ -13,6 +13,7 @@ function formatAcceleratorLabel(accel, platform = process.platform) {
     .map((token) => {
       if (token === "CommandOrControl") return isMac ? "Cmd" : "Ctrl";
       if (token === "Super") return isMac ? "Cmd" : "Win";
+      if (token === "Alt") return isMac ? "Option" : "Alt";
       return token;
     })
     .join("+");

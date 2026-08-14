@@ -1255,11 +1255,13 @@
       stop: { el: stopInput, hotkey: "Esc" },
     };
 
-    // Static quick-pick chip labels are authored as "Ctrl+..." in the HTML;
-    // relabel them per-platform (e.g. "Cmd+Space" on macOS) on mount.
+    // Static quick-pick chip labels are authored as "Ctrl+..."/"Alt+..." in
+    // the HTML; relabel them per-platform (e.g. "Cmd+Space", "Option+Space"
+    // on macOS) on mount. Chips with no translatable token (F9, Escape, "F9,
+    // easy reach") are left untouched so any extra hint text survives.
     $$(".quick-pick", view).forEach((chip) => {
       const key = chip.getAttribute("data-key");
-      if (key && key.includes("Ctrl")) {
+      if (key && /\b(Ctrl|CommandOrControl|Alt|Super)\b/.test(key)) {
         chip.textContent = pretty(key.replace(/\bCtrl\b/g, "CommandOrControl"));
       }
     });
