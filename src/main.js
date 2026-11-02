@@ -696,13 +696,18 @@ ipcMain.handle("finalize-recording", async (_event, ...args) => {
 
     const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length;
 
-    historyStore.finalize({
-      id, status: "ok", transcript,
-      errorKind: null, errorMessage: null,
-      durationMs: durationMs || 0, wordCount,
-      audioFilename, audioBytes
-    });
-    mainWindow?.webContents.send("history-changed", { id, kind: "update" });
+    // Bookkeeping must never block delivery of a transcript we already have.
+    try {
+      historyStore.finalize({
+        id, status: "ok", transcript,
+        errorKind: null, errorMessage: null,
+        durationMs: durationMs || 0, wordCount,
+        audioFilename, audioBytes
+      });
+      mainWindow?.webContents.send("history-changed", { id, kind: "update" });
+    } catch (err) {
+      log(`finalize-recording: history write failed: ${err.message}`);
+    }
 
     notifyMain("working", "Pasting transcript...");
     const insert = await textInserter.insertTranscript(transcript);

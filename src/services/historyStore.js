@@ -120,8 +120,10 @@ function close() {
   opened = false;
 }
 
+// Self-heal: an aborted quit can close the store while the app keeps running.
+// Re-open instead of throwing, otherwise every later dictation is lost.
 function ensureOpen() {
-  if (!opened) throw new Error("historyStore: init() must be called before use");
+  if (!opened) init();
 }
 
 // Atomic write: serialise to a temp file then rename over the target.
