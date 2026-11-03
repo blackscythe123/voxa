@@ -31,6 +31,7 @@
     "appId": "com.Voxa.app",
     "productName": "Voxa",
     "copyright": "Copyright © 2026 Voxa",
+    "afterPack": "scripts/adhoc-sign.js",
     "directories": {
       "buildResources": "assets",
       "output": "dist"
@@ -97,6 +98,7 @@
         "LSUIElement": false,
         "ITSAppUsesNonExemptEncryption": false
       },
+      "identity": null,
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
