@@ -1,5 +1,5 @@
-const { clipboard } = require("electron");
-const { exec } = require("node:child_process");
+const { clipboard, systemPreferences } = require("electron");
+const { exec, execFile } = require("node:child_process");
 
 // Insert transcribed text into the foreground window.
 //
@@ -51,11 +51,21 @@ async function insertTranscript(text) {
   }
 
   if (process.platform === "darwin") {
+    // Ask for Accessibility (shows the system prompt once, then macOS remembers).
+    // Without it a posted keystroke is silently dropped, so don't claim "pasted".
+    if (!systemPreferences.isTrustedAccessibilityClient(true)) {
+      return { pasted: false, clipboard: clipboardOk, error: "Accessibility permission not granted" };
+    }
     return await new Promise((resolve) => {
-      // Requires Accessibility permission; if it's not granted, osascript
-      // exits non-zero and we fall back to the clipboard-only result.
-      exec(
-        'osascript -e \'tell application "System Events" to keystroke "v" using command down\'',
+      // Post Cmd+V as a CGEvent (key 9 = "v"). Unlike System Events' keystroke,
+      // this needs only Accessibility, not a second Automation prompt.
+      const jxa = "ObjC.import('ApplicationServices');" +
+        "for (const down of [true, false]) {" +
+        "const e = $.CGEventCreateKeyboardEvent($(), 9, down);" +
+        "$.CGEventSetFlags(e, $.kCGEventFlagMaskCommand);" +
+        "$.CGEventPost($.kCGHIDEventTap, e); }";
+      execFile(
+        "osascript", ["-l", "JavaScript", "-e", jxa],
         { timeout: 5000 },
         (err) => {
           if (err) {
