@@ -170,33 +170,40 @@ function loginWithBrowserWindow() {
     });
 
     let captured = false;
+    let capturing = false;
+    const hasToken = (cs) => cs.some((c) => c.name.includes("session-token"));
 
-    async function tryCaptureOnLoad() {
-      if (captured) return;
+    // Only finish once the session-token cookie exists. The logged-out
+    // chatgpt.com home page also loads outside /auth/, so capturing on URL alone
+    // saved an empty session and closed the window (hence 2-3 login retries).
+    async function tryCapture() {
+      if (captured || capturing || loginWin.isDestroyed()) return;
       const url = loginWin.webContents.getURL();
       if (!url.startsWith("https://chatgpt.com") || url.includes("/auth/")) return;
 
-      captured = true;
-
-      // Poll for the actual session-token cookie — it may arrive after page load
-      let cookies = [];
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 500));
-        cookies = await loginSession.cookies.get({ url: "https://chatgpt.com" });
-        if (cookies.some((c) => c.name.includes("session-token"))) break;
+      capturing = true;
+      try {
+        let cookies = [];
+        for (let i = 0; i < 20 && !loginWin.isDestroyed(); i++) {
+          cookies = await loginSession.cookies.get({ url: "https://chatgpt.com" });
+          if (hasToken(cookies)) break;
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        if (!hasToken(cookies)) return; // not signed in yet; keep the window open
+        captured = true;
+        saveCookies(cookies);
+        setTimeout(() => { if (!loginWin.isDestroyed()) loginWin.close(); }, 300);
+        resolve(true);
+      } finally {
+        capturing = false;
       }
-
-      saveCookies(cookies);
-      setTimeout(() => { if (!loginWin.isDestroyed()) loginWin.close(); }, 300);
-      resolve(cookies.some((c) => c.name.includes("session-token")));
     }
 
-    loginWin.webContents.on("did-finish-load", () => {
-      tryCaptureOnLoad().catch(reject);
-    });
+    loginWin.webContents.on("did-finish-load", () => { tryCapture().catch(reject); });
+    loginWin.webContents.on("did-navigate-in-page", () => { tryCapture().catch(reject); });
 
     loginWin.on("closed", () => {
-      if (!captured) resolve(hasCookies());
+      if (!captured) resolve(false);
     });
 
     loginWin.loadURL(LOGIN_URL);
@@ -231,7 +238,7 @@ async function transcribeAudio(audioBuffer, mimeType = "audio/webm") {
     const peak = peakAmplitudeFromWav(buf);
     if (peak !== null && peak < 100) {
       throw new Error(
-        "Microphone captured silence. Check Windows mic permissions for desktop apps " +
+        "Microphone captured silence. Check mic permissions for desktop apps " +
         "(click 'Open Mic Settings' below) and verify the correct input device is set as default."
       );
     }

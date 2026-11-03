@@ -467,7 +467,7 @@
 
     // hotkey kbd labels
     const prefs = (await call("getPreferences")) || {};
-    const pretty = (s) => String(s || "").replace(/CommandOrControl/g, "Ctrl");
+    const pretty = (s) => bridge()?.formatHotkeyLabel(s) ?? String(s || "").replace(/CommandOrControl/g, "Ctrl");
     if (prefs.startHotkey) setText(byId("startKbd", view), pretty(prefs.startHotkey));
     if (prefs.stopHotkey) setText(byId("stopKbd", view), pretty(prefs.stopHotkey));
     setStatus(
@@ -496,6 +496,12 @@
   async function mountHistory(view) {
     historyState = { view, search: "", prefs: {}, debounceTimer: null, loaded: HISTORY_PAGE_SIZE };
     historyState.prefs = (await call("getPreferences")) || {};
+
+    const emptyHint = byId("historyEmpty", view);
+    if (emptyHint && historyState.prefs.startHotkey) {
+      const key = bridge()?.formatHotkeyLabel(historyState.prefs.startHotkey) || historyState.prefs.startHotkey;
+      emptyHint.textContent = `nothing here yet — press ${key} anywhere and say something.`;
+    }
 
     // search box w/ 200ms debounce
     const searchInput = byId("historySearch", view);
@@ -1242,12 +1248,23 @@
   function mountShortcuts(view) {
     const startInput = byId("startHotkeyInput", view);
     const stopInput = byId("stopHotkeyInput", view);
-    const pretty = (s) => String(s || "").replace(/CommandOrControl/g, "Ctrl");
+    const pretty = (s) => bridge()?.formatHotkeyLabel(s) ?? String(s || "").replace(/CommandOrControl/g, "Ctrl");
 
     const fields = {
       start: { el: startInput, hotkey: "F9" },
       stop: { el: stopInput, hotkey: "Esc" },
     };
+
+    // Static quick-pick chip labels are authored as "Ctrl+..."/"Alt+..." in
+    // the HTML; relabel them per-platform (e.g. "Cmd+Space", "Option+Space"
+    // on macOS) on mount. Chips with no translatable token (F9, Escape, "F9,
+    // easy reach") are left untouched so any extra hint text survives.
+    $$(".quick-pick", view).forEach((chip) => {
+      const key = chip.getAttribute("data-key");
+      if (key && /\b(Ctrl|CommandOrControl|Alt|Super)\b/.test(key)) {
+        chip.textContent = pretty(key.replace(/\bCtrl\b/g, "CommandOrControl"));
+      }
+    });
 
     function renderField(target) {
       const f = fields[target];
@@ -1258,6 +1275,9 @@
         f.el.prepend(kbd);
       }
       kbd.textContent = pretty(f.hotkey) || "—";
+      $$(`.quick-pick[data-target="${target}"]`, view).forEach((chip) => {
+        chip.classList.toggle("suggested", chip.getAttribute("data-key") === f.hotkey);
+      });
     }
 
     async function loadPrefs() {

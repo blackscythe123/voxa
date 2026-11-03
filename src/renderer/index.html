@@ -199,7 +199,7 @@
     <template id="tpl-microphone">
       <div class="content-head">
         <h2>Microphone</h2>
-        <p class="sub">pick whichever input Windows knows about</p>
+        <p class="sub">pick whichever input your system knows about</p>
       </div>
 
       <div class="card">
@@ -232,11 +232,11 @@
         </h4>
         <p>
           we heard nothing on the last take — the track came back empty. usually that's a muted input,
-          the wrong device selected above, or Windows hasn't granted microphone permission to Voxa yet.
+          the wrong device selected above, or the system hasn't granted microphone permission to Voxa yet.
         </p>
         <a class="privacy-link" id="micSettingsBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/></svg>
-          Open Windows privacy &rsaquo; Microphone settings
+          Open microphone privacy settings
         </a>
       </div>
     </template>
@@ -263,6 +263,7 @@
               <button class="chip quick-pick" data-key="F10" data-target="start" type="button">F10</button>
               <button class="chip quick-pick" data-key="F11" data-target="start" type="button">F11</button>
               <button class="chip quick-pick" data-key="Ctrl+Space" data-target="start" type="button">Ctrl+Space</button>
+              <button class="chip quick-pick" data-key="Alt+Space" data-target="start" type="button">Alt+Space</button>
               <button class="chip quick-pick" data-key="Alt+Shift+V" data-target="start" type="button">Alt+Shift+V</button>
             </div>
           </div>
@@ -325,7 +326,7 @@
         <p class="hint">when enabled, Voxa wakes up quietly with your system and waits in the tray.</p>
         <label class="toggle-row" for="autoLaunch">
           <span class="switch" id="autoLaunch" role="switch" aria-checked="false" tabindex="0"></span>
-          <span>launch on Windows boot</span>
+          <span>launch on system startup</span>
         </label>
       </div>
 

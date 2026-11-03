@@ -1,7 +1,13 @@
 const Store = require("electron-store");
 
+// F9 collides with macOS's reserved Mission Control / App Exposé "show
+// application windows" shortcut on many keyboard configs — pressing it can
+// bring other apps' windows forward alongside the overlay. Use a combo
+// that's free on both platforms as the mac default instead.
+const isMac = process.platform === "darwin";
+
 const defaults = {
-  startHotkey: "F9",
+  startHotkey: isMac ? "Alt+Space" : "F9",
   stopHotkey: "Escape",
   overlayPosition: "bottom-right",
   maxRecordingSeconds: 300,
@@ -43,6 +49,15 @@ if (!store.get("retentionMigratedV2") && store.get("successAudioRetentionHours")
   store.set("successAudioRetentionHours", 0);
 }
 store.set("retentionMigratedV2", true);
+
+// One-time upgrade: move existing mac users off prior mac defaults (F9 —
+// collides with Mission Control; Alt+Shift+V — an earlier attempt at a safe
+// default that wasn't well liked) onto the current default, unless they've
+// since customized it themselves.
+if (isMac && !store.get("macHotkeyMigratedV2") && ["F9", "Alt+Shift+V"].includes(store.get("startHotkey"))) {
+  store.set("startHotkey", "Alt+Space");
+}
+store.set("macHotkeyMigratedV2", true);
 
 function getPreferences() {
   return {

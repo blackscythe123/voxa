@@ -1,6 +1,6 @@
 {
   "name": "voxa",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "System-wide voice-to-text desktop helper using ChatGPT transcription",
   "homepage": "https://github.com/blackscythe123/voxa",
   "main": "src/main.js",
@@ -78,15 +78,13 @@
         {
           "target": "dmg",
           "arch": [
-            "x64",
-            "arm64"
+            "universal"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "x64",
-            "arm64"
+            "universal"
           ]
         }
       ],
