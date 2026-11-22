@@ -103,6 +103,70 @@ pub struct Home {
     play_started: Option<(std::time::Instant, f32)>,
     /// Microphones listed while the picker in Settings is open.
     mic_picker: Option<Vec<String>>,
+    chart_metric: Metric,
+    /// The bar clicked in the Insights chart.
+    chart_pick: Option<usize>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Metric {
+    Words,
+    Dictations,
+    Minutes,
+}
+
+impl Metric {
+    fn of(self, b: &store::Bucket) -> f32 {
+        match self {
+            Metric::Words => b.words as f32,
+            Metric::Dictations => b.dictations as f32,
+            Metric::Minutes => b.secs / 60.0,
+        }
+    }
+    fn tick(self, v: f32) -> String {
+        match self {
+            Metric::Minutes => format!("{} min", v.round() as u32),
+            _ if v >= 10_000.0 => format!("{}K", (v / 1000.0).round() as u32),
+            _ => fmt_thousands(v.round() as usize),
+        }
+    }
+    fn value(self, b: &store::Bucket) -> String {
+        match self {
+            Metric::Words => format!("{} words", fmt_thousands(b.words)),
+            Metric::Dictations => format!("{} dictation{}", fmt_thousands(b.dictations), if b.dictations == 1 { "" } else { "s" }),
+            Metric::Minutes => talk_time(b.secs),
+        }
+    }
+}
+
+/// "45 s", "12 min", "1h 5m" of talking.
+fn talk_time(secs: f32) -> String {
+    let m = (secs / 60.0).round() as u32;
+    if secs < 60.0 { format!("{} s talking", secs.round() as u32) } else if m >= 60 { format!("{}h {}m talking", m / 60, m % 60) } else { format!("{m} min talking") }
+}
+
+/// Tooltip for a chart bar: the value leads, the period follows.
+struct BarTip {
+    value: String,
+    period: String,
+    extra: String,
+}
+
+impl Render for BarTip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px(px(10.))
+            .py(px(8.))
+            .rounded(px(6.))
+            .bg(rgb(0xFFFFFF))
+            .border_1()
+            .border_color(rgba(0x00000026))
+            .shadow_md()
+            .font_family("Segoe UI")
+            .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(self.value.clone()))
+            .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(self.period.clone()))
+            .when(!self.extra.is_empty(), |d| d.child(div().mt(px(2.)).text_size(px(12.)).text_color(rgb(MUTED)).child(self.extra.clone())))
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -176,6 +240,8 @@ impl Home {
             suggestion: None,
             play_started: None,
             mic_picker: None,
+            chart_metric: Metric::Words,
+            chart_pick: None,
         };
         me.go(page, cx);
         me
@@ -1282,6 +1348,7 @@ impl Home {
         for (r, name) in Range::ALL {
             chips = chips.child(self.chip(SharedString::from(format!("range-{name}")), name, self.range == r, cx.listener(move |this, _: &ClickEvent, _, cx| {
                 this.range = r;
+                this.chart_pick = None;
                 cx.notify();
             })));
         }
@@ -1349,34 +1416,81 @@ impl Home {
                 .into_any_element(),
         );
 
-        // Chart.
-        let max = st.buckets.iter().map(|b| b.1).max().unwrap_or(0).max(1) as f32;
+        // Chart: a real scale, a tooltip per bar, click a bar for that period's details.
+        let metric = self.chart_metric;
         let n = st.buckets.len().max(1);
-        let gap = if n > 20 { 4. } else if n > 10 { 8. } else { 18. };
+        let max = st.buckets.iter().map(|b| metric.of(b)).fold(0.0f32, f32::max);
+        let ticks = store::nice_ticks(max);
+        let top = ticks.last().copied().unwrap_or(1.0).max(1.0);
+        let plot_h = 190.0;
         let every = n.div_ceil(12);
-        let show_values = n <= 12;
-        let bars = div().flex().items_end().gap(px(gap)).h(px(170.)).children(st.buckets.iter().map(|(_, w, now)| {
-            let col = div().flex_1().min_w(px(0.)).flex().flex_col().items_center().justify_end().h_full();
-            if *w == 0 {
-                col.child(div().size(px(5.)).rounded_full().bg(rgb(0xE7E1DA)))
-            } else {
-                let h = 6.0 + 140.0 * (*w as f32 / max);
-                col.when(show_values, |c| c.child(div().text_size(px(11.)).text_color(rgb(MUTED)).mb(px(4.)).child(fmt_thousands(*w))))
-                    .child(div().w_full().h(px(h)).rounded_t(px(3.)).bg(rgb(if *now { INK } else { 0xE2D6CB })))
-            }
+        let unit_word = match (n == (to - from).num_days() as usize + 1, st.buckets.first().map(|b| b.from != b.to && b.to.signed_duration_since(b.from).num_days() > 7)) {
+            (true, _) => "day",
+            (false, Some(true)) => "month",
+            _ => "week",
+        };
+        let title = match metric {
+            Metric::Words => format!("Words per {unit_word}"),
+            Metric::Dictations => format!("Dictations per {unit_word}"),
+            Metric::Minutes => format!("Minutes talking per {unit_word}"),
+        };
+        let pick = self.chart_pick.filter(|i| *i < st.buckets.len());
+        let mut metric_chips = div().flex().gap(px(6.));
+        for (id, label, m) in [("m-words", "Words", Metric::Words), ("m-dict", "Dictations", Metric::Dictations), ("m-min", "Minutes", Metric::Minutes)] {
+            metric_chips = metric_chips.child(self.chip(id, label, metric == m, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.chart_metric = m;
+                cx.notify();
+            })));
+        }
+        // Y axis labels and hairline gridlines at the same heights.
+        let y_of = |v: f32| plot_h - plot_h * (v / top);
+        let axis = div().relative().w(px(52.)).flex_none().h(px(plot_h)).children(ticks.iter().map(|t| {
+            div().absolute().right(px(8.)).top(px(y_of(*t) - 8.)).text_size(px(11.)).text_color(rgb(MUTED)).child(metric.tick(*t))
         }));
-        let labels = div().flex().gap(px(gap)).mt(px(8.)).children(st.buckets.iter().enumerate().map(|(i, (l, _, now))| {
+        let grid = div().absolute().top_0().left_0().size_full().children(ticks.iter().map(|t| {
+            div().absolute().left_0().right_0().top(px(y_of(*t))).h(px(1.)).bg(rgb(if *t == 0.0 { 0xCFC6BD } else { 0xEFEAE4 }))
+        }));
+        let bars = div().absolute().top_0().left_0().size_full().flex().children(st.buckets.iter().enumerate().map(|(i, b)| {
+            let v = metric.of(b);
+            let h = if v > 0.0 { (plot_h * v / top).max(3.0) } else { 0.0 };
+            let emphasised = match pick { Some(p) => p == i, None => b.current };
+            let tip = (metric.value(b), b.period.clone(), match metric {
+                Metric::Words => format!("{} dictations, {}", fmt_thousands(b.dictations), talk_time(b.secs)),
+                Metric::Dictations => format!("{} words, {}", fmt_thousands(b.words), talk_time(b.secs)),
+                Metric::Minutes => format!("{} words, {} dictations", fmt_thousands(b.words), fmt_thousands(b.dictations)),
+            });
+            // The whole column is the hover and click target, not just the painted bar.
+            div()
+                .id(SharedString::from(format!("bar-{i}")))
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_end()
+                .cursor_pointer()
+                .rounded(px(4.))
+                .hover(|s| s.bg(rgba(0x8F4C2C0D)))
+                .tooltip(move |_, cx| cx.new(|_| BarTip { value: tip.0.clone(), period: tip.1.clone(), extra: tip.2.clone() }).into())
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.chart_pick = if this.chart_pick == Some(i) { None } else { Some(i) };
+                    cx.notify();
+                }))
+                .child(div().w(gpui::relative(0.62)).max_w(px(24.)).h(px(h)).rounded_t(px(4.)).bg(rgb(if emphasised { INK } else { 0xDCCBBE })))
+        }));
+        let labels = div().flex().pl(px(52.)).mt(px(8.)).children(st.buckets.iter().enumerate().map(|(i, b)| {
+            let strong = pick == Some(i) || (pick.is_none() && b.current);
             div()
                 .flex_1()
                 .min_w(px(0.))
                 .flex()
                 .justify_center()
                 .text_size(px(11.))
-                .text_color(rgb(if *now { INK } else { MUTED }))
-                .when(*now, |x| x.font_weight(FontWeight::SEMIBOLD))
-                .child(if i % every == 0 || *now { l.clone() } else { String::new() })
+                .text_color(rgb(if strong { TEXT } else { MUTED }))
+                .when(strong, |x| x.font_weight(FontWeight::SEMIBOLD))
+                .child(if i % every == 0 || strong { b.label.clone() } else { String::new() })
         }));
-        let unit = if n == (to - from).num_days() as usize + 1 { "Words per day" } else if st.buckets.first().is_some_and(|b| b.0.len() <= 6 && !b.0.contains(' ')) { "Words per month" } else { "Words per week" };
         out.push(
             div()
                 .mt(px(3.))
@@ -1386,11 +1500,65 @@ impl Home {
                 .border_1()
                 .border_color(rgba(CARD_BORDER))
                 .rounded(px(4.))
-                .child(div().mb(px(14.)).text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(unit))
-                .child(bars)
+                .child(
+                    div()
+                        .mb(px(18.))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                        .child(metric_chips),
+                )
+                .child(div().flex().child(axis).child(div().relative().flex_1().min_w(px(0.)).h(px(plot_h)).child(grid).child(bars)))
                 .child(labels)
+                .child(div().mt(px(10.)).text_size(px(12.)).text_color(rgb(MUTED)).child("Point at a bar for its numbers; click it for the details."))
                 .into_any_element(),
         );
+
+        // The clicked bar's period, in full.
+        if let Some(b) = pick.and_then(|i| st.buckets.get(i)).cloned() {
+            let sub = store::stats(&entries, b.from, b.to, today);
+            let apps = sub.per_app.iter().take(4).map(|(a, w)| format!("{a} ({})", fmt_thousands(*w))).collect::<Vec<_>>().join(", ");
+            out.push(
+                div()
+                    .mt(px(3.))
+                    .px(px(20.))
+                    .py(px(16.))
+                    .bg(rgb(0xFFFFFF))
+                    .border_1()
+                    .border_l_4()
+                    .border_color(rgba(CARD_BORDER))
+                    .border_color(rgb(INK))
+                    .rounded(px(4.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(b.period.clone()))
+                            .child(div().id("pick-clear").text_size(px(13.)).text_color(rgb(MUTED)).cursor_pointer().hover(|s| s.text_color(rgb(INK))).child("Clear").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.chart_pick = None;
+                                cx.notify();
+                            }))),
+                    )
+                    .child(
+                        div()
+                            .mt(px(10.))
+                            .flex()
+                            .gap(px(28.))
+                            .children([
+                                (fmt_thousands(sub.words), "words"),
+                                (fmt_thousands(sub.dictations), "dictations"),
+                                (talk_time(sub.secs_spoken).replace(" talking", ""), "talking"),
+                                (if sub.wpm > 0 { format!("{}", sub.wpm) } else { "-".into() }, "words a minute"),
+                            ]
+                            .into_iter()
+                            .map(|(n, l)| div().child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child(n)).child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(l)))),
+                    )
+                    .when(!apps.is_empty(), |d| d.child(div().mt(px(10.)).text_size(px(13.)).text_color(rgb(0x3D3D3D)).child(format!("Where: {apps}"))))
+                    .into_any_element(),
+            );
+        }
 
         // Highlights.
         let mut facts: Vec<String> = Vec::new();

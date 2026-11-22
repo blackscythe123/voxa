@@ -293,6 +293,22 @@ pub fn insights(entries: &[Entry], now: DateTime<Local>) -> Insights {
     Insights { week_label, week_words, minutes_saved, streak_days, per_day, today: (today - monday).num_days() as usize, per_app }
 }
 
+/// One bar of the Insights chart.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bucket {
+    /// Short axis label ("Mon", "22", "2 Nov", "Nov").
+    pub label: String,
+    /// Full period for the tooltip and details ("Sunday 22 November", "2 to 8 November").
+    pub period: String,
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    pub words: usize,
+    pub dictations: usize,
+    pub secs: f32,
+    /// Contains today.
+    pub current: bool,
+}
+
 /// Numbers for any date range (Insights page).
 #[derive(Debug, PartialEq)]
 pub struct Stats {
@@ -308,8 +324,8 @@ pub struct Stats {
     pub busiest_day: Option<(String, usize)>,
     /// Consecutive days with a dictation, ending today (or yesterday). Not limited to the range.
     pub streak_days: u32,
-    /// Chart: (label, words, contains today).
-    pub buckets: Vec<(String, usize, bool)>,
+    /// Chart bars: one per day, week or month, depending on the range.
+    pub buckets: Vec<Bucket>,
     /// Words per app in the range, most first.
     pub per_app: Vec<(String, usize)>,
 }
@@ -336,30 +352,43 @@ pub fn stats(entries: &[Entry], from: NaiveDate, to: NaiveDate, today: NaiveDate
     per_app.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let busiest_day = per_day.iter().max_by_key(|(_, w)| **w).map(|(d, w)| (d.format("%a %-d %b").to_string(), *w));
 
+    // Per day: (words, dictations, seconds talking).
+    let mut daily: std::collections::BTreeMap<NaiveDate, (usize, usize, f32)> = Default::default();
+    for e in &in_range {
+        let d = daily.entry(e.local_time().date_naive()).or_default();
+        d.0 += e.words();
+        d.1 += 1;
+        d.2 += e.secs;
+    }
+    let sum = |a: NaiveDate, b: NaiveDate| daily.range(a..=b).fold((0, 0, 0.0), |acc, (_, v)| (acc.0 + v.0, acc.1 + v.1, acc.2 + v.2));
+    let bucket = |label: String, period: String, a: NaiveDate, b: NaiveDate| {
+        let (words, dictations, secs) = sum(a, b);
+        Bucket { label, period, from: a, to: b, words, dictations, secs, current: (a..=b).contains(&today) }
+    };
     let span = (to - from).num_days() + 1;
     let mut buckets = Vec::new();
     if span <= 31 {
         let mut d = from;
         while d <= to {
             let label = if span <= 7 { if d == today { "Today".into() } else { d.format("%a").to_string() } } else { d.format("%-d").to_string() };
-            buckets.push((label, per_day.get(&d).copied().unwrap_or(0), d == today));
+            buckets.push(bucket(label, d.format("%A %-d %B").to_string(), d, d));
             d += Days::days(1);
         }
     } else if span <= 182 {
         let mut start = from - Days::days(from.weekday().num_days_from_monday() as i64);
         while start <= to {
-            let end = start + Days::days(6);
-            let w: usize = per_day.range(start.max(from)..=end.min(to)).map(|(_, w)| *w).sum();
-            buckets.push((start.max(from).format("%-d %b").to_string(), w, (start..=end).contains(&today)));
-            start = end + Days::days(1);
+            let (a, b) = (start.max(from), (start + Days::days(6)).min(to));
+            let period = if a.month() == b.month() { format!("{} to {} {}", a.day(), b.day(), b.format("%B")) } else { format!("{} to {}", a.format("%-d %B"), b.format("%-d %B")) };
+            buckets.push(bucket(a.format("%-d %b").to_string(), period, a, b));
+            start += Days::days(7);
         }
     } else {
         let mut m = NaiveDate::from_ymd_opt(from.year(), from.month(), 1).unwrap();
         while m <= to {
             let next = if m.month() == 12 { NaiveDate::from_ymd_opt(m.year() + 1, 1, 1) } else { NaiveDate::from_ymd_opt(m.year(), m.month() + 1, 1) }.unwrap();
-            let w: usize = per_day.range(m.max(from)..next).map(|(_, w)| *w).sum();
+            let (a, b) = (m.max(from), (next - Days::days(1)).min(to));
             let label = if from.year() == to.year() { m.format("%b").to_string() } else { m.format("%b %y").to_string() };
-            buckets.push((label, w, (m..next).contains(&today)));
+            buckets.push(bucket(label, m.format("%B %Y").to_string(), a, b));
             m = next;
         }
     }
@@ -394,6 +423,18 @@ pub fn day_label(d: NaiveDate, today: NaiveDate) -> String {
         1 => "Yesterday".into(),
         _ => d.format("%A %-d %B").to_string(),
     }
+}
+
+/// Axis ticks from 0 to at least `max`: about 5 steps of 1, 2, 2.5 or 5 x 10^n.
+pub fn nice_ticks(max: f32) -> Vec<f32> {
+    if max <= 0.0 {
+        return vec![0.0, 1.0];
+    }
+    let rough = max / 5.0;
+    let mag = 10f32.powf(rough.log10().floor());
+    let step = [1.0, 2.0, 2.5, 5.0, 10.0].iter().map(|m| m * mag).find(|s| *s >= rough).unwrap_or(10.0 * mag).max(1.0);
+    let top = (max / step).ceil() * step;
+    (0..=((top / step).round() as usize)).map(|i| i as f32 * step).collect()
 }
 
 #[cfg(test)]
@@ -456,12 +497,22 @@ mod tests {
         let s = stats(&e, d(11, 1), d(11, 22), d(11, 22));
         assert_eq!((s.words, s.dictations, s.longest_words, s.avg_words), (9, 3, 4, 3));
         assert_eq!(s.buckets.len(), 22, "daily up to a month");
-        assert_eq!(s.buckets.last().unwrap(), &("22".to_string(), 4, true));
+        let last = s.buckets.last().unwrap();
+        assert_eq!((last.label.as_str(), last.words, last.dictations, last.current), ("22", 4, 1, true));
+        assert_eq!(s.buckets.iter().map(|b| b.words).sum::<usize>(), s.words, "bars add up to the total");
         assert_eq!(s.per_app[0], ("Gmail".to_string(), 6));
         assert_eq!(s.wpm, 36, "9 words in 15 s");
         assert_eq!(s.busiest_day.as_ref().unwrap().1, 4);
         assert!(stats(&e, d(8, 1), d(11, 22), d(11, 22)).buckets.len() <= 27, "weekly for a few months");
         assert_eq!(stats(&e, d(1, 1), d(11, 22), d(11, 22)).buckets.len(), 11, "monthly for a year");
+    }
+
+    #[test]
+    fn ticks_are_round_and_cover_the_max() {
+        assert_eq!(nice_ticks(4062.0), vec![0.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0]);
+        assert_eq!(nice_ticks(37.0), vec![0.0, 10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(nice_ticks(3.0), vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(nice_ticks(0.0), vec![0.0, 1.0]);
     }
 
     #[test]
