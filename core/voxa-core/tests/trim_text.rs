@@ -98,6 +98,12 @@ fn spoken_new_lines_and_bullets() {
     assert_eq!(spoken_formatting("First point. New paragraph. Second point."), "First point.\n\nSecond point.");
     assert_eq!(spoken_formatting("Shopping: bullet point milk bullet point eggs"), "Shopping:\n- Milk\n- Eggs");
     assert_eq!(spoken_formatting("The newline character"), "The newline character", "not a command");
+    // Owner's test, 2026-11-22: Whisper writes "new line" as "Newline", and "next para" is short.
+    assert_eq!(
+        spoken_formatting("Hi, my name is Simiyon Newline. I am from Coimbatore, Newline. But I'm studying in Chennai, SSN College, Newline. Yep. Next para.\n\nYeah, that's it."),
+        "Hi, my name is Simiyon\nI am from Coimbatore\nBut I'm studying in Chennai, SSN College\nYep.\n\nYeah, that's it."
+    );
+    assert_eq!(spoken_formatting("Put a newline after each item"), "Put a newline after each item", "mid-sentence one-word form stays");
 }
 
 #[test]

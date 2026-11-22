@@ -109,11 +109,29 @@ pub fn replace_phrases(text: &str, pairs: &[(String, String)]) -> String {
 /// "new line", "new paragraph" and "bullet point" spoken while dictating become line breaks and
 /// bullets. Whisper writes them as words with punctuation around them; that punctuation goes.
 pub fn spoken_formatting(text: &str) -> String {
-    const COMMANDS: &[(&str, &str)] = &[("new paragraph", "\n\n"), ("next paragraph", "\n\n"), ("new line", "\n"), ("next line", "\n"), ("bullet point", "\n- ")];
+    // (spoken, inserted, strict). Whisper often writes "new line" as one word, "Newline"; the
+    // one-word and short forms only count when they end a phrase (punctuation or the end follows),
+    // so "the newline character" stays as it is.
+    const COMMANDS: &[(&str, &str, bool)] = &[
+        ("new paragraph", "\n\n", false),
+        ("next paragraph", "\n\n", false),
+        ("new para", "\n\n", true),
+        ("next para", "\n\n", true),
+        ("new line", "\n", false),
+        ("next line", "\n", false),
+        ("newline", "\n", true),
+        ("bullet point", "\n- ", false),
+    ];
+    let ends_phrase = |rest: &str| rest.trim_start_matches(' ').chars().next().is_none_or(|c| matches!(c, '.' | ',' | '!' | '?' | ';' | ':' | '\n'));
     let mut s = text.to_string();
-    for (cmd, out) in COMMANDS {
+    for (cmd, out, strict) in COMMANDS {
+        let mut from = 0;
         loop {
-            let Some(&(a, b)) = find_phrase(&s, cmd).first() else { break };
+            let Some(&(a, b)) = find_phrase(&s[from..], cmd).first().map(|(a, b)| (a + from, b + from)).as_ref() else { break };
+            if *strict && !ends_phrase(&s[b..]) {
+                from = b;
+                continue;
+            }
             // Drop the space and a comma before; keep a full stop (it ends the sentence before).
             let mut start = a;
             while start > 0 && s[..start].ends_with(' ') {
@@ -122,14 +140,15 @@ pub fn spoken_formatting(text: &str) -> String {
             if s[..start].ends_with(',') {
                 start -= 1;
             }
-            // Drop punctuation and spaces after.
+            // Drop punctuation, spaces and any line break Whisper already put there.
             let mut end = b;
             while let Some(c) = s[end..].chars().next() {
-                if matches!(c, '.' | ',' | ';' | ':' | ' ') { end += c.len_utf8() } else { break }
+                if matches!(c, '.' | ',' | ';' | ':' | ' ' | '\n') { end += c.len_utf8() } else { break }
             }
             s.replace_range(start..end, out);
             // Capitalise what follows a break.
             let after = start + out.len();
+            from = after;
             if let Some(c) = s[after..].chars().next() {
                 if c.is_lowercase() {
                     let up: String = c.to_uppercase().collect();
