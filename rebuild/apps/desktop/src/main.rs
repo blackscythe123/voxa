@@ -522,17 +522,18 @@ fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
         |_, _, _| {},
         move |b, _, window, _| {
             let w = f32::from(b.size.width);
-            let base = b.origin.y + px(f32::from(b.size.height) * 0.68);
+            let base = b.origin.y + px(f32::from(b.size.height) * 0.62);
             let n = QUILL_CYCLE as f32;
-            // Quiet speech should still move the ink: lift the low end of the level curve.
-            let amp = |lvl: f32| 1.6 + lvl.clamp(0.0, 1.0).powf(0.6) * 7.5;
-            let wave = |frac: f32| (frac * std::f32::consts::TAU * 2.0).sin();
+            // Seismograph: no voice, flat line; a reading only when there is sound. Room hum below
+            // the gate stays flat; above it, quiet speech is lifted so it still shows.
+            const GATE: f32 = 0.14;
+            let amp = |lvl: f32| if lvl < GATE { 0.0 } else { ((lvl - GATE) / (1.0 - GATE)).min(1.0).powf(0.6) * 11.0 };
             let at = |k: usize| {
-                let lvl = |i: usize| levels.get(i).copied().unwrap_or(0.0);
-                // A little neighbour smoothing so the stroke is a curve, not a zigzag.
-                let l = (lvl(k.saturating_sub(1)) + 2.0 * lvl(k) + lvl(k + 1)) / 4.0;
-                let frac = k as f32 / n;
-                (b.origin.x + px(frac * w), base - px(wave(frac) * amp(l)))
+                let l = levels.get(k).copied().unwrap_or(0.0);
+                // Alternate up and down with a fixed per-tick jitter, like a needle trace.
+                let jitter = 0.55 + 0.45 * (((k * 7919) % 97) as f32 / 96.0);
+                let dir = if k % 2 == 0 { 1.0 } else { -1.0 };
+                (b.origin.x + px(k as f32 / n * w), base - px(dir * jitter * amp(l)))
             };
 
             let p_now = tick as f32 / n;
@@ -557,7 +558,7 @@ fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
             // and leans a little further when you speak up.
             let (hx, hy) = at(tick.min(levels.len().saturating_sub(1)));
             let lvl = levels.get(tick).copied().unwrap_or(0.0);
-            let deg = -12.0 - 3.0 * wave(p_now) - 4.0 * lvl;
+            let deg = -12.0 - 5.0 * lvl;
             let (sc, ang, head) = (1.45, deg.to_radians(), point(hx, hy));
             let q = |x: f32, y: f32| quill_point(x, y, sc, ang, head);
             let mut body = PathBuilder::fill();
