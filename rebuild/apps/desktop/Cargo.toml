@@ -1,0 +1,28 @@
+[package]
+name = "voxa-desktop"
+description = "Voxa for Windows: the GPUI recording strip and tray, driven by voxa-core."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+voxa-core = { path = "../../crates/voxa-core" }
+voxa-chatgpt = { path = "../../crates/voxa-chatgpt" }
+cpal = "0.15"
+hound = "3.5"
+gpui = "0.2.2"
+raw-window-handle = "0.6"
+global-hotkey = "0.10.0"
+tray-icon = "0.26.1"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Threading",
+  "Win32_Graphics_Dwm",
+] }
