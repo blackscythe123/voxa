@@ -4,8 +4,14 @@
 use voxa_chatgpt::{ChatGpt, Session};
 
 fn main() {
-    let dir = std::path::PathBuf::from(std::env::var("APPDATA").expect("APPDATA")).join("voxa");
-    let Some(session) = Session::from_electron_dir(&dir) else {
+    let appdata = std::path::PathBuf::from(std::env::var("APPDATA").expect("APPDATA"));
+    // Voxa's own sign-in first, then the current Electron app's session.
+    let (dir, loaded) = match Session::from_voxa_dir(&appdata.join("voxa-next")) {
+        Some(s) => (appdata.join("voxa-next"), Some(s)),
+        None => (appdata.join("voxa"), Session::from_electron_dir(&appdata.join("voxa"))),
+    };
+    println!("session source: {}", dir.display());
+    let Some(session) = loaded else {
         println!("no saved session in {}", dir.display());
         return;
     };

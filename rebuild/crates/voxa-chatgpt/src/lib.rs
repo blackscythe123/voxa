@@ -38,7 +38,39 @@ struct StoredCookie {
     value: String,
 }
 
+#[derive(serde::Deserialize)]
+struct SavedSession {
+    cookie_header: String,
+    user_agent: String,
+}
+
+/// A stable random id for this install, sent as `oai-device-id` like a browser would.
+pub fn device_id(dir: &Path) -> String {
+    let path = dir.join("device-id.txt");
+    if let Ok(id) = std::fs::read_to_string(&path) {
+        if !id.trim().is_empty() {
+            return id.trim().to_string();
+        }
+    }
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+        ^ ((std::process::id() as u128) << 64);
+    let h = format!("{n:032x}");
+    let id = format!("{}-{}-4{}-a{}-{}", &h[0..8], &h[8..12], &h[13..16], &h[17..20], &h[20..32]);
+    let _ = std::fs::create_dir_all(dir);
+    let _ = std::fs::write(&path, &id);
+    id
+}
+
 impl Session {
+    /// The session Voxa's own sign-in window saved (`voxa-next\session.json`).
+    pub fn from_voxa_dir(dir: &Path) -> Option<Self> {
+        let saved: SavedSession = serde_json::from_slice(&std::fs::read(dir.join("session.json")).ok()?).ok()?;
+        if saved.cookie_header.is_empty() {
+            return None;
+        }
+        Some(Self { cookie_header: saved.cookie_header, user_agent: saved.user_agent, device_id: device_id(dir) })
+    }
+
     /// Load the session the current Electron app saved (`%APPDATA%\voxa`), for migration and testing.
     pub fn from_electron_dir(dir: &Path) -> Option<Self> {
         let cookies: Vec<StoredCookie> = serde_json::from_slice(&std::fs::read(dir.join("chatgpt-cookies.json")).ok()?).ok()?;

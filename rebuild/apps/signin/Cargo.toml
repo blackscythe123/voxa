@@ -1,0 +1,12 @@
+[package]
+name = "voxa-signin"
+description = "Voxa's ChatGPT sign-in window: a WebView2 page that captures the session for Voxa."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = "1"
+tao = "0.37.3"
+wry = "0.57.3"

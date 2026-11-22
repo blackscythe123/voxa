@@ -47,7 +47,7 @@ fn data_dir() -> PathBuf {
     PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa-next")
 }
 
-/// INTERIM until the sign-in window exists: the session the current Voxa app saved.
+/// Where the current (Electron) Voxa saved its session. Used once, to carry a user's sign-in over.
 fn electron_dir() -> PathBuf {
     PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa")
 }
@@ -171,7 +171,8 @@ impl Voxa {
             let (session, state, network) = cx
                 .background_executor()
                 .spawn(async move {
-                    match GptSession::from_electron_dir(&electron_dir()) {
+                    let saved = GptSession::from_voxa_dir(&data_dir()).or_else(|| GptSession::from_electron_dir(&electron_dir()));
+                    match saved {
                         None => (None, Session::Expired, Network::Up),
                         Some(s) => match gpt.access_token(&s) {
                             Ok(_) => (Some(s), Session::Valid, Network::Up),
@@ -325,9 +326,24 @@ impl Voxa {
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::OpenSignIn if !fake_mode() => {
-                // INTERIM until the sign-in window exists: re-read the session the current Voxa app saved.
-                win::log("sign-in: re-checking the saved ChatGPT session (sign in through the current Voxa app)");
-                self.check_session(cx);
+                let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("voxa-signin.exe")));
+                let Some(exe) = exe.filter(|p| p.exists()) else {
+                    win::log("FAIL sign-in window not found next to voxa-desktop.exe");
+                    return;
+                };
+                win::log("sign-in: opening the sign-in window");
+                cx.spawn(async move |this, cx| {
+                    let code = cx
+                        .background_executor()
+                        .spawn(async move { std::process::Command::new(exe).status().ok().and_then(|s| s.code()) })
+                        .await;
+                    let _ = this.update(cx, |v, cx| {
+                        win::log(&format!("sign-in window closed (exit {code:?})"));
+                        // Signed in or not, re-check: the core resends a waiting dictation when the session is valid.
+                        v.check_session(cx);
+                    });
+                })
+                .detach();
             }
             Effect::OpenSignIn => {
                 win::log("STAND-IN sign-in: pretending the user signs in");
