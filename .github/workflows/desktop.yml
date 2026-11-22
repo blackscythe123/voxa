@@ -60,7 +60,7 @@ jobs:
       - name: Test
         run: cargo test --workspace --release
       - name: Build and package (universal .app and .dmg)
-        run: scripts/package-mac.sh
+        run: bash scripts/package-mac.sh
       - uses: actions/upload-artifact@v4
         with:
           name: voxa-macos
