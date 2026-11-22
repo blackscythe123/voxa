@@ -69,6 +69,8 @@ pub enum Command {
     Resend(u64),
     ResendAll,
     DeleteEntry(u64),
+    /// The user corrected a dictation's text.
+    EditEntry(u64, String),
     DeleteAll,
 }
 

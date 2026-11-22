@@ -67,8 +67,10 @@ pub fn audio_for_upload(path: &Path) -> Option<Vec<u8>> {
     }
 }
 
-pub fn finish_text(text: String, dir: &Path) -> String {
-    if crate::store::Settings::load(dir).remove_fillers { voxa_core::text::remove_fillers(&text) } else { text }
+/// After transcription: filler removal (if on), then the user's word list for `app`.
+pub fn finish_text(text: String, dir: &Path, app: &str) -> String {
+    let text = if crate::store::Settings::load(dir).remove_fillers { voxa_core::text::remove_fillers(&text) } else { text };
+    crate::store::Words::load(dir).apply(&text, app)
 }
 
 #[cfg(test)]
@@ -109,8 +111,8 @@ mod tests {
         let dir = std::env::temp_dir().join("voxa-prepare-settings");
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::fs::remove_file(dir.join("settings.json"));
-        assert_eq!(finish_text("Um, hello.".into(), &dir), "Um, hello.", "off by default");
+        assert_eq!(finish_text("Um, hello.".into(), &dir, ""), "Um, hello.", "off by default");
         std::fs::write(dir.join("settings.json"), r#"{"remove_fillers": true}"#).unwrap();
-        assert_eq!(finish_text("Um, hello.".into(), &dir), "Hello.");
+        assert_eq!(finish_text("Um, hello.".into(), &dir, ""), "Hello.");
     }
 }

@@ -177,6 +177,57 @@ impl Settings {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pair {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppRule {
+    pub app: String,
+    pub no_final_period: bool,
+    pub lowercase: bool,
+}
+
+/// The user's word list (words.json): fixes for words ChatGPT gets wrong, spoken snippets,
+/// spoken formatting, and per-app style. Applied on this PC after every dictation.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Words {
+    pub fixes: Vec<Pair>,
+    pub snippets: Vec<Pair>,
+    pub spoken_formatting: bool,
+    pub rules: Vec<AppRule>,
+}
+
+impl Words {
+    pub fn load(dir: &Path) -> Self {
+        std::fs::read(dir.join("words.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+    pub fn save(&self, dir: &Path) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
+            let _ = write_atomic(&dir.join("words.json"), &bytes);
+        }
+    }
+    /// Fixes, then snippets, then spoken formatting, then the rule for `app` if there is one.
+    pub fn apply(&self, text: &str, app: &str) -> String {
+        use voxa_core::text::{apply_style, replace_phrases, spoken_formatting};
+        let pairs = |v: &[Pair]| v.iter().map(|p| (p.from.clone(), p.to.clone())).collect::<Vec<_>>();
+        let mut s = replace_phrases(text, &pairs(&self.fixes));
+        s = replace_phrases(&s, &pairs(&self.snippets));
+        if self.spoken_formatting {
+            s = spoken_formatting(&s);
+        }
+        if let Some(r) = self.rules.iter().find(|r| r.app.eq_ignore_ascii_case(app)) {
+            s = apply_style(&s, r.no_final_period, r.lowercase);
+        }
+        s
+    }
+}
+
 /// Typing speed used for "faster than typing": a typical 40 words a minute.
 pub const TYPING_WPM: f32 = 40.0;
 
@@ -460,6 +511,23 @@ mod tests {
         // Older files without the new fields still load.
         std::fs::write(dir.join("settings.json"), r#"{"remove_fillers": true}"#).unwrap();
         assert_eq!(Settings::load(&dir).keep_days, 30);
+    }
+
+    #[test]
+    fn words_apply_in_order_and_round_trip() {
+        let dir = std::env::temp_dir().join(format!("voxa-words-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let w = Words {
+            fixes: vec![Pair { from: "clawed code".into(), to: "Claude Code".into() }],
+            snippets: vec![Pair { from: "my email".into(), to: "sam@example.com".into() }],
+            spoken_formatting: true,
+            rules: vec![AppRule { app: "Claude Code".into(), no_final_period: true, lowercase: false }],
+        };
+        w.save(&dir);
+        let back = Words::load(&dir);
+        assert_eq!(back, w);
+        assert_eq!(back.apply("Ask clawed code. New line. Mail my email.", "Claude Code"), "Ask Claude Code.\nMail sam@example.com");
+        assert_eq!(back.apply("Ask clawed code.", "Slack"), "Ask Claude Code.", "rules only for their app");
     }
 
     #[test]

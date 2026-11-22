@@ -504,6 +504,7 @@ impl Voxa {
                 }
                 let path = self.audio_paths.get(&job).cloned();
                 let peak = self.peaks.get(&job).copied().unwrap_or(1.0);
+                let app = self.flow.job(job).map(|j| j.target.app.clone()).unwrap_or_default();
                 let session = self.session.clone();
                 let gpt = self.gpt.clone();
                 cx.spawn(async move |this, cx| {
@@ -523,7 +524,7 @@ impl Voxa {
                                 std::thread::sleep(Duration::from_millis(wait));
                                 result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
                             }
-                            result.map(|t| prepare::finish_text(t, &data_dir()))
+                            result.map(|t| prepare::finish_text(t, &data_dir(), &app))
                         })
                         .await;
                     let result = match result {
@@ -727,6 +728,12 @@ impl Voxa {
             },
             ResendAll => self.resend_all(cx),
             DeleteEntry(id) => self.delete_entry(id, cx),
+            EditEntry(id, text) => {
+                if let Some(e) = self.history.get(id).cloned() {
+                    self.history.upsert(Entry { text, ..e });
+                    self.history.save();
+                }
+            }
             DeleteAll => self.delete_history(cx),
         }
         self.publish();
@@ -805,13 +812,14 @@ impl Voxa {
         self.history.upsert(Entry { status: Status::Waiting("Writing it out".into()), ..entry.clone() });
         cx.notify();
         let gpt = self.gpt.clone();
+        let app = entry.app.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     let bytes = prepare::audio_for_upload(&audio).ok_or(TranscribeError::Server(0))?;
                     let (name, mime) = if audio.extension().is_some_and(|e| e == "webm") { ("recording.webm", "audio/webm") } else { ("recording.wav", "audio/wav") };
-                    gpt.transcribe(&session, bytes, name, mime).map(|t| prepare::finish_text(t, &data_dir()))
+                    gpt.transcribe(&session, bytes, name, mime).map(|t| prepare::finish_text(t, &data_dir(), &app))
                 })
                 .await;
             let _ = this.update(cx, |v, cx| {
@@ -1223,7 +1231,18 @@ fn run_window(tour: bool) {
         input::bind_keys(cx);
         let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
         let backend = cx.new(Backend::new);
-        let first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::Home };
+        let mut first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::Home };
+        // Developer switch: VOXA_PAGE=words | history | insights | settings | detail (newest dictation).
+        if let Ok(p) = std::env::var("VOXA_PAGE") {
+            first = match p.as_str() {
+                "words" => Page::Words,
+                "history" => Page::History,
+                "insights" => Page::Insights,
+                "settings" => Page::Settings,
+                "detail" => backend.read(cx).history.entries.last().map(|e| Page::Detail(e.id)).unwrap_or(Page::History),
+                _ => first,
+            };
+        }
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions { title: Some("Voxa".into()), ..Default::default() }),
             window_bounds: Some(WindowBounds::centered(size(px(1100.), px(760.)), cx)),

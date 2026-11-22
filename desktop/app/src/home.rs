@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::store::{self, Settings, Status};
 use crate::INK;
+use crate::input::TextInput;
 use crate::remote::Backend as Voxa;
 use voxa_core::{Blocker, Network, Session};
 
@@ -21,6 +22,10 @@ const CARD_BORDER: u32 = 0x0000000F;
 // Segoe Fluent Icons code points.
 const I_HISTORY: char = '\u{E81C}';
 const I_HOME: char = '\u{E80F}';
+const I_WORDS: char = '\u{E82D}';
+const I_EDIT: char = '\u{E70F}';
+const I_BACK: char = '\u{E72B}';
+const I_ARROW: char = '\u{E72A}';
 const I_PREV: char = '\u{E76B}';
 const I_NEXT: char = '\u{E76C}';
 const I_INSIGHTS: char = '\u{E9D2}';
@@ -52,6 +57,9 @@ pub enum Page {
     History,
     Insights,
     Settings,
+    Words,
+    /// One dictation, opened from History or Home.
+    Detail(u64),
     /// Guided setup (the first-run tour), steps 1 to SETUP_STEPS.
     Setup(u8),
 }
@@ -83,6 +91,17 @@ pub struct Home {
     range: Range,
     /// Custom range (local dates).
     custom: (chrono::NaiveDate, chrono::NaiveDate),
+    fix_from: Entity<TextInput>,
+    fix_to: Entity<TextInput>,
+    snip_from: Entity<TextInput>,
+    snip_to: Entity<TextInput>,
+    edit_box: Entity<TextInput>,
+    /// The dictation being edited on its detail page.
+    editing: Option<u64>,
+    /// After an edit: offer to always fix what changed (from, to).
+    suggestion: Option<(String, String)>,
+    /// When playback started, to draw progress.
+    play_started: Option<(std::time::Instant, f32)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -118,6 +137,10 @@ enum StatusFilter {
 impl Home {
     pub fn new(voxa: Entity<Voxa>, page: Page, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&voxa, |_, _, cx| cx.notify()).detach();
+        let input = |ph: &str, cx: &mut Context<Self>| cx.new(|cx| TextInput::new(ph, cx));
+        let (fix_from, fix_to) = (input("When it writes", cx), input("Write instead", cx));
+        let (snip_from, snip_to) = (input("When I say", cx), input("Type this", cx));
+        let edit_box = input("", cx);
         let focus = cx.focus_handle();
         window.focus(&focus);
         let mut me = Self {
@@ -143,6 +166,14 @@ impl Home {
                 let t = chrono::Local::now().date_naive();
                 (t - chrono::Duration::days(29), t)
             },
+            fix_from,
+            fix_to,
+            snip_from,
+            snip_to,
+            edit_box,
+            editing: None,
+            suggestion: None,
+            play_started: None,
         };
         me.go(page, cx);
         me
@@ -158,6 +189,10 @@ impl Home {
             self.try_since = self.voxa.read(cx).history.entries.last().map(|e| e.id).unwrap_or(0);
         }
         self.confirm_delete = false;
+        if !matches!(page, Page::Detail(_)) {
+            self.editing = None;
+            self.suggestion = None;
+        }
         self.page = page;
         cx.notify();
     }
@@ -817,15 +852,345 @@ impl Home {
             )
             .child(
                 div()
+                    .id(SharedString::from(format!("open-{id}")))
                     .flex_1()
                     .min_w(px(0.))
                     .text_size(px(14.))
                     .line_height(px(21.))
-                    .child(div().text_color(rgb(if muted { MUTED } else { TEXT })).child(body))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.go(Page::Detail(id), cx)))
+                    .child(div().text_color(rgb(if muted { MUTED } else { TEXT })).hover(|s| s.text_color(rgb(INK))).child(body))
                     .children(note.filter(|(_, why)| !why.is_empty()).map(|(_, why)| div().mt(px(4.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(MUTED)).child(why))),
             )
             .child(actions)
             .into_any_element()
+    }
+
+    fn detail(&mut self, id: u64, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(e) = self.voxa.read(cx).history.get(id).cloned() else {
+            return vec![
+                div().text_size(px(14.)).text_color(rgb(MUTED)).child("This dictation was deleted.").into_any_element(),
+                wbtn("back-gone", "Back to History", false).mt(px(12.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::History, cx))).into_any_element(),
+            ];
+        };
+        let live = self.voxa.read(cx).is_live(id);
+        let has_audio = e.audio.as_ref().is_some_and(|a| a.exists());
+        let when = e.local_time();
+        let mut out: Vec<AnyElement> = vec![
+            div()
+                .id("back")
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_size(px(13.))
+                .text_color(rgb(INK))
+                .cursor_pointer()
+                .child(icon(I_BACK, 12.))
+                .child("History")
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::History, cx)))
+                .into_any_element(),
+        ];
+        // Where and when.
+        let place = match (e.via.as_ref(), e.started_in.as_ref().filter(|s| **s != e.app)) {
+            (Some(b), Some(f)) => format!("in {b}, started in {f}"),
+            (Some(b), None) => format!("in {b}"),
+            (None, Some(f)) => format!("started in {f}"),
+            _ => String::new(),
+        };
+        let status = match &e.status {
+            Status::Pasted => "Pasted".to_string(),
+            Status::Ready => "Not pasted".to_string(),
+            Status::Waiting(w) => w.clone(),
+            Status::Failed(f) => f.clone(),
+        };
+        out.push(
+            div()
+                .mt(px(14.))
+                .flex()
+                .items_center()
+                .gap(px(14.))
+                .child(app_badge_via(&e.app, e.via.as_deref(), 44.))
+                .child(
+                    div()
+                        .child(div().text_size(px(24.)).line_height(px(30.)).font_weight(FontWeight::SEMIBOLD).child(e.app.clone()))
+                        .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(
+                            [when.format("%A %-d %B %Y, %H:%M").to_string(), secs_label(e.secs), format!("{} words", e.words()), status, place]
+                                .into_iter()
+                                .filter(|s| !s.is_empty())
+                                .collect::<Vec<_>>()
+                                .join("  ·  "),
+                        )),
+                )
+                .into_any_element(),
+        );
+
+        // The text: read, copy, or correct it.
+        let editing = self.editing == Some(id);
+        let text_card = if editing {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(10.))
+                .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Correct the text. Voxa keeps the recording either way."))
+                .child(self.edit_box.clone())
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .justify_end()
+                        .child(wbtn("edit-cancel", "Cancel", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.editing = None;
+                            cx.notify();
+                        })))
+                        .child(wbtn("edit-save", "Save", true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            let new = this.edit_box.read(cx).text();
+                            let old = this.voxa.read(cx).history.get(id).map(|e| e.text.clone()).unwrap_or_default();
+                            this.editing = None;
+                            if new.trim() != old.trim() && !new.trim().is_empty() {
+                                this.suggestion = voxa_core::text::changed_phrase(&old, &new);
+                                this.voxa.update(cx, |v, cx| v.edit_entry(id, new, cx));
+                            }
+                            cx.notify();
+                        }))),
+                )
+        } else {
+            let copied = self.copied == Some(id);
+            let text = e.text.clone();
+            let can_edit = matches!(e.status, Status::Pasted | Status::Ready);
+            div()
+                .child(div().text_size(px(16.)).line_height(px(26.)).child(if e.text.is_empty() { "No text yet.".to_string() } else { e.text.clone() }))
+                .child(
+                    div()
+                        .mt(px(14.))
+                        .flex()
+                        .gap(px(8.))
+                        .when(can_edit, |d| {
+                            d.child(
+                                wbtn("copy-detail", if copied { "Copied" } else { "Copy" }, false).child(icon(if copied { I_CHECK } else { I_COPY }, 12.)).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                                    this.copied = Some(id);
+                                    cx.notify();
+                                })),
+                            )
+                            .child(wbtn("edit", "Edit", false).child(icon(I_EDIT, 12.)).on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                let t = this.voxa.read(cx).history.get(id).map(|e| e.text.clone()).unwrap_or_default();
+                                this.edit_box.update(cx, |b, cx| b.set_text(&t, cx));
+                                this.edit_box.read(cx).focus(window);
+                                this.editing = Some(id);
+                                this.suggestion = None;
+                                cx.notify();
+                            })))
+                        }),
+                )
+        };
+        out.push(card().mt(px(18.)).flex_col().items_start().py(px(18.)).child(text_card.w_full()).into_any_element());
+
+        if let Some((from, to)) = self.suggestion.clone() {
+            let (f2, t2) = (from.clone(), to.clone());
+            out.push(
+                div()
+                    .mt(px(8.))
+                    .px(px(16.))
+                    .py(px(12.))
+                    .rounded(px(4.))
+                    .bg(rgb(0xF3E7DE))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(icon(I_WORDS, 14.).text_color(rgb(INK)))
+                    .child(div().flex_1().text_size(px(14.)).child(format!("Always change \"{from}\" to \"{to}\" in future dictations?")))
+                    .child(wbtn("sug-no", "No thanks", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.suggestion = None;
+                        cx.notify();
+                    })))
+                    .child(wbtn("sug-yes", "Add to Words", true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        let (f, t) = (f2.clone(), t2.clone());
+                        this.voxa.update(cx, |v, cx| v.update_words(|w| w.fixes.push(store::Pair { from: f, to: t }), cx));
+                        this.suggestion = None;
+                        cx.notify();
+                    })))
+                    .into_any_element(),
+            );
+        }
+
+        // The recording.
+        if has_audio {
+            let playing = self.playing == Some(id);
+            let progress = match (playing, self.play_started) {
+                (true, Some((t, len))) if len > 0.0 => (t.elapsed().as_secs_f32() / len).clamp(0.0, 1.0),
+                _ => 0.0,
+            };
+            let file = e.audio.clone().unwrap_or_default();
+            out.push(section("Recording").into_any_element());
+            out.push(
+                card()
+                    .child(self.icon_btn(format!("dplay-{id}"), if playing { I_STOP } else { I_PLAY }, if playing { "Stop" } else { "Play" }, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_play(id, cx))))
+                    .child(div().flex_1().h(px(4.)).rounded(px(2.)).bg(rgb(0xF0EBE5)).child(div().h_full().w(gpui::relative(progress)).rounded(px(2.)).bg(rgb(INK))))
+                    .child(div().w(px(60.)).flex().justify_end().text_size(px(13.)).text_color(rgb(MUTED)).child(secs_label(e.secs)))
+                    .child(self.icon_btn(format!("dfolder-{id}"), I_FOLDER, "Show the file", false, cx.listener(move |_, _: &ClickEvent, _, _| crate::os::reveal(&file))))
+                    .into_any_element(),
+            );
+        }
+
+        // What else can be done with it.
+        let unsent = matches!(e.status, Status::Waiting(_) | Status::Failed(_));
+        let mut actions = div().mt(px(18.)).flex().gap(px(8.));
+        if has_audio && (!live || unsent) {
+            actions = actions.child(
+                wbtn("dretry", if unsent { "Send now" } else { "Write it out again" }, false)
+                    .child(icon(if unsent { I_SEND } else { I_RETRY }, 12.))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend(id, cx)))),
+            );
+        }
+        if !live {
+            actions = actions.child(if self.confirm_entry == Some(id) {
+                wbtn("ddel-yes", "Delete it and its recording", true).bg(rgb(0xC42B1C)).hover(|s| s.bg(rgb(0xA32416))).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.confirm_entry = None;
+                    if this.playing == Some(id) {
+                        this.playing = None;
+                        crate::os::stop_audio();
+                    }
+                    this.voxa.update(cx, |v, cx| v.delete_entry(id, cx));
+                    this.go(Page::History, cx);
+                }))
+            } else {
+                wbtn("ddel", "Delete", false).child(icon(I_DELETE, 12.)).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.confirm_entry = Some(id);
+                    cx.notify();
+                }))
+            });
+        }
+        out.push(actions.into_any_element());
+        out
+    }
+
+    fn words_page(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let w = self.voxa.read(cx).words();
+        let apps: Vec<String> = {
+            let v = self.voxa.read(cx);
+            let mut counts: Vec<(String, usize)> = Vec::new();
+            for e in v.history.entries.iter().rev().take(2000) {
+                if e.app == crate::import::UNKNOWN_APP {
+                    continue;
+                }
+                match counts.iter_mut().find(|(a, _)| *a == e.app) {
+                    Some((_, n)) => *n += 1,
+                    None => counts.push((e.app.clone(), 1)),
+                }
+            }
+            counts.sort_by(|a, b| b.1.cmp(&a.1));
+            counts.into_iter().map(|(a, _)| a).filter(|a| !w.rules.iter().any(|r| r.app == *a)).take(8).collect()
+        };
+        let mut out: Vec<AnyElement> = vec![
+            div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Words").into_any_element(),
+            div()
+                .mt(px(4.))
+                .text_size(px(14.))
+                .text_color(rgb(MUTED))
+                .child("Fix what ChatGPT keeps getting wrong, and expand things you say often. Applied on this PC after every dictation, before it is pasted.")
+                .into_any_element(),
+        ];
+
+        // Fixes and snippets share a shape: a pair list with an add row.
+        let pair_list = |this: &mut Self, title: &str, sub: &str, key: &'static str, items: Vec<store::Pair>, from: Entity<TextInput>, to: Entity<TextInput>, cx: &mut Context<Self>| -> Vec<AnyElement> {
+            let mut v: Vec<AnyElement> = vec![section(title.to_string()).into_any_element(), div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(MUTED)).child(sub.to_string()).into_any_element()];
+            let (f, t) = (from.clone(), to.clone());
+            v.push(
+                card()
+                    .mb(px(3.))
+                    .child(div().flex_1().child(from))
+                    .child(icon(I_ARROW, 12.).text_color(rgb(MUTED)))
+                    .child(div().flex_1().child(to))
+                    .child(wbtn(SharedString::from(format!("{key}-add")), "Add", true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        let (a, b) = (f.read(cx).text(), t.read(cx).text());
+                        if a.trim().is_empty() || b.trim().is_empty() {
+                            return;
+                        }
+                        let pair = store::Pair { from: a.trim().to_string(), to: b.trim().to_string() };
+                        this.voxa.update(cx, |v, cx| {
+                            v.update_words(|w| if key == "fix" { w.fixes.push(pair) } else { w.snippets.push(pair) }, cx)
+                        });
+                        f.update(cx, |i, cx| i.set_text("", cx));
+                        t.update(cx, |i, cx| i.set_text("", cx));
+                    })))
+                    .into_any_element(),
+            );
+            for (i, p) in items.iter().enumerate() {
+                v.push(
+                    card()
+                        .min_h(px(48.))
+                        .py(px(8.))
+                        .mb(px(3.))
+                        .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).text_color(rgb(MUTED)).child(p.from.clone()))
+                        .child(icon(I_ARROW, 12.).text_color(rgb(MUTED)))
+                        .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).child(p.to.clone()))
+                        .child(this.icon_btn(format!("{key}-del-{i}"), I_DELETE, "Remove", false, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.voxa.update(cx, |v, cx| {
+                                v.update_words(|w| {
+                                    let list = if key == "fix" { &mut w.fixes } else { &mut w.snippets };
+                                    if i < list.len() {
+                                        list.remove(i);
+                                    }
+                                }, cx)
+                            })
+                        })))
+                        .into_any_element(),
+                );
+            }
+            v
+        };
+        let (ff, ft, sf, st) = (self.fix_from.clone(), self.fix_to.clone(), self.snip_from.clone(), self.snip_to.clone());
+        out.extend(pair_list(self, "Fixes", "Names and words ChatGPT spells wrong. Tip: edit a dictation and Voxa offers to add the fix for you.", "fix", w.fixes.clone(), ff, ft, cx));
+        out.extend(pair_list(self, "Snippets", "Say a short phrase, get the full text: an email address, a sign-off, a link.", "snip", w.snippets.clone(), sf, st, cx));
+
+        out.push(section("Spoken formatting").into_any_element());
+        out.push(
+            card()
+                .child(icon(I_TEXT, 18.).w(px(20.)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(div().text_size(px(14.)).child("Say \"new line\", \"new paragraph\" or \"bullet point\""))
+                        .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Turns them into line breaks and bullets. In chats and terminals a line break may send the message.")),
+                )
+                .child(toggle("spoken-fmt", w.spoken_formatting).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_words(|w| w.spoken_formatting = !w.spoken_formatting, cx)))))
+                .into_any_element(),
+        );
+
+        out.push(section("Per-app rules").into_any_element());
+        out.push(div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(MUTED)).child("How text should look in a particular app or site.").into_any_element());
+        for (i, r) in w.rules.iter().enumerate() {
+            let (np, lc) = (r.no_final_period, r.lowercase);
+            out.push(
+                card()
+                    .mb(px(3.))
+                    .child(app_badge(&r.app, 28.))
+                    .child(div().w(px(160.)).text_size(px(14.)).child(r.app.clone()))
+                    .child(div().flex_1().flex().gap(px(18.)).text_size(px(13.)).child(div().flex().items_center().gap(px(8.)).child("No full stop at the end").child(toggle(Box::leak(format!("rule-np-{i}").into_boxed_str()), np).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.voxa.update(cx, |v, cx| v.update_words(|w| if let Some(r) = w.rules.get_mut(i) { r.no_final_period = !np }, cx))
+                    })))).child(div().flex().items_center().gap(px(8.)).child("lowercase").child(toggle(Box::leak(format!("rule-lc-{i}").into_boxed_str()), lc).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.voxa.update(cx, |v, cx| v.update_words(|w| if let Some(r) = w.rules.get_mut(i) { r.lowercase = !lc }, cx))
+                    })))))
+                    .child(self.icon_btn(format!("rule-del-{i}"), I_DELETE, "Remove", false, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.voxa.update(cx, |v, cx| v.update_words(|w| if i < w.rules.len() { w.rules.remove(i); }, cx))
+                    })))
+                    .into_any_element(),
+            );
+        }
+        if !apps.is_empty() {
+            let mut chips = div().mt(px(6.)).flex().flex_wrap().items_center().gap(px(6.)).child(div().text_size(px(13.)).text_color(rgb(MUTED)).mr(px(4.)).child("Add a rule for"));
+            for (i, a) in apps.into_iter().enumerate() {
+                let app = a.clone();
+                chips = chips.child(self.chip(SharedString::from(format!("rule-add-{i}")), &a, false, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    let app = app.clone();
+                    this.voxa.update(cx, |v, cx| v.update_words(|w| w.rules.push(store::AppRule { app, no_final_period: true, lowercase: false }), cx))
+                })));
+            }
+            out.push(chips.into_any_element());
+        }
+        out.push(div().h(px(30.)).into_any_element());
+        out
     }
 
     fn toggle_play(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -838,6 +1203,19 @@ impl Home {
         let secs = self.voxa.read(cx).play_entry(id);
         if let Some(secs) = secs {
             self.playing = Some(id);
+            self.play_started = Some((std::time::Instant::now(), secs));
+            // Redraw the progress bar while it plays.
+            cx.spawn(async move |this, cx| loop {
+                cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
+                let go_on = this.update(cx, |h, cx| {
+                    cx.notify();
+                    h.playing == Some(id)
+                });
+                if !matches!(go_on, Ok(true)) {
+                    break;
+                }
+            })
+            .detach();
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(std::time::Duration::from_secs_f32(secs + 0.3)).await;
                 let _ = this.update(cx, |h, cx| {
@@ -1651,6 +2029,8 @@ impl Render for Home {
             Page::Home => self.home(cx),
             Page::History => self.history(cx),
             Page::Insights => self.insights(cx),
+            Page::Words => self.words_page(cx),
+            Page::Detail(id) => self.detail(id, cx),
             _ => self.settings(cx),
         };
         let nav = div()
@@ -1667,6 +2047,7 @@ impl Render for Home {
             .child(self.nav_item("nav-home", I_HOME, "Home", Page::Home, cx))
             .child(self.nav_item("nav-history", I_HISTORY, "History", Page::History, cx))
             .child(self.nav_item("nav-insights", I_INSIGHTS, "Insights", Page::Insights, cx))
+            .child(self.nav_item("nav-words", I_WORDS, "Words", Page::Words, cx))
             .child(div().flex_1())
             .child(self.nav_item("nav-settings", I_SETTINGS, "Settings", Page::Settings, cx));
         root.flex().child(nav).child(

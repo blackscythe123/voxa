@@ -166,6 +166,26 @@ impl Backend {
         cx.notify();
     }
 
+    pub fn edit_entry(&mut self, id: u64, text: String, cx: &mut Context<Self>) {
+        link::send(&Command::EditEntry(id, text.clone()));
+        if let Some(e) = self.history.entries.iter_mut().find(|e| e.id == id) {
+            e.text = text;
+        }
+        cx.notify();
+    }
+
+    pub fn words(&self) -> crate::store::Words {
+        crate::store::Words::load(&data_dir())
+    }
+
+    /// The window process is the only writer of words.json; the tray process reads it per dictation.
+    pub fn update_words(&mut self, f: impl FnOnce(&mut crate::store::Words), cx: &mut Context<Self>) {
+        let mut w = crate::store::Words::load(&data_dir());
+        f(&mut w);
+        w.save(&data_dir());
+        cx.notify();
+    }
+
     pub fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
         link::send(&Command::DeleteEntry(id));
         self.history.entries.retain(|e| e.id != id);
