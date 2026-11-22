@@ -1,8 +1,12 @@
 //! Microphone capture: default input device -> mono 16 kHz 16-bit WAV on disk, written as it
 //! records so a crash never loses a dictation. Also publishes a live level for the ink line.
+//!
+//! Building a WASAPI stream takes 300-550 ms, so the stream is built once and kept paused;
+//! the hotkey only calls play(), which delivers audio in ~6-17 ms (measured, examples/mic_latency.rs).
+//! It is rebuilt when the default input device changes.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -21,49 +25,50 @@ pub fn level() -> f32 {
 pub enum MicError {
     NoDevice,
     /// The device refused to open (most often: Windows microphone privacy is off).
-    Blocked(String),
+    Blocked(#[allow(dead_code)] String),
 }
 
 type Writer = hound::WavWriter<std::io::BufWriter<std::fs::File>>;
 
-pub struct Recording {
+/// State shared with the audio callback.
+struct Shared {
+    writer: Mutex<Option<Writer>>,
+    peak: AtomicU32,
+    reset: AtomicBool,
+}
+
+pub struct Mic {
     stream: Stream,
-    writer: Arc<Mutex<Option<Writer>>>,
-    pub path: PathBuf,
-    peak: Arc<AtomicU32>,
+    device_name: String,
+    shared: Arc<Shared>,
+    path: Option<PathBuf>,
 }
 
-pub fn has_input_device() -> bool {
-    cpal::default_host().default_input_device().is_some()
+fn default_device() -> Result<(cpal::Device, String), MicError> {
+    let d = cpal::default_host().default_input_device().ok_or(MicError::NoDevice)?;
+    let name = d.name().unwrap_or_default();
+    Ok((d, name))
 }
 
-pub fn start(path: &Path) -> Result<Recording, MicError> {
-    let device = cpal::default_host().default_input_device().ok_or(MicError::NoDevice)?;
+fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError> {
     let config = device.default_input_config().map_err(|e| MicError::Blocked(e.to_string()))?;
     let in_rate = config.sample_rate().0;
     let channels = config.channels() as usize;
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let spec = hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-    let writer = hound::WavWriter::create(path, spec).map_err(|e| MicError::Blocked(e.to_string()))?;
-    let writer = Arc::new(Mutex::new(Some(writer)));
-    let peak = Arc::new(AtomicU32::new(0));
-
-    // Linear resampler state: position in the input stream, in output-sample units.
     let step = in_rate as f64 / RATE as f64;
     let mut pos = 0.0f64;
     let mut prev = 0.0f32;
-    let w = writer.clone();
-    let pk = peak.clone();
+
     let mut on_samples = move |mono: &mut dyn Iterator<Item = f32>| {
+        if shared.reset.swap(false, Ordering::Relaxed) {
+            pos = 0.0;
+            prev = 0.0;
+        }
         let mut sum = 0.0f32;
         let mut n = 0usize;
         let mut out: Vec<i16> = Vec::new();
         for s in mono {
             sum += s * s;
             n += 1;
-            // emit output samples that fall between prev and s
             while pos < 1.0 {
                 let v = prev + (s - prev) * pos as f32;
                 out.push((v.clamp(-1.0, 1.0) * i16::MAX as f32) as i16);
@@ -74,12 +79,14 @@ pub fn start(path: &Path) -> Result<Recording, MicError> {
         }
         if n > 0 {
             let rms = (sum / n as f32).sqrt();
-            let lvl = (rms * 6.0).min(1.0); // speech RMS ~0.02-0.2
-            LEVEL.store(lvl.to_bits(), Ordering::Relaxed);
-            let p = f32::from_bits(pk.load(Ordering::Relaxed)).max(rms);
-            pk.store(p.to_bits(), Ordering::Relaxed);
+            // Decibel scale, like an audio meter: -50 dB (room) .. -15 dB (loud) -> 0..1.
+            // Measured speech here: soft 0.016 (-36 dB), normal 0.037 (-29 dB), loud 0.07 (-23 dB).
+            let db = 20.0 * rms.max(1e-6).log10();
+            LEVEL.store(((db + 50.0) / 35.0).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+            let p = f32::from_bits(shared.peak.load(Ordering::Relaxed)).max(rms);
+            shared.peak.store(p.to_bits(), Ordering::Relaxed);
         }
-        if let Ok(mut g) = w.lock() {
+        if let Ok(mut g) = shared.writer.lock() {
             if let Some(wr) = g.as_mut() {
                 for v in out {
                     let _ = wr.write_sample(v);
@@ -107,26 +114,64 @@ pub fn start(path: &Path) -> Result<Recording, MicError> {
         other => return Err(MicError::Blocked(format!("unsupported sample format {other:?}"))),
     }
     .map_err(|e| MicError::Blocked(e.to_string()))?;
-    stream.play().map_err(|e| MicError::Blocked(e.to_string()))?;
-    Ok(Recording { stream, writer, path: path.to_path_buf(), peak })
+    // Built but not capturing: nothing is recorded until start().
+    stream.pause().map_err(|e| MicError::Blocked(e.to_string()))?;
+    Ok(stream)
 }
 
-impl Recording {
-    /// Stop and finalise the WAV. Returns the loudest RMS seen (to tell silence from speech).
-    pub fn finish(self) -> f32 {
-        drop(self.stream);
-        if let Ok(mut g) = self.writer.lock() {
-            if let Some(w) = g.take() {
-                let _ = w.finalize();
-            }
-        }
-        LEVEL.store(0f32.to_bits(), Ordering::Relaxed);
-        f32::from_bits(self.peak.load(Ordering::Relaxed))
+impl Mic {
+    /// Build the stream now (paused) so starting later is instant.
+    pub fn new() -> Result<Self, MicError> {
+        let (device, device_name) = default_device()?;
+        let shared = Arc::new(Shared { writer: Mutex::new(None), peak: AtomicU32::new(0), reset: AtomicBool::new(true) });
+        let stream = build(&device, shared.clone())?;
+        Ok(Self { stream, device_name, shared, path: None })
     }
 
-    pub fn discard(self) {
+    pub fn device_name(&self) -> &str {
+        &self.device_name
+    }
+
+    /// Start writing to `path`. Rebuilds first if the default microphone changed.
+    pub fn start(&mut self, path: &Path) -> Result<(), MicError> {
+        let (device, name) = default_device()?;
+        if name != self.device_name {
+            self.stream = build(&device, self.shared.clone())?;
+            self.device_name = name;
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let spec = hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let writer = hound::WavWriter::create(path, spec).map_err(|e| MicError::Blocked(e.to_string()))?;
+        *self.shared.writer.lock().unwrap() = Some(writer);
+        self.shared.peak.store(0f32.to_bits(), Ordering::Relaxed);
+        self.shared.reset.store(true, Ordering::Relaxed);
+        self.path = Some(path.to_path_buf());
+        if let Err(e) = self.stream.play() {
+            // Stale stream (device reset): rebuild once and retry.
+            self.stream = build(&device, self.shared.clone())?;
+            self.stream.play().map_err(|_| MicError::Blocked(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Stop and finalise the WAV. Returns the loudest RMS seen.
+    pub fn finish(&mut self) -> f32 {
+        let _ = self.stream.pause();
+        if let Some(w) = self.shared.writer.lock().unwrap().take() {
+            let _ = w.finalize();
+        }
+        LEVEL.store(0f32.to_bits(), Ordering::Relaxed);
+        self.path = None;
+        f32::from_bits(self.shared.peak.load(Ordering::Relaxed))
+    }
+
+    pub fn discard(&mut self) {
         let path = self.path.clone();
         self.finish();
-        let _ = std::fs::remove_file(path);
+        if let Some(p) = path {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }

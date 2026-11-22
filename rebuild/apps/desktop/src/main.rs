@@ -27,8 +27,16 @@ use voxa_chatgpt::{ChatGpt, Session as GptSession};
 use voxa_core::{Effect, Event, Flow, JobId, Mic, Network, Problem, Readiness, Session, State, Target, TranscribeError};
 
 const INK: u32 = 0x8F4C2C;
-/// Below this peak RMS a recording is treated as silence and never sent (Whisper invents text for silence).
-const SILENCE: f32 = 0.008;
+/// Below this peak RMS a recording is treated as silence and never sent. Measured: soft speech
+/// peaked at 0.0156, a silent take at 0.0079, so the cutoff sits well under soft speech.
+const SILENCE: f32 = 0.003;
+/// Whisper invents these for near-silent audio. Only trusted when the recording was also quiet.
+const QUIET: f32 = 0.02;
+const SILENCE_PHRASES: &[&str] = &["thank you.", "thank you", "thanks for watching!", "thanks for watching.", "you", "bye."];
+
+fn invented_for_silence(text: &str, peak: f32) -> bool {
+    peak < QUIET && SILENCE_PHRASES.contains(&text.trim().to_lowercase().as_str())
+}
 const RECHECK: Duration = Duration::from_secs(600);
 
 fn fake_mode() -> bool {
@@ -53,7 +61,8 @@ struct Voxa {
     main_key: HotKey,
     esc_key: HotKey,
     esc_bound: bool,
-    recording: Option<audio::Recording>,
+    mic: Option<audio::Mic>,
+    mic_on: bool,
     audio_paths: HashMap<JobId, PathBuf>,
     peaks: HashMap<JobId, f32>,
     levels: VecDeque<f32>,
@@ -69,7 +78,18 @@ impl Voxa {
         } else {
             Session::Unknown
         };
-        let mic = if audio::has_input_device() { Mic::Granted } else { Mic::Missing };
+        let built = audio::Mic::new();
+        let mic = match &built {
+            Ok(m) => {
+                win::log(&format!("microphone ready (paused): {}", m.device_name()));
+                Mic::Granted
+            }
+            Err(audio::MicError::NoDevice) => Mic::Missing,
+            Err(e) => {
+                win::log(&format!("microphone unavailable: {e:?}"));
+                Mic::Denied
+            }
+        };
         let flow = Flow::new(Readiness { session, network: Network::Up, mic });
         let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
         let main_key = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
@@ -128,7 +148,8 @@ impl Voxa {
             main_key,
             esc_key,
             esc_bound: false,
-            recording: None,
+            mic: built.ok(),
+            mic_on: false,
             audio_paths: HashMap::new(),
             peaks: HashMap::new(),
             levels: VecDeque::new(),
@@ -210,11 +231,19 @@ impl Voxa {
                 }
                 let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
                 let path = data_dir().join("audio").join(format!("{ts}-{}.wav", job.0));
-                match audio::start(&path) {
-                    Ok(r) => {
+                let started = match self.mic.as_mut() {
+                    Some(m) => m.start(&path),
+                    None => audio::Mic::new().and_then(|mut m| {
+                        let r = m.start(&path);
+                        self.mic = Some(m);
+                        r
+                    }),
+                };
+                match started {
+                    Ok(()) => {
                         win::log(&format!("  recording to {}", path.display()));
                         self.audio_paths.insert(job, path);
-                        self.recording = Some(r);
+                        self.mic_on = true;
                     }
                     Err(e) => {
                         // The mic would not open: undo the recording and show the blocker instead.
@@ -231,15 +260,17 @@ impl Voxa {
                 }
             }
             Effect::StopCapture { job } => {
-                if let Some(r) = self.recording.take() {
-                    let peak = r.finish();
+                if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                    self.mic_on = false;
+                    let peak = m.finish();
                     win::log(&format!("  recording stopped, peak rms {peak:.4}"));
                     self.peaks.insert(job, peak);
                 }
             }
             Effect::DiscardCapture { .. } => {
-                if let Some(r) = self.recording.take() {
-                    r.discard();
+                if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                    self.mic_on = false;
+                    m.discard();
                 }
             }
             Effect::Transcribe { job } if !fake_mode() => {
@@ -249,6 +280,7 @@ impl Voxa {
                     return;
                 }
                 let path = self.audio_paths.get(&job).cloned();
+                let peak = self.peaks.get(&job).copied().unwrap_or(1.0);
                 let session = self.session.clone();
                 let gpt = self.gpt.clone();
                 cx.spawn(async move |this, cx| {
@@ -260,6 +292,13 @@ impl Voxa {
                             gpt.transcribe(&session, audio, "recording.wav", "audio/wav")
                         })
                         .await;
+                    let result = match result {
+                        Ok(t) if invented_for_silence(&t, peak) => {
+                            win::log(&format!("  dropped {t:?}: near-silent take (peak {peak:.4})"));
+                            Ok(String::new())
+                        }
+                        other => other,
+                    };
                     let _ = this.update(cx, |v, cx| v.handle(Event::Transcribed { job, result }, cx));
                 })
                 .detach();
@@ -456,7 +495,7 @@ fn ink_line(levels: Vec<f32>) -> AnyElement {
             for i in 1..=n {
                 let x = w * i as f32 / n as f32;
                 let lvl = if i < pad { 0.0 } else { levels.get(i - pad).copied().unwrap_or(0.0) };
-                let y = if i % 2 == 0 { lvl } else { -lvl } * 11.;
+                let y = if i % 2 == 0 { lvl } else { -lvl } * 12.;
                 p.line_to(point(b.origin.x + px(x), mid + px(y)));
             }
             if let Ok(p) = p.build() {
