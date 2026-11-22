@@ -126,7 +126,7 @@ impl Voxa {
         if history.prune(settings.keep_days, now_ms()) > 0 {
             history.save();
         }
-        let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.app.clone()).collect();
+        let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.via.clone().unwrap_or_else(|| e.app.clone())).collect();
         std::thread::spawn(move || win::cache_open_app_icons(apps));
         let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
         let main_key = settings.hotkey.parse::<HotKey>().unwrap_or_else(|_| {
@@ -191,7 +191,7 @@ impl Voxa {
                             }
                             let fg = win::foreground();
                             let target = Target { app: win::app_name(fg), window: fg as u64 };
-                            win::cache_app_icon(fg, target.app.clone());
+                            win::cache_app_icon(fg, win::icon_owner(fg));
                             win::log(&format!("hotkey in {}", win::describe(fg)));
                             v.handle(Event::Hotkey { target }, cx);
                         } else if ev.id == v.esc_key.id() {
@@ -418,11 +418,12 @@ impl Voxa {
             }
             Effect::Paste { job, target, text } => {
                 let fg = win::foreground();
-                let result = if fg as u64 == target.window {
+                let same_tab = !win::browser_name(fg).is_some() || win::app_name(fg) == target.app;
+                let result = if fg as u64 == target.window && same_tab {
                     if win::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed }
                 } else {
                     let app = win::app_name(fg);
-                    win::cache_app_icon(fg, app.clone());
+                    win::cache_app_icon(fg, win::icon_owner(fg));
                     Delivery::TargetChanged(Target { app, window: fg as u64 })
                 };
                 self.handle(Event::Delivered { job, result }, cx);
@@ -495,6 +496,10 @@ impl Voxa {
                 status,
                 audio: self.audio_paths.get(&job.id).cloned(),
                 started_in: job.started_in.as_ref().map(|t| t.app.clone()),
+                // The browser, when the app is a site; kept once known (the window may close later).
+                via: win::browser_name(job.target.window as _)
+                    .filter(|b| *b != job.target.app)
+                    .or_else(|| self.history.get(id).and_then(|e| e.via.clone())),
             };
             let next = match &job.state {
                 JobState::Recording | JobState::Transcribing => continue,

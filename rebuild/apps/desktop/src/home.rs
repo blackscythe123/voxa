@@ -275,6 +275,27 @@ fn toggle(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
         )
 }
 
+/// The app's badge, with the browser's icon in the corner when the app is a site in a tab.
+fn app_badge_via(app: &str, via: Option<&str>, size: f32) -> gpui::Div {
+    let base = app_badge(app, size);
+    match via.map(crate::win::icon_file).filter(|f| f.exists()) {
+        Some(f) => div().relative().size(px(size)).flex_none().child(base).child(
+            div()
+                .absolute()
+                .right(px(-5.))
+                .bottom(px(-5.))
+                .size(px(size * 0.55))
+                .rounded_full()
+                .bg(rgb(0xFFFFFF))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(gpui::img(f).size(px(size * 0.45))),
+        ),
+        None => base,
+    }
+}
+
 /// The app's real icon (cached from its exe), or a coloured square with its initial.
 fn app_badge(app: &str, size: f32) -> gpui::Div {
     let file = crate::win::icon_file(app);
@@ -286,6 +307,9 @@ fn app_badge(app: &str, size: f32) -> gpui::Div {
         ("whatsapp", 0x25D366), ("slack", 0x4A154B), ("gmail", 0xEA4335), ("outlook", 0x0F6CBD), ("vs code", 0x007ACC), ("visual studio", 0x68217A),
         ("notion", 0x191919), ("chrome", 0x1A73E8), ("edge", 0x0C59A4), ("firefox", 0xE66000), ("teams", 0x5B5FC7), ("discord", 0x5865F2),
         ("word", 0x185ABD), ("excel", 0x107C41), ("powerpoint", 0xC43E1C), ("notepad", 0x2B579A), ("telegram", 0x229ED9), ("chatgpt", 0x10A37F),
+        ("claude", 0xD97757), ("youtube", 0xFF0000), ("github", 0x24292F), ("linkedin", 0x0A66C2), ("google docs", 0x4285F4), ("google sheets", 0x0F9D58),
+        ("google meet", 0x00897B), ("reddit", 0xFF4500), ("figma", 0xF24E1E), ("instagram", 0xE1306C), ("jira", 0x0052CC), ("messenger", 0x0084FF),
+        ("gemini", 0x4285F4), ("perplexity", 0x20808D), ("brave", 0xFB542B),
     ];
     let lower = app.to_lowercase();
     let brand = known.iter().find(|(k, _)| lower.contains(k)).map(|(_, c)| *c);
@@ -712,7 +736,7 @@ impl Home {
             .border_1()
             .border_color(rgba(CARD_BORDER))
             .rounded(px(4.))
-            .child(app_badge(&e.app, 28.).mt(px(2.)))
+            .child(app_badge_via(&e.app, e.via.as_deref(), 28.).mt(px(2.)))
             .child(
                 div()
                     .w(px(110.))
@@ -722,6 +746,7 @@ impl Home {
                     .text_color(rgb(MUTED))
                     .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(time_label(e)))
                     .child(e.app.clone())
+                    .children(e.via.as_ref().map(|b| div().child(format!("in {b}"))))
                     .children(e.started_in.as_ref().filter(|s| **s != e.app).map(|s| div().child(format!("from {s}"))))
                     .children(note.map(|(n, _)| div().text_color(rgb(note_color)).child(n))),
             )

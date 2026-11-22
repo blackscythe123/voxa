@@ -208,7 +208,70 @@ pub fn exe_path(hwnd: HWND) -> String {
     }
 }
 
+const BROWSERS: &[(&str, &str)] = &[
+    ("brave", "Brave"), ("chrome", "Chrome"), ("msedge", "Edge"), ("firefox", "Firefox"),
+    ("opera", "Opera"), ("vivaldi", "Vivaldi"), ("arc", "Arc"),
+];
+
+/// Sites recognised from a browser tab's title: (text to find, name to show).
+const SITES: &[(&str, &str)] = &[
+    ("chatgpt", "ChatGPT"), ("gmail", "Gmail"), ("whatsapp", "WhatsApp"), ("slack", "Slack"),
+    ("claude", "Claude"), ("google docs", "Google Docs"), ("google sheets", "Google Sheets"),
+    ("google meet", "Google Meet"), ("notion", "Notion"), ("github", "GitHub"), ("linkedin", "LinkedIn"),
+    ("youtube", "YouTube"), ("outlook", "Outlook"), ("discord", "Discord"), ("telegram", "Telegram"),
+    ("messenger", "Messenger"), ("instagram", "Instagram"), ("reddit", "Reddit"), ("figma", "Figma"),
+    ("jira", "Jira"), ("microsoft teams", "Teams"), ("gemini", "Gemini"), ("perplexity", "Perplexity"),
+    (" / x", "X"),
+];
+
+fn window_title(hwnd: HWND) -> String {
+    let mut title = [0u16; 512];
+    let n = unsafe { GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32) };
+    String::from_utf16_lossy(&title[..n.max(0) as usize])
+}
+
+/// The browser that owns `hwnd`, if it is one ("Brave").
+pub fn browser_name(hwnd: HWND) -> Option<String> {
+    let stem = std::path::Path::new(&exe_path(hwnd)).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+    BROWSERS.iter().find(|(s, _)| *s == stem).map(|(_, n)| n.to_string())
+}
+
+/// The site in the browser's current tab, if it is one Voxa knows ("ChatGPT").
+pub fn site_in_tab(hwnd: HWND) -> Option<String> {
+    browser_name(hwnd)?;
+    site_from_title(&window_title(hwnd))
+}
+
+pub fn site_from_title(title: &str) -> Option<String> {
+    let title = title.to_lowercase();
+    SITES.iter().find(|(k, _)| title.contains(k)).map(|(_, n)| n.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::site_from_title;
+
+    #[test]
+    fn sites_from_real_browser_titles() {
+        assert_eq!(site_from_title("ChatGPT - Brave").as_deref(), Some("ChatGPT"));
+        assert_eq!(site_from_title("Inbox (12) - someone@gmail.com - Gmail - Brave").as_deref(), Some("Gmail"));
+        assert_eq!(site_from_title("(3) WhatsApp - Google Chrome").as_deref(), Some("WhatsApp"));
+        assert_eq!(site_from_title("Project plan - Google Docs - Profile 1 - Microsoft Edge").as_deref(), Some("Google Docs"));
+        assert_eq!(site_from_title("Home / X - Brave").as_deref(), Some("X"));
+        assert_eq!(site_from_title("Rust docs - Brave"), None, "unknown sites stay as the browser");
+    }
+}
+
+/// The app whose own icon represents `hwnd`: the browser for a site, else the app itself.
+pub fn icon_owner(hwnd: HWND) -> String {
+    browser_name(hwnd).unwrap_or_else(|| app_name(hwnd))
+}
+
+/// What History calls the place the user dictated into: the site for a known browser tab, else the app.
 pub fn app_name(hwnd: HWND) -> String {
+    if let Some(site) = site_in_tab(hwnd) {
+        return site;
+    }
     let exe = exe_path(hwnd);
     let stem = std::path::Path::new(&exe).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
     let known = match stem.as_str() {
@@ -455,7 +518,7 @@ pub fn cache_open_app_icons(wanted: std::collections::HashSet<String>) {
         unsafe {
             let wanted = &*(l as *const std::collections::HashSet<String>);
             if IsWindowVisible(h) != 0 {
-                let name = app_name(h);
+                let name = icon_owner(h);
                 if wanted.contains(&name) {
                     cache_app_icon(h, name);
                 }
