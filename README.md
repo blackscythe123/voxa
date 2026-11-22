@@ -14,7 +14,10 @@ Native, fast and light: the strip appears in about 30 ms and Voxa uses about 65 
 | **Mac** (Apple Silicon and Intel) | [Voxa-0.4.1-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v0.4.1/Voxa-0.4.1-mac.dmg) |
 | **Android** (keyboard) | [Voxa-Android-0.1.1.apk](https://github.com/blackscythe123/voxa/releases/download/android-v0.1.1/Voxa-Android-0.1.1.apk) |
 
-All releases: [Releases page](https://github.com/blackscythe123/voxa/releases).
+Always the newest version: [Windows](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-Setup.exe)
+· [Mac](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-mac.dmg)
+· [latest release page](https://github.com/blackscythe123/voxa/releases/latest). All releases:
+[Releases page](https://github.com/blackscythe123/voxa/releases).
 
 - **Windows:** run the installer (no admin needed). If SmartScreen says "Windows protected your PC",
   click *More info* > *Run anyway*. It updates the old Voxa and keeps your history and sign-in.

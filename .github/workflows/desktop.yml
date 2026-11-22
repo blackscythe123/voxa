@@ -80,5 +80,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Version-free copies, so .../releases/latest/download/Voxa-Setup.exe always gets the newest.
+          cp dist/Voxa-Setup-*.exe dist/Voxa-Setup.exe
+          cp dist/Voxa-*-mac.dmg dist/Voxa-mac.dmg
           ls -la dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Voxa $GITHUB_REF_NAME" --generate-notes
