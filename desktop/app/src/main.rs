@@ -4,6 +4,7 @@
 #![windows_subsystem = "windows"]
 
 mod home;
+mod input;
 mod import;
 mod link;
 mod prepare;
@@ -183,6 +184,7 @@ impl Voxa {
             history.save();
         }
         let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.via.clone().unwrap_or_else(|| e.app.clone())).collect();
+        os::refresh_site_icons_once();
         for site in history.entries.iter().map(|e| e.app.as_str()).filter(|a| os::is_known_site(a)) {
             os::cache_site_icon(site);
         }
@@ -304,6 +306,16 @@ impl Voxa {
                         v.levels.push_back(lvl);
                         while v.levels.len() > QUILL_CYCLE {
                             v.levels.pop_front();
+                        }
+                    }
+                    // Asking "you moved to X, paste there?": follow the app in front, so going back
+                    // to where it started pastes there and the question always names the real app.
+                    if let State::NeedsYou(Problem::TargetChanged { now_in, .. }) = v.flow.state().clone() {
+                        let fg = os::foreground();
+                        if !fg.is_null() && fg as u64 != now_in.window && !os::is_own_window(fg) {
+                            let app = os::app_name(fg);
+                            os::cache_app_icon(fg, os::icon_owner(fg));
+                            v.handle(Event::Focus { target: Target { app, window: fg as u64 } }, cx);
                         }
                     }
                     let offline = v.flow.readiness().network == Network::Down;
@@ -1208,6 +1220,7 @@ fn run_window(tour: bool) {
     }
     Application::new().run(move |cx: &mut App| {
         os::show_in_dock();
+        input::bind_keys(cx);
         let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
         let backend = cx.new(Backend::new);
         let first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::Home };

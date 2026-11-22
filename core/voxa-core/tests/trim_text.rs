@@ -70,3 +70,47 @@ fn real_words_are_not_fillers() {
     let s = "Mum said umbrella, human, hummus and summer are fine.";
     assert_eq!(remove_fillers(s), s);
 }
+
+use voxa_core::text::{apply_style, changed_phrase, replace_phrases, spoken_formatting};
+
+fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
+    p.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+}
+
+#[test]
+fn fixes_replace_whole_words_in_any_case() {
+    let p = pairs(&[("clawed code", "Claude Code"), ("oxa", "Voxa")]);
+    assert_eq!(replace_phrases("I asked Clawed Code about oxa.", &p), "I asked Claude Code about Voxa.");
+    assert_eq!(replace_phrases("toxa and oxalic stay", &p), "toxa and oxalic stay", "only whole words");
+    let longest_first = pairs(&[("claude", "Claude"), ("claude code", "Claude Code")]);
+    assert_eq!(replace_phrases("open claude code", &longest_first), "open Claude Code");
+}
+
+#[test]
+fn snippets_expand() {
+    let p = pairs(&[("my email", "sam@example.com")]);
+    assert_eq!(replace_phrases("Send it to my email.", &p), "Send it to sam@example.com.");
+}
+
+#[test]
+fn spoken_new_lines_and_bullets() {
+    assert_eq!(spoken_formatting("Hello, new line, how are you?"), "Hello\nHow are you?");
+    assert_eq!(spoken_formatting("First point. New paragraph. Second point."), "First point.\n\nSecond point.");
+    assert_eq!(spoken_formatting("Shopping: bullet point milk bullet point eggs"), "Shopping:\n- Milk\n- Eggs");
+    assert_eq!(spoken_formatting("The newline character"), "The newline character", "not a command");
+}
+
+#[test]
+fn per_app_style() {
+    assert_eq!(apply_style("Sounds good.", true, false), "Sounds good");
+    assert_eq!(apply_style("Wait for it...", true, false), "Wait for it...");
+    assert_eq!(apply_style("Sounds Good.", false, true), "sounds good.");
+}
+
+#[test]
+fn edits_become_fix_suggestions() {
+    assert_eq!(changed_phrase("Ask clawed code to fix it.", "Ask Claude Code to fix it."), Some(("clawed code".into(), "Claude Code".into())));
+    assert_eq!(changed_phrase("Hello there.", "Hello there."), None, "no change");
+    assert_eq!(changed_phrase("One two three four five six", "Something entirely different now"), None, "a rewrite is not a fix");
+    assert_eq!(changed_phrase("Send it.", "Send it now."), None, "an addition is not a fix");
+}

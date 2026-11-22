@@ -73,6 +73,8 @@ pub enum Event {
     Readiness(Readiness),
     /// Send a waiting or failed dictation again now (History's "Send now").
     Retry { job: JobId },
+    /// The app in front changed while the strip asks where to paste.
+    Focus { target: Target },
 }
 
 /// Work for the shell to do.
@@ -141,6 +143,7 @@ impl Flow {
             Event::Delivered { job, result } => self.on_delivered(job, result, &mut fx),
             Event::Readiness(r) => self.on_readiness(r, &mut fx),
             Event::Retry { job } => self.on_retry(job, &mut fx),
+            Event::Focus { target } => self.on_focus(target, &mut fx),
         }
         fx
     }
@@ -238,6 +241,21 @@ impl Flow {
                 fx.push(Effect::HideStrip { after_ms: 0 });
             }
             _ => {}
+        }
+    }
+
+    /// While asking "you moved to X, paste there?": going back to where the dictation started
+    /// pastes it there (no question needed); going somewhere else updates the question.
+    fn on_focus(&mut self, target: Target, fx: &mut Vec<Effect>) {
+        let State::NeedsYou(Problem::TargetChanged { job, now_in }) = self.state.clone() else { return };
+        let Some(original) = self.jobs.get(&job).map(|j| j.target.clone()) else { return };
+        if target.window == original.window {
+            if let Some(text) = self.ready_text(job) {
+                self.state = State::Delivering { job };
+                fx.push(Effect::Paste { job, target: original, text });
+            }
+        } else if target != now_in {
+            self.state = State::NeedsYou(Problem::TargetChanged { job, now_in: target });
         }
     }
 

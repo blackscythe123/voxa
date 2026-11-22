@@ -248,3 +248,20 @@ pub fn url_host(address: &str) -> Option<String> {
     let ok = host.contains('.') && !host.starts_with('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
     ok.then_some(host)
 }
+
+/// Website icons cached before 0.3.5 came from an icon service that returns the parent site's
+/// icon for some services (Gmail showed Google's "G"). Clear them once so they are fetched again,
+/// straight from each site. App icons taken from the PC are kept.
+pub fn refresh_site_icons_once() {
+    let dir = crate::data_dir().join("icons");
+    let marker = dir.join(".site-icons-v2");
+    if marker.exists() || !dir.exists() {
+        let _ = std::fs::write(&marker, b"");
+        return;
+    }
+    for (_, name, _) in SITES {
+        let _ = std::fs::remove_file(icon_file(name));
+    }
+    let _ = std::fs::write(&marker, b"");
+    log("website icons cleared; fetching them again from each site");
+}

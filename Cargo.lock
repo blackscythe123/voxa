@@ -7580,7 +7580,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voxa-chatgpt"
-version = "0.3.3"
+version = "0.3.5"
 dependencies = [
  "reqwest",
  "serde",
@@ -7590,14 +7590,14 @@ dependencies = [
 
 [[package]]
 name = "voxa-core"
-version = "0.3.3"
+version = "0.3.5"
 dependencies = [
  "hound",
 ]
 
 [[package]]
 name = "voxa-desktop"
-version = "0.3.3"
+version = "0.3.5"
 dependencies = [
  "chrono",
  "cocoa 0.26.0",
@@ -7615,6 +7615,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tray-icon",
+ "unicode-segmentation",
  "voxa-chatgpt",
  "voxa-core",
  "voxa-vad",
@@ -7626,7 +7627,7 @@ dependencies = [
 
 [[package]]
 name = "voxa-signin"
-version = "0.3.3"
+version = "0.3.5"
 dependencies = [
  "serde_json",
  "tao",
@@ -7635,7 +7636,7 @@ dependencies = [
 
 [[package]]
 name = "voxa-vad"
-version = "0.3.3"
+version = "0.3.5"
 dependencies = [
  "hound",
  "ndarray",

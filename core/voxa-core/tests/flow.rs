@@ -162,6 +162,39 @@ fn history_retry_never_interrupts_a_recording() {
 }
 
 #[test]
+fn going_back_to_where_you_started_pastes_there_with_no_question() {
+    // Owner case, 2026-11-22: started in VS Code, stopped in Brave, went back to VS Code.
+    let mut f = Flow::new(ready());
+    let job = started(&mut f); // in WhatsApp
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Ok("hi".into()) });
+    f.handle(Event::Delivered { job, result: Delivery::TargetChanged(slack()) });
+    let fx = f.handle(Event::Focus { target: whatsapp() });
+    assert!(has(&fx, &Effect::Paste { job, target: whatsapp(), text: "hi".into() }), "pastes where it started");
+    f.handle(Event::Delivered { job, result: Delivery::Pasted });
+    let j = f.job(job).unwrap();
+    assert_eq!((j.target.clone(), j.started_in.clone()), (whatsapp(), None), "recorded where it started, no move");
+}
+
+#[test]
+fn moving_on_to_a_third_app_updates_the_question() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Ok("hi".into()) });
+    f.handle(Event::Delivered { job, result: Delivery::TargetChanged(slack()) });
+    let gmail = Target { app: "Gmail".into(), window: 3 };
+    let fx = f.handle(Event::Focus { target: gmail.clone() });
+    assert!(fx.iter().all(|e| !matches!(e, Effect::Paste { .. } | Effect::PasteHere { .. })));
+    let t = strip_text(&f).unwrap();
+    assert_eq!((t.title.as_str(), t.action.as_deref()), ("You moved to Gmail", Some("Paste in Gmail")));
+    assert_eq!(t.detail.as_deref(), Some("Go back to WhatsApp and it pastes there"));
+    let fx = f.handle(Event::Action);
+    assert!(has(&fx, &Effect::PasteHere { job, text: "hi".into() }));
+    assert_eq!(f.job(job).unwrap().target, gmail, "recorded where it really went");
+}
+
+#[test]
 fn switching_apps_asks_instead_of_pasting_into_the_wrong_chat() {
     let mut f = Flow::new(ready());
     let job = started(&mut f);

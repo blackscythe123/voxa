@@ -67,7 +67,7 @@ pub fn strip_text(flow: &Flow) -> Option<StripText> {
             Problem::NoSpeech { .. } => text("Didn't hear any speech", s("Check the microphone"), None, true),
             Problem::TargetChanged { job, now_in } => text(
                 format!("You moved to {}", now_in.app),
-                Some(format!("This was meant for {}", app_of(flow, *job))),
+                Some(format!("Go back to {} and it pastes there", app_of(flow, *job))),
                 Some(format!("Paste in {}", now_in.app)),
                 true,
             ),
