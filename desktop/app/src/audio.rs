@@ -40,6 +40,8 @@ struct Shared {
 pub struct Mic {
     stream: Stream,
     device_name: String,
+    /// The user's choice in Settings; None follows the system default.
+    preferred: Option<String>,
     shared: Arc<Shared>,
     path: Option<PathBuf>,
 }
@@ -48,6 +50,34 @@ fn default_device() -> Result<(cpal::Device, String), MicError> {
     let d = cpal::default_host().default_input_device().ok_or(MicError::NoDevice)?;
     let name = d.name().unwrap_or_default();
     Ok((d, name))
+}
+
+/// The preferred microphone if it is plugged in, else the system default (which follows the OS:
+/// a new headset, or a change in sound settings, is picked up at the next recording).
+fn pick_device(preferred: Option<&str>) -> Result<(cpal::Device, String), MicError> {
+    if let Some(want) = preferred {
+        if let Ok(devices) = cpal::default_host().input_devices() {
+            for d in devices {
+                if d.name().is_ok_and(|n| n == want) {
+                    return Ok((d, want.to_string()));
+                }
+            }
+        }
+    }
+    default_device()
+}
+
+/// Names of the microphones the OS reports, for the picker in Settings.
+pub fn input_devices() -> Vec<String> {
+    let mut names: Vec<String> = cpal::default_host().input_devices().map(|ds| ds.filter_map(|d| d.name().ok()).collect()).unwrap_or_default();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// The system default microphone's name.
+pub fn default_device_name() -> Option<String> {
+    cpal::default_host().default_input_device().and_then(|d| d.name().ok())
 }
 
 fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError> {
@@ -123,10 +153,19 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
 impl Mic {
     /// Build the stream now (paused) so starting later is instant.
     pub fn new() -> Result<Self, MicError> {
-        let (device, device_name) = default_device()?;
+        Self::with_preferred(None)
+    }
+
+    pub fn with_preferred(preferred: Option<String>) -> Result<Self, MicError> {
+        let (device, device_name) = pick_device(preferred.as_deref())?;
         let shared = Arc::new(Shared { writer: Mutex::new(None), peak: AtomicU32::new(0), reset: AtomicBool::new(true) });
         let stream = build(&device, shared.clone())?;
-        Ok(Self { stream, device_name, shared, path: None })
+        Ok(Self { stream, device_name, preferred, shared, path: None })
+    }
+
+    /// Change the preferred microphone; takes effect at the next recording.
+    pub fn set_preferred(&mut self, preferred: Option<String>) {
+        self.preferred = preferred;
     }
 
     pub fn device_name(&self) -> &str {
@@ -135,7 +174,7 @@ impl Mic {
 
     /// Start writing to `path`. Rebuilds first if the default microphone changed.
     pub fn start(&mut self, path: &Path) -> Result<(), MicError> {
-        let (device, name) = default_device()?;
+        let (device, name) = pick_device(self.preferred.as_deref())?;
         if name != self.device_name {
             self.stream = build(&device, self.shared.clone())?;
             self.device_name = name;
@@ -173,6 +212,19 @@ impl Mic {
         self.finish();
         if let Some(p) = path {
             let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Manual: cargo test -p voxa-desktop list_microphones -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn list_microphones() {
+        eprintln!("default: {:?}", super::default_device_name());
+        for d in super::input_devices() {
+            eprintln!("  {d}");
         }
     }
 }

@@ -156,11 +156,13 @@ pub struct Settings {
     pub imported_old_voxa: bool,
     /// Hold the shortcut while talking; a quick tap still toggles.
     pub hold_to_talk: bool,
+    /// Microphone chosen in Settings, by name; None follows the system default.
+    pub mic_device: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None }
     }
 }
 

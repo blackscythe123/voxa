@@ -164,7 +164,7 @@ impl Voxa {
         } else {
             Session::Unknown
         };
-        let built = audio::Mic::new();
+        let built = audio::Mic::with_preferred(Settings::load(&data_dir()).mic_device);
         let mic = match &built {
             Ok(m) => {
                 os::log(&format!("microphone ready (paused): {}", m.device_name()));
@@ -745,6 +745,10 @@ impl Voxa {
             PauseHotkey(p) => self.pause_hotkey(p),
             ReloadSettings => {
                 self.settings = Settings::load(&data_dir());
+                if let Some(m) = self.mic.as_mut() {
+                    m.set_preferred(self.settings.mic_device.clone());
+                }
+                self.mic_name = self.settings.mic_device.clone().unwrap_or_else(|| audio::default_device_name().unwrap_or_else(|| "No microphone".into()));
                 if self.history.prune(self.settings.keep_days, now_ms()) > 0 {
                     self.history.save();
                 }

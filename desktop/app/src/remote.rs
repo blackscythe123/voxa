@@ -242,7 +242,8 @@ impl Backend {
         }
         if on {
             let path = std::env::temp_dir().join("voxa-mic-test.wav");
-            match audio::Mic::new().and_then(|mut m| m.start(&path).map(|_| m)) {
+            let preferred = Settings::load(&data_dir()).mic_device;
+            match audio::Mic::with_preferred(preferred).and_then(|mut m| m.start(&path).map(|_| m)) {
                 Ok(m) => {
                     self.mic_name = m.device_name().to_string();
                     self.mic = Some(m);

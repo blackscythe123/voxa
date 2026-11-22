@@ -101,6 +101,8 @@ pub struct Home {
     suggestion: Option<(String, String)>,
     /// When playback started, to draw progress.
     play_started: Option<(std::time::Instant, f32)>,
+    /// Microphones listed while the picker in Settings is open.
+    mic_picker: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -173,6 +175,7 @@ impl Home {
             editing: None,
             suggestion: None,
             play_started: None,
+            mic_picker: None,
         };
         me.go(page, cx);
         me
@@ -183,6 +186,9 @@ impl Home {
             self.stop_capture(cx);
         }
         self.confirm_delete = false;
+        if self.mic_picker.take().is_some() && self.tour.is_none() {
+            self.voxa.update(cx, |v, cx| v.mic_test(false, cx));
+        }
         if !matches!(page, Page::Detail(_)) {
             self.editing = None;
             self.suggestion = None;
@@ -1644,9 +1650,94 @@ impl Home {
                 .child(toggle("hold-to-talk", s.hold_to_talk).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.hold_to_talk = !s.hold_to_talk, cx)))))
                 .into_any_element(),
         );
-        out.push(card().mb(px(3.)).child(icon(I_MIC, 18.).w(px(20.))).child(row_text("Microphone", "Voxa uses the default microphone. Change it in your sound settings.".into())).child(div().flex_none().text_size(px(13.)).text_color(rgb(MUTED)).max_w(px(200.)).child(mic)).child(wbtn("sound-settings", "Change", false).on_click(|_, _, _| {
-            crate::os::open_sound_settings();
-        })).into_any_element());
+        // Microphone: follow the system, or pick one; the list has a live meter.
+        let chosen = s.mic_device.clone();
+        let mic_sub = match &chosen {
+            None => "Follows your system's default microphone: plug in a headset and Voxa uses it.".to_string(),
+            Some(_) => "If it's unplugged, Voxa uses the system default until it's back.".to_string(),
+        };
+        let open = self.mic_picker.is_some();
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon(I_MIC, 18.).w(px(20.)))
+                .child(row_text("Microphone", mic_sub))
+                .child(div().flex_none().max_w(px(240.)).text_size(px(13.)).text_color(rgb(MUTED)).child(match &chosen {
+                    None => format!("System default ({mic})"),
+                    Some(n) => n.clone(),
+                }))
+                .child(wbtn("mic-change", if open { "Done" } else { "Change" }, false).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if this.mic_picker.is_some() {
+                        this.mic_picker = None;
+                        this.voxa.update(cx, |v, cx| v.mic_test(false, cx));
+                    } else {
+                        this.mic_picker = Some(crate::audio::input_devices());
+                        this.voxa.update(cx, |v, cx| v.mic_test(true, cx));
+                    }
+                    cx.notify();
+                })))
+                .into_any_element(),
+        );
+        if let Some(devices) = self.mic_picker.clone() {
+            let (levels, testing_name) = {
+                let v = self.voxa.read(cx);
+                (v.levels.iter().copied().collect::<Vec<f32>>(), v.mic_name.clone())
+            };
+            let tick = levels.len().saturating_sub(1);
+            let mut list = div()
+                .mb(px(3.))
+                .px(px(16.))
+                .py(px(12.))
+                .rounded(px(4.))
+                .bg(rgb(0xFFFFFF))
+                .border_1()
+                .border_color(rgba(CARD_BORDER))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.))
+                        .pb(px(10.))
+                        .mb(px(6.))
+                        .border_b_1()
+                        .border_color(rgba(CARD_BORDER))
+                        .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Say something:"))
+                        .child(crate::ink_line_faded(levels, tick, false))
+                        .child(div().flex_1().min_w(px(0.)).text_size(px(12.)).text_color(rgb(MUTED)).child(testing_name)),
+                );
+            let options: Vec<Option<String>> = std::iter::once(None).chain(devices.into_iter().map(Some)).collect();
+            for (i, opt) in options.into_iter().enumerate() {
+                let selected = opt == chosen;
+                let label = match &opt {
+                    None => "System default (follows your sound settings)".to_string(),
+                    Some(n) => n.clone(),
+                };
+                list = list.child(
+                    div()
+                        .id(SharedString::from(format!("mic-opt-{i}")))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.))
+                        .px(px(8.))
+                        .py(px(8.))
+                        .rounded(px(4.))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(rgb(0xF6F4F1)))
+                        .child(div().w(px(16.)).text_color(rgb(INK)).child(if selected { icon(I_CHECK, 12.) } else { div() }))
+                        .child(div().text_size(px(14.)).when(selected, |d| d.font_weight(FontWeight::SEMIBOLD)).child(label))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            let pick = opt.clone();
+                            this.voxa.update(cx, |v, cx| {
+                                v.update_settings(|s| s.mic_device = pick, cx);
+                                // Restart the live test on the newly chosen mic.
+                                v.mic_test(false, cx);
+                                v.mic_test(true, cx);
+                            });
+                        })),
+                );
+            }
+            out.push(list.into_any_element());
+        }
         out.push(
             card()
                 .mb(px(3.))
