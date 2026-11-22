@@ -1,6 +1,6 @@
 # Old (Electron) vs new (GPUI) Voxa: startup and memory
 
-Measured 2026-11-22 on the owner's Windows 11 laptop by `rebuild/apps/desktop/tests-e2e/compare.ps1`
+Measured 2026-11-22 on the owner's Windows 11 laptop by `apps/desktop/tests-e2e/compare.ps1`
 (real hotkeys via SendInput; "visible" = a strip-sized window of the app becomes visible, polled every 5 ms).
 Both apps were already running in the tray, as in normal use. One run each, nobody speaking.
 

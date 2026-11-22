@@ -21,8 +21,8 @@ public static class W {
 "@
 [W]::SetProcessDPIAware() | Out-Null
 
-$Spike = "C:\projects\voxa\rebuild\apps\desktop\tests-e2e"
-$Exe = "C:\projects\voxa\rebuild\target\debug\voxa-desktop.exe"
+$Spike = "C:\projects\voxa\apps\desktop\tests-e2e"
+$Exe = "C:\projects\voxa\target\debug\voxa-desktop.exe"
 $TestFile = "$env:TEMP\voxa-spike-notepad.txt"
 
 function Get-Fg { $h=[W]::GetForegroundWindow(); "$h `"$([W]::Title($h))`"" }

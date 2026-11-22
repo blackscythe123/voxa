@@ -35,7 +35,7 @@ public static class UiWin {
 [UiWin]::SetProcessDPIAware() | Out-Null
 $Shots = "$env:TEMP\voxa-shots"; New-Item -ItemType Directory -Force $Shots | Out-Null
 $Ff = (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName
-$UiExe = "C:\projects\voxa\rebuild\target\release\voxa-desktop.exe"
+$UiExe = "C:\projects\voxa\target\release\voxa-desktop.exe"
 
 # The main window may live in its own process (--window): search every Voxa process.
 function Get-Ui {

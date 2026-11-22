@@ -1,7 +1,7 @@
 # Desktop UI, round 2 (2026-11-22)
 
 Screens from the real app (GPUI, release build, stand-in transcription, throwaway data folder with
-synthetic tone recordings). Captured and driven by `rebuild/apps/desktop/tests-e2e/window.ps1`.
+synthetic tone recordings). Captured and driven by `apps/desktop/tests-e2e/window.ps1`.
 
 ## What changed after the round-1 reviews (`../desktop-v1`)
 

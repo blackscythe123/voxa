@@ -18,7 +18,7 @@ DisableProgramGroupPage=yes
 DisableDirPage=yes
 ; Per-user: no admin prompt to install or update.
 PrivilegesRequired=lowest
-OutputDir=..\dist
+OutputDir=..\target\dist
 OutputBaseFilename=Voxa-Setup-{#AppVersion}
 SetupIconFile=..\apps\desktop\assets\icon.ico
 UninstallDisplayIcon={app}\Voxa.exe
