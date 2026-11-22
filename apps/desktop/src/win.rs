@@ -267,6 +267,35 @@ pub fn give_focus_back(prev: HWND) {
     }
 }
 
+/// A window of Voxa itself (the strip, or the main window in its own process).
+pub fn is_own_window(hwnd: HWND) -> bool {
+    let exe = exe_path(hwnd);
+    let me = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    !exe.is_empty() && exe.eq_ignore_ascii_case(&me)
+}
+
+/// Bring another app's window to the front so a paste lands there. Windows only allows this
+/// from the foreground app, which Voxa is when its own window was in front.
+pub fn switch_to(hwnd: HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, SW_RESTORE};
+    unsafe {
+        if IsWindow(hwnd) == 0 {
+            return;
+        }
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd);
+    }
+    for _ in 0..15 {
+        if foreground() == hwnd {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(80));
+}
+
 pub static STRIP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn strip_visible(show: bool) {

@@ -3,7 +3,7 @@
 ; app imports its history, recordings, shortcut and ChatGPT sign-in.
 ; Build: ISCC.exe installer\voxa.iss  (after cargo build --release -p voxa-desktop -p voxa-signin)
 
-#define AppVersion "0.3.2"
+#define AppVersion "0.3.3"
 #define Bin "..\target\release"
 
 [Setup]

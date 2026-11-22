@@ -4,6 +4,6 @@ members = ["crates/voxa-core", "crates/voxa-chatgpt", "crates/voxa-vad", "apps/d
 
 [workspace.package]
 edition = "2024"
-version = "0.3.2"
+version = "0.3.3"
 license = "MIT"
 publish = false

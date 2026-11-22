@@ -522,7 +522,14 @@ impl Voxa {
                 .detach();
             }
             Effect::Paste { job, target, text } => {
-                let fg = os::foreground();
+                let mut fg = os::foreground();
+                // Voxa's own window is never where text goes: finishing while looking at Voxa
+                // means "put it where I started". Switch back and paste there.
+                if os::is_own_window(fg) && fg as u64 != target.window {
+                    os::log(&format!("  finished in Voxa's window; going back to {}", target.app));
+                    os::switch_to(target.window as _);
+                    fg = os::foreground();
+                }
                 let same_tab = !os::browser_name(fg).is_some() || os::app_name(fg) == target.app;
                 let result = if fg as u64 == target.window && same_tab {
                     if os::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed }
@@ -609,11 +616,15 @@ impl Voxa {
                 audio: self.audio_paths.get(&job.id).cloned(),
                 started_in: job.started_in.as_ref().map(|t| t.app.clone()),
                 // The browser, when the app is a site; kept once known (the window may close later).
-                via: host
-                    .clone()
-                    .or_else(|| os::browser_name(job.target.window as _))
-                    .filter(|b| *b != app)
-                    .or_else(|| self.history.get(id).and_then(|e| e.via.clone())),
+                // After a move, only where it was actually pasted counts (no earlier guess).
+                via: if job.started_in.is_some() {
+                    os::browser_name(job.target.window as _).filter(|b| *b != app)
+                } else {
+                    host.clone()
+                        .or_else(|| os::browser_name(job.target.window as _))
+                        .filter(|b| *b != app)
+                        .or_else(|| self.history.get(id).and_then(|e| e.via.clone()))
+                },
             };
             let next = match &job.state {
                 JobState::Recording | JobState::Transcribing => continue,
