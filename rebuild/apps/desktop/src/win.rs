@@ -281,6 +281,47 @@ pub fn cache_site_icon(site: &str) {
     });
 }
 
+/// What History calls a domain: a known site's name ("Gmail" for mail.google.com), else the domain.
+pub fn site_for_domain(domain: &str) -> String {
+    SITES
+        .iter()
+        .find(|(_, _, d)| domain == *d || domain.ends_with(&format!(".{d}")))
+        .map(|(_, n, _)| n.to_string())
+        .unwrap_or_else(|| domain.to_string())
+}
+
+/// Icon for a site that is not on the known list: fetched once from the site itself
+/// (https://domain/favicon.ico), so no third party learns which sites are used.
+pub fn cache_domain_icon(domain: &str) {
+    let out = icon_file(domain);
+    if out.exists() {
+        return;
+    }
+    let domain = domain.to_string();
+    std::thread::spawn(move || {
+        let client = match reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(8)).build() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        for path in ["apple-touch-icon.png", "favicon.ico"] {
+            let bytes = client.get(format!("https://{domain}/{path}")).send().ok().filter(|r| r.status().is_success()).and_then(|r| r.bytes().ok());
+            let Some(img) = bytes.and_then(|b| image::load_from_memory(&b).ok()) else { continue };
+            let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3).to_rgba8();
+            if img.width() >= 16 && write_png(&out, img.as_raw(), img.width()).is_ok() {
+                log(&format!("site icon cached for {domain}"));
+                return;
+            }
+        }
+        log(&format!("no site icon for {domain}"));
+    });
+}
+
+/// Cache the icon for a domain: a known site's icon, else the site's own favicon.
+pub fn cache_domain_icon_or_site(domain: &str) {
+    let name = site_for_domain(domain);
+    if is_known_site(&name) { cache_site_icon(&name) } else { cache_domain_icon(domain) }
+}
+
 pub fn is_known_site(name: &str) -> bool {
     SITES.iter().any(|(_, n, _)| *n == name)
 }
