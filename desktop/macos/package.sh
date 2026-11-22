@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build Voxa.app (universal: Apple Silicon + Intel) and a .dmg into target/dist. Runs on macOS.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 TARGETS="aarch64-apple-darwin x86_64-apple-darwin"
 for t in $TARGETS; do
@@ -31,17 +31,17 @@ cp "$ORT/libonnxruntime.dylib" "$APP/Contents/MacOS/"
 ICONSET=target/Voxa.iconset
 rm -rf "$ICONSET"; mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
-  sips -z $s $s apps/desktop/assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  d=$((s * 2)); sips -z $d $d apps/desktop/assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z $s $s desktop/app/assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  d=$((s * 2)); sips -z $d $d desktop/app/assets/icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Voxa.icns"
 
-sed "s/VERSION/$VERSION/g" apps/desktop/macos/Info.plist > "$APP/Contents/Info.plist"
+sed "s/VERSION/$VERSION/g" desktop/macos/Info.plist > "$APP/Contents/Info.plist"
 
 # Ad-hoc signature so macOS remembers the microphone and Accessibility grants.
 codesign --force --sign - --options runtime "$APP/Contents/MacOS/libonnxruntime.dylib"
-codesign --force --sign - --options runtime --entitlements apps/desktop/macos/entitlements.plist "$APP/Contents/MacOS/voxa-signin"
-codesign --force --sign - --options runtime --entitlements apps/desktop/macos/entitlements.plist "$APP"
+codesign --force --sign - --options runtime --entitlements desktop/macos/entitlements.plist "$APP/Contents/MacOS/voxa-signin"
+codesign --force --sign - --options runtime --entitlements desktop/macos/entitlements.plist "$APP"
 codesign --verify --deep --strict "$APP"
 lipo -archs "$APP/Contents/MacOS/Voxa"
 

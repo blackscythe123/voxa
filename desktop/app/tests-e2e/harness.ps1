@@ -21,7 +21,7 @@ public static class W {
 "@
 [W]::SetProcessDPIAware() | Out-Null
 
-$Spike = "C:\projects\voxa\apps\desktop\tests-e2e"
+$Spike = "C:\projects\voxa\desktop\app\tests-e2e"
 $Exe = "C:\projects\voxa\target\debug\voxa-desktop.exe"
 $TestFile = "$env:TEMP\voxa-spike-notepad.txt"
 

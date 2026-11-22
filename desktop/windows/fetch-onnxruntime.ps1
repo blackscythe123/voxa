@@ -3,7 +3,7 @@
 # to voxa-desktop.exe.
 $ErrorActionPreference = "Stop"
 $sha = "579b636403983254346a5c1d80bd28f1519cd1e284cd204f8d4ff41f8d711559"
-$dst = Join-Path $PSScriptRoot "..\vendor\onnxruntime"
+$dst = Join-Path $PSScriptRoot "..\..\vendor\onnxruntime"
 New-Item -ItemType Directory -Force $dst | Out-Null
 $work = Join-Path $env:TEMP ("ort-" + [guid]::NewGuid())
 New-Item -ItemType Directory $work | Out-Null

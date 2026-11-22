@@ -1,10 +1,10 @@
 ; Voxa for Windows installer (the GPUI rebuild). Works as an update over the old Voxa:
 ; closes it, removes its start-at-sign-in entry, optionally uninstalls it, and on first run the new
 ; app imports its history, recordings, shortcut and ChatGPT sign-in.
-; Build: ISCC.exe installer\voxa.iss  (after cargo build --release -p voxa-desktop -p voxa-signin)
+; Build: ISCC.exe desktop\windows\voxa.iss  (after cargo build --release -p voxa-desktop -p voxa-signin)
 
 #define AppVersion "0.3.3"
-#define Bin "..\target\release"
+#define Bin "..\..\target\release"
 
 [Setup]
 AppId={{6F1C2E3A-8B7D-4C55-9E21-5A0D7C9B4F31}
@@ -18,9 +18,9 @@ DisableProgramGroupPage=yes
 DisableDirPage=yes
 ; Per-user: no admin prompt to install or update.
 PrivilegesRequired=lowest
-OutputDir=..\target\dist
+OutputDir=..\..\target\dist
 OutputBaseFilename=Voxa-Setup-{#AppVersion}
-SetupIconFile=..\apps\desktop\assets\icon.ico
+SetupIconFile=..\app\assets\icon.ico
 UninstallDisplayIcon={app}\Voxa.exe
 UninstallDisplayName=Voxa
 Compression=lzma2/ultra64

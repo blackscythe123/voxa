@@ -7,9 +7,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-voxa-core = { path = "../../crates/voxa-core" }
-voxa-chatgpt = { path = "../../crates/voxa-chatgpt" }
-voxa-vad = { path = "../../crates/voxa-vad" }
+voxa-core = { path = "../../core/voxa-core" }
+voxa-chatgpt = { path = "../../core/voxa-chatgpt" }
+voxa-vad = { path = "../../core/voxa-vad" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

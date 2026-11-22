@@ -28,6 +28,6 @@ fn main() {
             let _ = std::fs::copy(&src, dir.join("onnxruntime.dll"));
         }
     } else {
-        println!("cargo:warning=vendor/onnxruntime/onnxruntime.dll missing: run scripts/fetch-onnxruntime.ps1 (long recordings will be sent untrimmed)");
+        println!("cargo:warning=vendor/onnxruntime/onnxruntime.dll missing: run desktop/windows/fetch-onnxruntime.ps1 (long recordings will be sent untrimmed)");
     }
 }

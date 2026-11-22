@@ -26,9 +26,9 @@ Collected with `gh` and the crates.io API on 2026-11-22. Source clones for revie
 
 | Need | GPUI | Rune |
 |---|---|---|
-| Global hotkey | not found in gpui crates (would need e.g. `global-hotkey` crate) | `crates/rune/src/shortcuts/mod.rs`: `global_shortcut(accelerator, handler)` |
+| Global hotkey | not found in gpui crates (would need e.g. `global-hotkey` crate) | `core/rune/src/shortcuts/mod.rs`: `global_shortcut(accelerator, handler)` |
 | Transparent always-on-top overlay | window options exist in platform code (verify) | `transparent(...)` in `runtime/elements.rs`; topmost/always_on_top in platform code; `examples/overlay`, `overlay-lab` |
-| Tray icon | not found in gpui crates (would need e.g. `tray-icon` crate) | tray references in `crates/rune/src` (verify API) |
+| Tray icon | not found in gpui crates (would need e.g. `tray-icon` crate) | tray references in `core/rune/src` (verify API) |
 | Accessibility | AccessKit (`window/a11y.rs`, `examples/a11y.rs`) | AccessKit (vendored `accesskit_windows`, `accesskit_macos`; `src/a11y/`) |
 | Webview (ChatGPT sign-in) | none; add `wry` | none; add `wry` |
 | Android | no | no (iOS embed only) |

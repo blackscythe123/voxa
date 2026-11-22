@@ -3,29 +3,38 @@
 Press a shortcut in any app, talk, and your words are written out by your own ChatGPT account and
 pasted where your cursor is.
 
-This repository holds the native rebuild: one Rust codebase for Windows and macOS, and the Android
-app. The earlier Electron app is in git history (last commit before its removal: see `git log --
-src/`) and its releases stay on the Releases page.
+One Rust codebase for Windows and macOS, plus the Android app. The earlier Electron app is in git
+history (removed in `110ea43`); its releases stay on the Releases page.
 
 ## Layout
 
-| Path | What |
-|---|---|
-| `crates/voxa-core` | The dictation flow as a pure state machine, strip wording, silence trimming, filler removal. Shared by every app. |
-| `crates/voxa-chatgpt` | ChatGPT session, account and transcription client. |
-| `crates/voxa-vad` | Silero voice detection (cuts long silences before upload). |
-| `apps/desktop` | The desktop app (GPUI): strip, tray, main window. `src/win.rs` and `src/mac.rs` are the only per-OS code. |
-| `apps/signin` | The ChatGPT sign-in window (system WebView). |
-| `installer` | Windows installer (Inno Setup). |
-| `voxa-kotlin` | Android app and keyboard. |
-| `docs` | Flow audit, design mockups, reviews, measurements. |
+```
+core/            shared Rust, used by every app
+  voxa-core        the dictation flow (a tested state machine), strip wording, trimming, fillers
+  voxa-chatgpt     ChatGPT session, account and transcription client
+  voxa-vad         Silero voice detection (cuts long silences before upload)
+desktop/
+  app/             the Windows + macOS app (GPUI): strip, tray, Home, History, Insights, Settings
+    src/win.rs       Windows-only code   } the only per-OS files; the build picks one
+    src/mac.rs       macOS-only code     } (mod os in main.rs), everything else is shared
+  signin/          the ChatGPT sign-in window (system WebView)
+  windows/         Windows packaging: installer (Inno Setup), ONNX runtime download
+  macos/           macOS packaging: Info.plist, entitlements, .app and .dmg script
+android/         Android app and keyboard (Kotlin; will share core/ through UniFFI)
+docs/            flow audit, design mockups, reviews, measurements
+```
 
 ## Build
 
+Windows:
 ```
 cargo build --release -p voxa-desktop -p voxa-signin
-scripts\fetch-onnxruntime.ps1          # once, for silence trimming on Windows
-ISCC installer\voxa.iss                # Windows installer -> target\dist
+desktop\windows\fetch-onnxruntime.ps1     # once, for silence trimming
+ISCC desktop\windows\voxa.iss             # installer -> target\dist
 ```
 
-Tests: `cargo test --workspace`. Releases are built by GitHub Actions (`.github/workflows`).
+macOS (on a Mac): `bash desktop/macos/package.sh` -> `target/dist/Voxa-<version>-mac.dmg`
+
+Tests: `cargo test --workspace`. GitHub Actions (`.github/workflows/desktop.yml`) builds and tests
+both on every push to `main`; pushing a tag `v*` publishes a release with the Windows installer and
+the Mac .dmg.
