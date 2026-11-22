@@ -3,7 +3,9 @@
 
 #![windows_subsystem = "windows"]
 
+mod home;
 mod prepare;
+mod store;
 mod audio;
 mod stand_in;
 mod win;
@@ -16,18 +18,22 @@ use std::time::{Duration, Instant};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use gpui::{
-    AnyElement, App, Application, Bounds, ClickEvent, Context, Hsla, PathBuilder, Render, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, canvas, div, point, prelude::*, px, rgb,
+    AnyElement, App, Application, Bounds, ClickEvent, Context, Entity, Hsla, PathBuilder, Render, TitlebarOptions, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, canvas, div, point, prelude::*, px, rgb,
     rgba, size,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+
+use home::{Home, Page};
+use store::{Entry, History, Settings, Status};
 use voxa_core::copy::strip_text;
 use voxa_core::flow::Delivery;
 use voxa_chatgpt::{ChatGpt, Session as GptSession};
 use voxa_core::{Effect, Event, Flow, JobId, Mic, Network, Problem, Readiness, Session, State, Target, TranscribeError};
 
-const INK: u32 = 0x8F4C2C;
+pub(crate) const INK: u32 = 0x8F4C2C;
 /// Below this peak RMS a recording is treated as silence and never sent. Measured: soft speech
 /// peaked at 0.0156, a silent take at 0.0079, so the cutoff sits well under soft speech.
 const SILENCE: f32 = 0.003;
@@ -44,8 +50,16 @@ fn fake_mode() -> bool {
     std::env::var("VOXA_FAKE").is_ok_and(|v| !v.is_empty())
 }
 
+/// %APPDATA%\voxa-next, or VOXA_DATA (tests use a throwaway folder so real history is untouched).
 fn data_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("VOXA_DATA") {
+        return d.into();
+    }
     PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa-next")
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// Where the current (Electron) Voxa saved its session. Used once, to carry a user's sign-in over.
@@ -53,8 +67,21 @@ fn electron_dir() -> PathBuf {
     PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa")
 }
 
-struct Voxa {
-    flow: Flow,
+pub(crate) struct Voxa {
+    pub(crate) flow: Flow,
+    pub(crate) history: History,
+    pub(crate) settings: Settings,
+    pub(crate) start_with_windows: bool,
+    pub(crate) mic_name: String,
+    /// The setup's "Say something" step: mic open, nothing kept.
+    mic_testing: bool,
+    /// History entry id for each job of this run.
+    job_entries: HashMap<JobId, u64>,
+    job_secs: HashMap<JobId, f32>,
+    home: Option<WindowHandle<Home>>,
+    hotkey_paused: bool,
+    menu_open: MenuId,
+    menu_quit: MenuId,
     rec_started: Instant,
     frame: u64,
     tray: Option<TrayIcon>,
@@ -66,7 +93,7 @@ struct Voxa {
     mic_on: bool,
     audio_paths: HashMap<JobId, PathBuf>,
     peaks: HashMap<JobId, f32>,
-    levels: VecDeque<f32>,
+    pub(crate) levels: VecDeque<f32>,
     gpt: Arc<ChatGpt>,
     session: Option<GptSession>,
     last_check: Instant,
@@ -92,24 +119,72 @@ impl Voxa {
             }
         };
         let flow = Flow::new(Readiness { session, network: Network::Up, mic });
+        let mut settings = Settings::load(&data_dir());
+        let mut history = History::load(&data_dir());
+        if history.prune(settings.keep_days, now_ms()) > 0 {
+            history.save();
+        }
         let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
-        let main_key = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
+        let main_key = settings.hotkey.parse::<HotKey>().unwrap_or_else(|_| {
+            settings.hotkey = Settings::default().hotkey;
+            HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space)
+        });
         let esc_key = HotKey::new(None, Code::Escape);
         match hotkeys.register(main_key) {
-            Ok(()) => win::log("hotkey Ctrl+Alt+Space registered"),
+            Ok(()) => win::log(&format!("hotkey {} registered", settings.hotkey)),
             Err(e) => win::log(&format!("FAIL hotkey: {e}")),
         }
-        let tray = TrayIconBuilder::new().with_tooltip("Voxa").with_icon(tray_icon(None)).build().ok();
+        let menu = Menu::new();
+        let open_item = MenuItem::new("Open Voxa", true, None);
+        let quit_item = MenuItem::new("Quit Voxa", true, None);
+        let _ = menu.append_items(&[&open_item, &PredefinedMenuItem::separator(), &quit_item]);
+        let tray = TrayIconBuilder::new()
+            .with_tooltip("Voxa")
+            .with_icon(tray_icon(None))
+            .with_menu(Box::new(menu))
+            .with_menu_on_left_click(false)
+            .build()
+            .ok();
+        let mic_name = built.as_ref().map(|m| m.device_name().to_string()).unwrap_or_else(|_| "No microphone".into());
 
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_millis(40)).await;
             let alive = this
                 .update(cx, |v, cx| {
+                    while let Ok(ev) = MenuEvent::receiver().try_recv() {
+                        if ev.id == v.menu_open {
+                            v.open_home(None, cx);
+                        } else if ev.id == v.menu_quit {
+                            win::log("quit from tray");
+                            v.mic_test(false, cx);
+                            cx.quit();
+                        }
+                    }
+                    while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
+                        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                            v.open_home(None, cx);
+                        }
+                    }
+                    if win::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        win::log("another launch asked to open the window");
+                        v.open_home(None, cx);
+                    }
+                    if v.mic_testing {
+                        let lvl = audio::level().max(v.levels.back().copied().unwrap_or(0.0) * 0.88);
+                        v.levels.push_back(lvl);
+                        while v.levels.len() > QUILL_CYCLE {
+                            v.levels.pop_front();
+                        }
+                        cx.notify();
+                    }
                     while let Ok(ev) = GlobalHotKeyEvent::receiver().try_recv() {
                         if ev.state != HotKeyState::Pressed {
                             continue;
                         }
                         if ev.id == v.main_key.id() {
+                            if v.mic_testing {
+                                v.mic_test(false, cx);
+                            }
                             let fg = win::foreground();
                             let target = Target { app: win::app_name(fg), window: fg as u64 };
                             win::log(&format!("hotkey in {}", win::describe(fg)));
@@ -145,6 +220,17 @@ impl Voxa {
 
         let mut me = Self {
             flow,
+            history,
+            settings,
+            start_with_windows: win::starts_with_windows(),
+            mic_name,
+            mic_testing: false,
+            job_entries: HashMap::new(),
+            job_secs: HashMap::new(),
+            home: None,
+            hotkey_paused: false,
+            menu_open: open_item.id().clone(),
+            menu_quit: quit_item.id().clone(),
             rec_started: Instant::now(),
             frame: 0,
             tray,
@@ -175,7 +261,9 @@ impl Voxa {
             let (session, state, network) = cx
                 .background_executor()
                 .spawn(async move {
-                    let saved = GptSession::from_voxa_dir(&data_dir()).or_else(|| GptSession::from_electron_dir(&electron_dir()));
+                    let dir = data_dir();
+                    // Carry an Electron sign-in over once, unless the user signed out here.
+                    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if dir.join("signed-out").exists() { None } else { GptSession::from_electron_dir(&electron_dir()) });
                     match saved {
                         None => (None, Session::Expired, Network::Up),
                         Some(s) => match gpt.access_token(&s) {
@@ -206,6 +294,7 @@ impl Voxa {
         for e in effects {
             self.run(e, cx);
         }
+        self.sync_history();
         self.sync_esc();
         self.sync_tray();
         cx.notify();
@@ -228,6 +317,10 @@ impl Voxa {
                 .detach();
             }
             Effect::StartCapture { job } => {
+                if self.mic_testing {
+                    self.mic_test(false, cx);
+                }
+                self.job_entries.insert(job, now_ms());
                 self.rec_started = Instant::now();
                 self.frame = 0;
                 self.levels.clear();
@@ -265,6 +358,7 @@ impl Voxa {
                 }
             }
             Effect::StopCapture { job } => {
+                self.job_secs.insert(job, self.rec_started.elapsed().as_secs_f32());
                 if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
                     self.mic_on = false;
                     let peak = m.finish();
@@ -369,6 +463,199 @@ impl Voxa {
                 }
             }
         }
+    }
+
+    /// Mirror this run's jobs into the saved history.
+    fn sync_history(&mut self) {
+        use voxa_core::JobState;
+        let mut changed = false;
+        let jobs: Vec<voxa_core::Job> = self.flow.jobs().cloned().collect();
+        for job in jobs {
+            let Some(&id) = self.job_entries.get(&job.id) else { continue };
+            let secs = self.job_secs.get(&job.id).copied().unwrap_or(0.0);
+            let entry = |text: String, status: Status| Entry { id, app: job.target.app.clone(), text, secs, status, audio: self.audio_paths.get(&job.id).cloned() };
+            let next = match &job.state {
+                JobState::Recording | JobState::Transcribing => continue,
+                JobState::WaitingForNetwork => Some(entry(String::new(), Status::Waiting("Sends when you're back online".into()))),
+                JobState::Ready(t) | JobState::Delivered(t) if t.trim().is_empty() => None,
+                JobState::Ready(t) => Some(entry(t.clone(), Status::Ready)),
+                JobState::Delivered(t) => Some(entry(t.clone(), Status::Pasted)),
+                JobState::Failed(e) if e.needs_sign_in() => Some(entry(String::new(), Status::Waiting("Sign in to send".into()))),
+                JobState::Failed(_) => Some(entry(String::new(), Status::Failed("Couldn't reach ChatGPT".into()))),
+                JobState::Discarded => None,
+            };
+            changed |= match next {
+                Some(e) => self.history.upsert(e),
+                None => self.history.remove(id),
+            };
+        }
+        if changed {
+            self.history.save();
+        }
+    }
+
+    /// Whether a history entry belongs to a dictation the core is still handling.
+    pub(crate) fn is_live(&self, id: u64) -> bool {
+        use voxa_core::JobState;
+        self.job_entries.iter().any(|(job, e)| *e == id && self.flow.job(*job).is_some_and(|j| !matches!(j.state, JobState::Delivered(_) | JobState::Discarded)))
+    }
+
+    /// Open the Voxa window (or bring it forward), optionally on a page.
+    pub(crate) fn open_home(&mut self, page: Option<Page>, cx: &mut Context<Self>) {
+        let me = cx.entity();
+        // Deferred: the window reads Voxa while it builds, which can't happen inside this update.
+        cx.defer(move |cx| show_home(me, page, cx));
+    }
+
+    pub(crate) fn sign_in(&mut self, cx: &mut Context<Self>) {
+        let _ = std::fs::remove_file(data_dir().join("signed-out"));
+        self.run(Effect::OpenSignIn, cx);
+    }
+
+    pub(crate) fn sign_out(&mut self, cx: &mut Context<Self>) {
+        let dir = data_dir();
+        let _ = std::fs::remove_file(dir.join("session.json"));
+        // The sign-in window's cookies too, so the next sign-in really asks.
+        let _ = std::fs::remove_dir_all(dir.join("webview"));
+        let _ = std::fs::write(dir.join("signed-out"), b"");
+        self.session = None;
+        win::log("signed out");
+        let r = Readiness { session: Session::Expired, ..self.flow.readiness() };
+        self.handle(Event::Readiness(r), cx);
+    }
+
+    pub(crate) fn open_mic_settings(&mut self, cx: &mut Context<Self>) {
+        self.run(Effect::OpenMicSettings, cx);
+    }
+
+    /// Stop listening for the shortcut while the user picks a new one.
+    pub(crate) fn pause_hotkey(&mut self, pause: bool) {
+        if pause == self.hotkey_paused {
+            return;
+        }
+        let r = if pause { self.hotkeys.unregister(self.main_key) } else { self.hotkeys.register(self.main_key) };
+        win::log(&format!("shortcut {} ({r:?})", if pause { "paused" } else { "resumed" }));
+        self.hotkey_paused = pause;
+    }
+
+    pub(crate) fn set_hotkey(&mut self, s: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let new = s.parse::<HotKey>().map_err(|_| format!("{s} can't be used as a shortcut"))?;
+        if new.id() == self.main_key.id() {
+            return Ok(());
+        }
+        let _ = self.hotkeys.unregister(self.main_key);
+        if let Err(e) = self.hotkeys.register(new) {
+            win::log(&format!("shortcut {s} refused: {e}"));
+            let _ = self.hotkeys.register(self.main_key);
+            return Err(format!("{s} is already used by another app. Try a different one."));
+        }
+        win::log(&format!("shortcut changed to {s}"));
+        self.main_key = new;
+        self.update_settings(|st| st.hotkey = s.to_string(), cx);
+        Ok(())
+    }
+
+    pub(crate) fn update_settings(&mut self, f: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
+        f(&mut self.settings);
+        self.settings.save(&data_dir());
+        if self.history.prune(self.settings.keep_days, now_ms()) > 0 {
+            self.history.save();
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn delete_history(&mut self, cx: &mut Context<Self>) {
+        self.history.delete_all();
+        win::log("history deleted");
+        cx.notify();
+    }
+
+    pub(crate) fn set_autostart(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Err(e) = win::set_start_with_windows(on) {
+            win::log(&format!("FAIL start with Windows: {e}"));
+        }
+        self.start_with_windows = win::starts_with_windows();
+        cx.notify();
+    }
+
+    /// Send a kept recording that wasn't written out (from an earlier run). The text is kept in
+    /// History, ready to copy; it is never pasted into whatever app happens to be open now.
+    pub(crate) fn resend(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(entry) = self.history.get(id).cloned() else { return };
+        let Some(audio) = entry.audio.clone().filter(|a| a.exists()) else { return };
+        let Some(session) = self.session.clone() else {
+            self.sign_in(cx);
+            return;
+        };
+        self.history.upsert(Entry { status: Status::Waiting("Writing it out".into()), ..entry.clone() });
+        cx.notify();
+        let gpt = self.gpt.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let bytes = prepare::audio_for_upload(&audio).ok_or(TranscribeError::Server(0))?;
+                    gpt.transcribe(&session, bytes, "recording.wav", "audio/wav").map(|t| prepare::finish_text(t, &data_dir()))
+                })
+                .await;
+            let _ = this.update(cx, |v, cx| {
+                win::log(&format!("resend {id}: {}", if result.is_ok() { "ok" } else { "failed" }));
+                let next = match result {
+                    Ok(t) if !t.trim().is_empty() => Entry { text: t, status: Status::Ready, ..entry },
+                    Ok(_) => Entry { status: Status::Failed("No speech in the recording".into()), ..entry },
+                    Err(e) if e.needs_sign_in() => Entry { status: Status::Waiting("Sign in to send".into()), ..entry },
+                    Err(_) => Entry { status: Status::Failed("Couldn't reach ChatGPT".into()), ..entry },
+                };
+                v.history.upsert(next);
+                v.history.save();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn resend_all(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<u64> = self
+            .history
+            .entries
+            .iter()
+            .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && e.audio.as_ref().is_some_and(|a| a.exists()) && !self.is_live(e.id))
+            .map(|e| e.id)
+            .collect();
+        for id in ids {
+            self.resend(id, cx);
+        }
+    }
+
+    /// Open the mic just to show the level (setup step 2). Nothing is kept.
+    pub(crate) fn mic_test(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on == self.mic_testing || fake_mode() {
+            return;
+        }
+        if on {
+            if !matches!(self.flow.state(), State::Idle) {
+                return;
+            }
+            let path = std::env::temp_dir().join("voxa-mic-test.wav");
+            if let Some(m) = self.mic.as_mut() {
+                if m.start(&path).is_ok() {
+                    self.mic_testing = true;
+                    self.mic_on = true;
+                    self.levels.clear();
+                    win::log("mic test on");
+                }
+            }
+        } else {
+            if let Some(m) = self.mic.as_mut() {
+                m.discard();
+            }
+            self.mic_on = false;
+            self.mic_testing = false;
+            self.levels.clear();
+            let _ = std::fs::remove_file(std::env::temp_dir().join("voxa-mic-test.wav"));
+            win::log("mic test off");
+        }
+        cx.notify();
     }
 
     /// Esc is bound only while recording, so Voxa never steals Esc from other apps.
@@ -515,7 +802,7 @@ fn quill_point(x: f32, y: f32, scale: f32, angle: f32, at: gpui::Point<gpui::Pix
 /// The writing quill: glides across every 4 s, leaving an ink line whose waves follow the voice.
 /// `levels` are this pass's smoothed mic levels (0..1), one per 40 ms tick; `tick` is the position
 /// in the pass.
-fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
+pub(crate) fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
     let ink: Hsla = rgb(INK).into();
     let pen: Hsla = rgb(0x2D2418).into();
     canvas(
@@ -690,10 +977,53 @@ impl Render for Voxa {
     }
 }
 
+fn show_home(voxa: Entity<Voxa>, page: Option<Page>, cx: &mut App) {
+    if let Some(h) = voxa.read(cx).home {
+        let shown = h.update(cx, |home, window, cx| {
+            if let Some(p) = page {
+                home.go(p, cx);
+            }
+            window.activate_window();
+            if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
+                win::bring_to_front(w.hwnd.get() as _);
+            }
+        });
+        if shown.is_ok() {
+            return;
+        }
+    }
+    let options = WindowOptions {
+        titlebar: Some(TitlebarOptions { title: Some("Voxa".into()), ..Default::default() }),
+        window_bounds: Some(WindowBounds::centered(size(px(1100.), px(760.)), cx)),
+        window_min_size: Some(size(px(760.), px(520.))),
+        focus: true,
+        show: true,
+        kind: WindowKind::Normal,
+        ..Default::default()
+    };
+    let first = page.unwrap_or(if voxa.read(cx).settings.onboarded { Page::History } else { Page::Setup(1) });
+    let v2 = voxa.clone();
+    match cx.open_window(options, move |window, cx| cx.new(|cx| Home::new(v2, first, window, cx))) {
+        Ok(h) => {
+            win::log(&format!("window opened on {first:?}"));
+            voxa.update(cx, |v, _| v.home = Some(h));
+        }
+        Err(e) => win::log(&format!("FAIL open window: {e}")),
+    }
+}
+
 fn main() {
-    let _ = std::fs::remove_file("voxa-desktop.log");
+    if !win::single_instance() {
+        // Voxa is already running: it opens its window.
+        return;
+    }
+    let background = std::env::args().any(|a| a == "--background");
+    let _ = std::fs::create_dir_all(data_dir());
+    let _ = std::fs::remove_file(win::log_path());
     win::log("voxa-desktop starting");
-    Application::new().run(|cx: &mut App| {
+    Application::new().run(move |cx: &mut App| {
+        let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
+        win::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
         let (w, h) = (px(760.), px(84.));
         let db = cx.primary_display().expect("display").bounds();
         let origin = point(db.origin.x + (db.size.width - w) / 2., db.origin.y + db.size.height - h - px(64.));
@@ -719,6 +1049,16 @@ fn main() {
         });
         if let Err(e) = &opened {
             win::log(&format!("FAIL open_window: {e}"));
+        }
+        // Started by the user (not at Windows sign-in): show the window; setup on first run.
+        if let Ok(h) = &opened {
+            if let Ok(voxa) = h.entity(cx) {
+                let onboarded = voxa.read(cx).settings.onboarded;
+                if !background || !onboarded {
+                    let v = voxa.clone();
+                    cx.defer(move |cx| show_home(v, None, cx));
+                }
+            }
         }
         // GPUI shows (and activates) the window once; give focus back and hide until the hotkey.
         win::give_focus_back(prev as _);

@@ -27,12 +27,21 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 static START: OnceLock<Instant> = OnceLock::new();
 
-/// Append a line to spike.log (next to the working directory) and stdout.
+/// The log file: %APPDATA%oxa-nextoxa-desktop.log (the working directory is System32 when
+/// Windows starts Voxa at sign-in). VOXA_LOG overrides it for tests.
+pub fn log_path() -> std::path::PathBuf {
+    match std::env::var_os("VOXA_LOG") {
+        Some(p) => p.into(),
+        None => crate::data_dir().join("voxa-desktop.log"),
+    }
+}
+
+/// Append a line to the log and stdout. Never logs secrets: callers pass states and sizes only.
 pub fn log(msg: &str) {
     let t = START.get_or_init(Instant::now).elapsed().as_millis();
     let line = format!("[{t:>7}ms] {msg}");
     println!("{line}");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("voxa-desktop.log") {
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log_path()) {
         let _ = writeln!(f, "{line}");
     }
 }
@@ -237,4 +246,75 @@ pub fn strip_visible(show: bool) {
     if h.is_null() { return; }
     unsafe { ShowWindow(h, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
     log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
+}
+
+// ── single instance ──────────────────────────────────────────────────────
+
+/// Set when a second launch (or the Start menu shortcut) asks this instance to show its window.
+pub static OPEN_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// True if this is the only Voxa running. Otherwise asks the running one to open its window and
+/// returns false, and the caller exits.
+pub fn single_instance() -> bool {
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, INFINITE, SetEvent, WaitForSingleObject};
+    unsafe {
+        let mutex = CreateMutexW(std::ptr::null(), 0, wide(r"Local\VoxaNextSingleInstance").as_ptr());
+        let already = GetLastError() == ERROR_ALREADY_EXISTS;
+        let event = CreateEventW(std::ptr::null(), 0, 0, wide(r"Local\VoxaNextOpenWindow").as_ptr());
+        if already {
+            if !event.is_null() {
+                SetEvent(event);
+            }
+            return false;
+        }
+        let _ = mutex; // held for the life of the process
+        let event = event as usize;
+        std::thread::spawn(move || loop {
+            if WaitForSingleObject(event as _, INFINITE) != 0 {
+                break;
+            }
+            OPEN_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        true
+    }
+}
+
+/// Bring a normal window to the front (used when the tray or a second launch opens Voxa).
+pub fn bring_to_front(hwnd: HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, SW_RESTORE};
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd);
+    }
+}
+
+// ── start with Windows ───────────────────────────────────────────────────
+
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_VALUE: &str = "Voxa Next";
+
+pub fn starts_with_windows() -> bool {
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    hkcu.open_subkey(RUN_KEY).and_then(|k| k.get_value::<String, _>(RUN_VALUE)).is_ok()
+}
+
+pub fn set_start_with_windows(on: bool) -> std::io::Result<()> {
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    let (key, _) = hkcu.create_subkey(RUN_KEY)?;
+    if on {
+        let exe = std::env::current_exe()?;
+        key.set_value(RUN_VALUE, &format!("\"{}\" --background", exe.display()))
+    } else {
+        match key.delete_value(RUN_VALUE) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            r => r,
+        }
+    }
 }

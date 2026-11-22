@@ -61,19 +61,8 @@ pub fn audio_for_upload(path: &Path) -> Option<Vec<u8>> {
     }
 }
 
-#[derive(serde::Deserialize, Default)]
-#[serde(default)]
-pub struct Settings {
-    /// Strip "um", "uh", "hmm" from transcripts. Off by default: wording is kept as spoken.
-    pub remove_fillers: bool,
-}
-
-pub fn settings(dir: &Path) -> Settings {
-    std::fs::read_to_string(dir.join("settings.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
-}
-
 pub fn finish_text(text: String, dir: &Path) -> String {
-    if settings(dir).remove_fillers { voxa_core::text::remove_fillers(&text) } else { text }
+    if crate::store::Settings::load(dir).remove_fillers { voxa_core::text::remove_fillers(&text) } else { text }
 }
 
 #[cfg(test)]

@@ -45,7 +45,7 @@ function Start-Voxa([string]$fake = "", [string]$session = "") {
   "voxa started (fake=$fake session=$session); foreground = $(Get-Fg)"
 }
 
-function Show-Log([int]$n = 12) { Get-Content "$Spike\voxa-desktop.log" | Select-Object -Last $n }
+function Show-Log([int]$n = 12) { Get-Content "$env:APPDATA\voxa-next\voxa-desktop.log" | Select-Object -Last $n }
 
 function Save-Screen([string]$name) {
   $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
