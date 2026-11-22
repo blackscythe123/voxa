@@ -249,36 +249,11 @@ pub fn site_from_title(title: &str) -> Option<String> {
     SITES.iter().find(|(k, _, _)| title.contains(k)).map(|(_, n, _)| n.to_string())
 }
 
-/// Fetch a known site's icon once (64 px PNG) and keep it with the app icons. Only the site's
-/// domain from the list above is sent, never the page. Nothing is fetched again once cached.
+/// Fetch a known site's icon once, straight from the site (see `fetch_site_icon`).
 pub fn cache_site_icon(site: &str) {
-    let Some(domain) = SITES.iter().find(|(_, n, _)| *n == site).map(|(_, _, d)| *d) else { return };
-    let out = icon_file(site);
-    if out.exists() {
-        return;
+    if let Some(domain) = SITES.iter().find(|(_, n, _)| *n == site).map(|(_, _, d)| *d) {
+        fetch_site_icon(domain.to_string(), icon_file(site));
     }
-    let site = site.to_string();
-    std::thread::spawn(move || {
-        let url = format!("https://www.google.com/s2/favicons?domain={domain}&sz=64");
-        let got = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .and_then(|c| c.get(url).send())
-            .ok()
-            .filter(|r| r.status().is_success())
-            .and_then(|r| r.bytes().ok());
-        match got {
-            // A real PNG only; a missing icon (404) keeps the letter badge.
-            Some(b) if b.starts_with(b"\x89PNG") => {
-                let _ = std::fs::create_dir_all(out.parent().unwrap());
-                let tmp = out.with_extension("tmp");
-                if std::fs::write(&tmp, &b).and_then(|_| std::fs::rename(&tmp, &out)).is_ok() {
-                    log(&format!("site icon cached for {site}"));
-                }
-            }
-            _ => log(&format!("no site icon for {site}")),
-        }
-    });
 }
 
 /// What History calls a domain: a known site's name ("Gmail" for mail.google.com), else the domain.
@@ -290,30 +265,115 @@ pub fn site_for_domain(domain: &str) -> String {
         .unwrap_or_else(|| domain.to_string())
 }
 
-/// Icon for a site that is not on the known list: fetched once from the site itself
-/// (https://domain/favicon.ico), so no third party learns which sites are used.
+/// Icon for a site that is not on the known list, straight from the site.
 pub fn cache_domain_icon(domain: &str) {
-    let out = icon_file(domain);
+    fetch_site_icon(domain.to_string(), icon_file(domain));
+}
+
+/// Fetch a site's icon once, only from the site itself (no icon service, so nobody else learns
+/// which sites are used): /apple-touch-icon.png, /favicon.ico, then the icon its home page
+/// declares. Saved as a 64 px PNG; never fetched again. If none works, the letter badge stays.
+fn fetch_site_icon(domain: String, out: std::path::PathBuf) {
     if out.exists() {
         return;
     }
-    let domain = domain.to_string();
     std::thread::spawn(move || {
-        let client = match reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(8)).build() {
-            Ok(c) => c,
-            Err(_) => return,
+        let Ok(client) = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            .build()
+        else {
+            return;
         };
+        let get = |url: &str| client.get(url).send().ok().filter(|r| r.status().is_success()).and_then(|r| r.bytes().ok());
+        let decode = |b: &[u8]| image::load_from_memory(b).ok().filter(|i| i.width() >= 16);
+        let mut found = None;
         for path in ["apple-touch-icon.png", "favicon.ico"] {
-            let bytes = client.get(format!("https://{domain}/{path}")).send().ok().filter(|r| r.status().is_success()).and_then(|r| r.bytes().ok());
-            let Some(img) = bytes.and_then(|b| image::load_from_memory(&b).ok()) else { continue };
-            let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3).to_rgba8();
-            if img.width() >= 16 && write_png(&out, img.as_raw(), img.width()).is_ok() {
-                log(&format!("site icon cached for {domain}"));
-                return;
+            if let Some(i) = get(&format!("https://{domain}/{path}")).and_then(|b| decode(&b)) {
+                found = Some(i);
+                break;
             }
         }
-        log(&format!("no site icon for {domain}"));
+        if found.is_none() {
+            let html = get(&format!("https://{domain}/")).map(|b| String::from_utf8_lossy(&b[..b.len().min(400_000)]).into_owned());
+            for href in html.as_deref().map(icon_links).unwrap_or_default() {
+                let url = resolve(&domain, &href);
+                if let Some(i) = get(&url).and_then(|b| decode(&b)) {
+                    found = Some(i);
+                    break;
+                }
+            }
+        }
+        match found {
+            Some(img) => {
+                let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
+                // Centre on a square canvas so wide icons keep their shape.
+                let mut sq = image::RgbaImage::new(64, 64);
+                image::imageops::overlay(&mut sq, &img.to_rgba8(), ((64 - img.width()) / 2) as i64, ((64 - img.height()) / 2) as i64);
+                if write_png(&out, sq.as_raw(), 64).is_ok() {
+                    log(&format!("site icon cached for {domain}"));
+                }
+            }
+            None => log(&format!("no site icon for {domain}; keeping the letter badge")),
+        }
     });
+}
+
+/// `href`s of <link rel="...icon..."> tags, biggest-looking first (apple-touch-icon, then icon).
+fn icon_links(html: &str) -> Vec<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut out: Vec<(u8, String)> = Vec::new();
+    let mut at = 0;
+    while let Some(i) = lower[at..].find("<link") {
+        let start = at + i;
+        let end = lower[start..].find('>').map(|e| start + e).unwrap_or(lower.len());
+        let tag = &lower[start..end];
+        let attr = |name: &str| -> Option<(usize, usize)> {
+            let p = tag.find(&format!("{name}="))? + name.len() + 1;
+            let q = tag[p..].chars().next()?;
+            if q == '"' || q == '\'' {
+                let close = tag[p + 1..].find(q)?;
+                Some((start + p + 1, start + p + 1 + close))
+            } else {
+                let close = tag[p..].find(|c: char| c.is_whitespace()).unwrap_or(tag.len() - p);
+                Some((start + p, start + p + close))
+            }
+        };
+        if let (Some((rs, re)), Some((hs, he))) = (attr("rel"), attr("href")) {
+            let rel = &lower[rs..re];
+            if rel.contains("icon") && !lower[hs..he].ends_with(".svg") {
+                let rank = if rel.contains("apple-touch") { 0 } else { 1 };
+                out.push((rank, html[hs..he].replace("&amp;", "&")));
+            }
+        }
+        at = end;
+    }
+    out.sort_by_key(|(r, _)| *r);
+    out.into_iter().map(|(_, h)| h).collect()
+}
+
+fn resolve(domain: &str, href: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        href.to_string()
+    } else if let Some(rest) = href.strip_prefix("//") {
+        format!("https://{rest}")
+    } else {
+        format!("https://{domain}/{}", href.trim_start_matches('/'))
+    }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::{icon_links, resolve};
+
+    #[test]
+    fn finds_declared_icons() {
+        let html = r#"<head><link rel="stylesheet" href="a.css"><link rel="icon" href="/fav-32.png" sizes="32x32">
+            <link href='https://cdn.example.com/touch.png' rel='apple-touch-icon'><link rel="icon" href="/logo.svg"></head>"#;
+        assert_eq!(icon_links(html), vec!["https://cdn.example.com/touch.png".to_string(), "/fav-32.png".to_string()]);
+        assert_eq!(resolve("example.com", "/fav-32.png"), "https://example.com/fav-32.png");
+        assert_eq!(resolve("example.com", "//cdn.x.com/i.png"), "https://cdn.x.com/i.png");
+    }
 }
 
 /// Cache the icon for a domain: a known site's icon, else the site's own favicon.
@@ -434,6 +494,33 @@ pub fn single_instance() -> bool {
             return false;
         }
         let _ = mutex; // held for the life of the process
+        let event = event as usize;
+        std::thread::spawn(move || loop {
+            if WaitForSingleObject(event as _, INFINITE) != 0 {
+                break;
+            }
+            OPEN_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        true
+    }
+}
+
+/// The window process's own single instance. False if the window is already open (it is then
+/// asked to come to the front).
+pub fn single_window_instance() -> bool {
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, INFINITE, SetEvent, WaitForSingleObject};
+    unsafe {
+        let mutex = CreateMutexW(std::ptr::null(), 0, wide(r"Local\VoxaNextWindow").as_ptr());
+        let already = GetLastError() == ERROR_ALREADY_EXISTS;
+        let event = CreateEventW(std::ptr::null(), 0, 0, wide(r"Local\VoxaNextWindowFront").as_ptr());
+        if already {
+            if !event.is_null() {
+                SetEvent(event);
+            }
+            return false;
+        }
+        let _ = mutex;
         let event = event as usize;
         std::thread::spawn(move || loop {
             if WaitForSingleObject(event as _, INFINITE) != 0 {
@@ -612,5 +699,18 @@ pub fn cache_open_app_icons(wanted: std::collections::HashSet<String>) {
     }
     unsafe {
         EnumWindows(Some(each), &missing as *const _ as LPARAM);
+    }
+}
+
+#[cfg(test)]
+mod icon_probe {
+    /// Manual: VOXA_DATA=<temp dir> cargo test probe_site_icons -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn probe_site_icons() {
+        for d in ["chatgpt.com", "mail.google.com", "whatsapp.com", "slack.com", "claude.ai", "github.com", "youtube.com", "discord.com", "linkedin.com", "gemini.google.com", "mangafire.to"] {
+            super::fetch_site_icon(d.to_string(), super::icon_file(d));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(20));
     }
 }

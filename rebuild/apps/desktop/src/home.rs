@@ -8,7 +8,8 @@ use gpui::{
 };
 
 use crate::store::{self, Settings, Status};
-use crate::{INK, Voxa};
+use crate::INK;
+use crate::remote::Backend as Voxa;
 use voxa_core::{Blocker, Network, Session};
 
 const TEXT: u32 = 0x1A1A1A;
@@ -423,7 +424,7 @@ impl Home {
                 .collect();
             let waiting_live = v.history.entries.iter().filter(|e| matches!(e.status, Status::Waiting(_)) && v.is_live(e.id)).count();
             let entries: Vec<store::Entry> = v.history.search(&query).into_iter().cloned().collect();
-            (v.flow.readiness(), v.settings.hotkey.clone(), waiting, waiting_live, entries)
+            (v.readiness(), v.settings.hotkey.clone(), waiting, waiting_live, entries)
         };
         let mut out: Vec<AnyElement> = vec![div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("History").into_any_element()];
         if r.session == Session::Expired && !self.dismissed.contains(&"signin") {
@@ -878,7 +879,7 @@ impl Home {
     fn settings(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let v = self.voxa.read(cx);
         let s = v.settings.clone();
-        let session = v.flow.readiness().session;
+        let session = v.readiness().session;
         let mic = v.mic_name.clone();
         let autostart = v.start_with_windows;
         let count = v.history.entries.len();
@@ -1032,7 +1033,7 @@ impl Home {
         let (shortcut, session, signing_in, mic, levels, latest) = {
             let v = self.voxa.read(cx);
             let latest = v.history.entries.iter().rev().find(|e| e.id > self.try_since && matches!(e.status, Status::Pasted | Status::Ready)).cloned();
-            (v.settings.hotkey.clone(), v.flow.readiness().session, v.signing_in, v.mic_name.clone(), v.levels.iter().copied().collect::<Vec<f32>>(), latest)
+            (v.settings.hotkey.clone(), v.readiness().session, v.signing_in, v.mic_name.clone(), v.levels.iter().copied().collect::<Vec<f32>>(), latest)
         };
         let p = |t: &str| div().mt(px(10.)).text_size(px(15.)).line_height(px(22.)).text_color(rgb(0x3D3D3D)).child(t.to_string());
         let h2 = |t: &str| div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child(t.to_string());

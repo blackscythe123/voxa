@@ -4,7 +4,9 @@
 #![windows_subsystem = "windows"]
 
 mod home;
+mod link;
 mod prepare;
+mod remote;
 mod store;
 mod tab;
 mod audio;
@@ -19,8 +21,8 @@ use std::time::{Duration, Instant};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use gpui::{
-    AnyElement, App, Application, Bounds, ClickEvent, Context, Entity, Hsla, PathBuilder, Render, TitlebarOptions, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, canvas, div, point, prelude::*, px, rgb,
+    AnyElement, App, Application, Bounds, ClickEvent, Context, Hsla, PathBuilder, Render, TitlebarOptions, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, canvas, div, point, prelude::*, px, rgb,
     rgba, size,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -28,6 +30,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use home::{Home, Page};
+use remote::Backend;
 use store::{Entry, History, Settings, Status};
 use voxa_core::copy::strip_text;
 use voxa_core::flow::Delivery;
@@ -72,14 +75,15 @@ pub(crate) struct Voxa {
     pub(crate) flow: Flow,
     pub(crate) history: History,
     pub(crate) settings: Settings,
-    pub(crate) start_with_windows: bool,
     pub(crate) mic_name: String,
     /// The setup's "Say something" step: mic open, nothing kept.
     mic_testing: bool,
     /// History entry id for each job of this run.
     job_entries: HashMap<JobId, u64>,
     job_secs: HashMap<JobId, f32>,
-    home: Option<WindowHandle<Home>>,
+    /// Last state published to the window process (live.json), to write only on change.
+    published: Option<link::Live>,
+    hotkey_result: Option<(String, Option<String>)>,
     hotkey_paused: bool,
     /// Domain in the browser's address bar when each job started, read off the UI thread.
     tab_domains: Arc<std::sync::Mutex<HashMap<JobId, String>>>,
@@ -175,6 +179,9 @@ impl Voxa {
                             v.open_home(None, cx);
                         }
                     }
+                    for cmd in link::take_commands() {
+                        v.on_command(cmd, cx);
+                    }
                     if win::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         win::log("another launch asked to open the window");
                         v.open_home(None, cx);
@@ -246,12 +253,12 @@ impl Voxa {
             flow,
             history,
             settings,
-            start_with_windows: win::starts_with_windows(),
             mic_name,
             mic_testing: false,
             job_entries: HashMap::new(),
             job_secs: HashMap::new(),
-            home: None,
+            published: None,
+            hotkey_result: None,
             hotkey_paused: false,
             tab_domains: Arc::new(std::sync::Mutex::new(HashMap::new())),
             signing_in: false,
@@ -321,6 +328,7 @@ impl Voxa {
             self.run(e, cx);
         }
         self.sync_history();
+        self.publish();
         self.sync_esc();
         self.sync_tray();
         cx.notify();
@@ -555,10 +563,56 @@ impl Voxa {
     }
 
     /// Open the Voxa window (or bring it forward), optionally on a page.
-    pub(crate) fn open_home(&mut self, page: Option<Page>, cx: &mut Context<Self>) {
-        let me = cx.entity();
-        // Deferred: the window reads Voxa while it builds, which can't happen inside this update.
-        cx.defer(move |cx| show_home(me, page, cx));
+    /// Open the Voxa window: a separate process, so its memory is returned when it closes.
+    /// If it is already open, it comes to the front.
+    pub(crate) fn open_home(&mut self, page: Option<Page>, _cx: &mut Context<Self>) {
+        self.publish();
+        let Ok(exe) = std::env::current_exe() else { return };
+        let mut c = std::process::Command::new(exe);
+        c.arg("--window");
+        if page == Some(Page::Setup(1)) {
+            c.arg("--tour");
+        }
+        match c.spawn() {
+            Ok(_) => win::log("window process started"),
+            Err(e) => win::log(&format!("FAIL window process: {e}")),
+        }
+    }
+
+    /// Tell the window process what it can't see in the files: sign-in, network, mic, live jobs.
+    fn publish(&mut self) {
+        let (session, online, mic) = link::Live::from_readiness(self.flow.readiness());
+        let live_ids = self.job_entries.values().copied().filter(|id| self.is_live(*id)).collect();
+        let live = link::Live { session, online, mic, mic_name: self.mic_name.clone(), signing_in: self.signing_in, live_ids, hotkey_result: self.hotkey_result.clone() };
+        if self.published.as_ref() != Some(&live) {
+            link::write_live(&live);
+            self.published = Some(live);
+        }
+    }
+
+    fn on_command(&mut self, cmd: link::Command, cx: &mut Context<Self>) {
+        use link::Command::*;
+        win::log(&format!("window asks: {}", match &cmd { SetHotkey(_) => "SetHotkey".into(), c => format!("{c:?}") }));
+        match cmd {
+            SignIn => self.sign_in(cx),
+            SignOut => self.sign_out(cx),
+            SetHotkey(s) => {
+                let r = self.set_hotkey(&s, cx);
+                self.hotkey_result = Some((s, r.err()));
+            }
+            PauseHotkey(p) => self.pause_hotkey(p),
+            ReloadSettings => {
+                self.settings = Settings::load(&data_dir());
+                if self.history.prune(self.settings.keep_days, now_ms()) > 0 {
+                    self.history.save();
+                }
+            }
+            Resend(id) => self.resend(id, cx),
+            ResendAll => self.resend_all(cx),
+            DeleteEntry(id) => self.delete_entry(id, cx),
+            DeleteAll => self.delete_history(cx),
+        }
+        self.publish();
     }
 
     pub(crate) fn sign_in(&mut self, cx: &mut Context<Self>) {
@@ -576,10 +630,6 @@ impl Voxa {
         win::log("signed out");
         let r = Readiness { session: Session::Expired, ..self.flow.readiness() };
         self.handle(Event::Readiness(r), cx);
-    }
-
-    pub(crate) fn open_mic_settings(&mut self, cx: &mut Context<Self>) {
-        self.run(Effect::OpenMicSettings, cx);
     }
 
     /// Stop listening for the shortcut while the user picks a new one.
@@ -621,14 +671,6 @@ impl Voxa {
     pub(crate) fn delete_history(&mut self, cx: &mut Context<Self>) {
         self.history.delete_all();
         win::log("history deleted");
-        cx.notify();
-    }
-
-    pub(crate) fn set_autostart(&mut self, on: bool, cx: &mut Context<Self>) {
-        if let Err(e) = win::set_start_with_windows(on) {
-            win::log(&format!("FAIL start with Windows: {e}"));
-        }
-        self.start_with_windows = win::starts_with_windows();
         cx.notify();
     }
 
@@ -677,19 +719,6 @@ impl Voxa {
             win::log("history entry deleted");
         }
         cx.notify();
-    }
-
-    /// Play an entry's recording; returns its length in seconds.
-    pub(crate) fn play_entry(&self, id: u64) -> Option<f32> {
-        let path = self.history.get(id)?.audio.clone().filter(|a| a.exists())?;
-        let secs = hound::WavReader::open(&path).ok().map(|r| r.duration() as f32 / r.spec().sample_rate as f32)?;
-        win::play_audio(&path).then_some(secs)
-    }
-
-    pub(crate) fn show_in_folder(&self, id: u64) {
-        if let Some(a) = self.history.get(id).and_then(|e| e.audio.clone()) {
-            let _ = std::process::Command::new("explorer").arg(format!("/select,{}", a.display())).spawn();
-        }
     }
 
     pub(crate) fn resend_all(&mut self, cx: &mut Context<Self>) {
@@ -1063,47 +1092,62 @@ impl Render for Voxa {
     }
 }
 
-fn show_home(voxa: Entity<Voxa>, page: Option<Page>, cx: &mut App) {
-    if let Some(h) = voxa.read(cx).home {
-        let shown = h.update(cx, |home, window, cx| {
-            if let Some(p) = page {
-                home.go(p, cx);
-            }
-            window.activate_window();
+/// `voxa-desktop --window`: just the Voxa window. Exits when the window closes, returning its
+/// memory; the tray process keeps running.
+fn run_window(tour: bool) {
+    if !win::single_window_instance() {
+        return; // already open: it was asked to come to the front
+    }
+    Application::new().run(move |cx: &mut App| {
+        let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
+        let backend = cx.new(Backend::new);
+        let first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::History };
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions { title: Some("Voxa".into()), ..Default::default() }),
+            window_bounds: Some(WindowBounds::centered(size(px(1100.), px(760.)), cx)),
+            window_min_size: Some(size(px(760.), px(520.))),
+            focus: true,
+            show: true,
+            kind: WindowKind::Normal,
+            ..Default::default()
+        };
+        let opened = cx.open_window(options, move |window, cx| {
             if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
+                win::light_caption(w.hwnd.get() as _);
                 win::bring_to_front(w.hwnd.get() as _);
             }
+            cx.new(|cx| Home::new(backend, first, window, cx))
         });
-        if shown.is_ok() {
-            return;
+        match opened {
+            Ok(h) => {
+                win::log(&format!("window opened on {first:?}"));
+                // Another "Open Voxa" while open: come to the front.
+                cx.spawn(async move |cx| loop {
+                    cx.background_executor().timer(Duration::from_millis(150)).await;
+                    if win::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        let r = h.update(cx, |_, window, _| {
+                            window.activate_window();
+                            if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
+                                win::bring_to_front(w.hwnd.get() as _);
+                            }
+                        });
+                        if r.is_err() {
+                            break;
+                        }
+                    }
+                })
+                .detach();
+            }
+            Err(e) => win::log(&format!("FAIL open window: {e}")),
         }
-    }
-    let options = WindowOptions {
-        titlebar: Some(TitlebarOptions { title: Some("Voxa".into()), ..Default::default() }),
-        window_bounds: Some(WindowBounds::centered(size(px(1100.), px(760.)), cx)),
-        window_min_size: Some(size(px(760.), px(520.))),
-        focus: true,
-        show: true,
-        kind: WindowKind::Normal,
-        ..Default::default()
-    };
-    let first = page.unwrap_or(if voxa.read(cx).settings.onboarded { Page::History } else { Page::Setup(1) });
-    let v2 = voxa.clone();
-    match cx.open_window(options, move |window, cx| {
-        if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
-            win::light_caption(w.hwnd.get() as _);
-        }
-        cx.new(|cx| Home::new(v2, first, window, cx))
-    }) {
-        Ok(h) => {
-            win::log(&format!("window opened on {first:?}"));
-            voxa.update(cx, |v, _| v.home = Some(h));
-        }
-        Err(e) => win::log(&format!("FAIL open window: {e}")),
-    }
+    });
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--window") {
+        return run_window(args.iter().any(|a| a == "--tour"));
+    }
     if !win::single_instance() {
         // Voxa is already running: it opens its window.
         return;
@@ -1141,13 +1185,12 @@ fn main() {
         if let Err(e) = &opened {
             win::log(&format!("FAIL open_window: {e}"));
         }
-        // Started by the user (not at Windows sign-in): show the window; setup on first run.
+        // Started by the user (not at Windows sign-in): show the window; the tour on first run.
         if let Ok(h) = &opened {
             if let Ok(voxa) = h.entity(cx) {
                 let onboarded = voxa.read(cx).settings.onboarded;
                 if !background || !onboarded {
-                    let v = voxa.clone();
-                    cx.defer(move |cx| show_home(v, None, cx));
+                    voxa.update(cx, |v, cx| v.open_home(None, cx));
                 }
             }
         }
