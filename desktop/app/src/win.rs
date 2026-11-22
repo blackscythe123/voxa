@@ -149,10 +149,10 @@ fn key(vk: u16, up: bool) -> INPUT {
     }
 }
 
-/// Paste `text` into the window in front, then put the user's clipboard back.
+/// Paste `text` into the window in front. With `keep`, the text stays on the clipboard (so Ctrl+V
+/// pastes it again anywhere); without, the user's previous clipboard text is put back.
 /// The caller has already checked the right window is in front (voxa-core decides what to do if not).
-/// Restores plain text only for now; every clipboard format is a TODO before release.
-pub fn paste_here(text: &str) -> bool {
+pub fn paste_here(text: &str, keep: bool) -> bool {
     let before = with_clipboard(read_clipboard_text).flatten();
     if with_clipboard(|| write_clipboard_text(text)) != Some(true) {
         log("FAIL could not write clipboard");
@@ -161,6 +161,9 @@ pub fn paste_here(text: &str) -> bool {
     let inputs = [key(VK_CONTROL, false), key(b'V' as u16, false), key(b'V' as u16, true), key(VK_CONTROL, true)];
     let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
     log(&format!("sent Ctrl+V ({sent} events) to {}", describe(foreground())));
+    if keep {
+        return sent == 4;
+    }
     std::thread::sleep(std::time::Duration::from_millis(250));
     let restored = with_clipboard(|| match &before {
         Some(s) => write_clipboard_text(s),

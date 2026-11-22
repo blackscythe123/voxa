@@ -158,11 +158,14 @@ pub struct Settings {
     pub hold_to_talk: bool,
     /// Microphone chosen in Settings, by name; None follows the system default.
     pub mic_device: Option<String>,
+    /// Leave the dictation on the clipboard after pasting (as the old app did); off puts back what
+    /// was copied before.
+    pub keep_on_clipboard: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true }
     }
 }
 

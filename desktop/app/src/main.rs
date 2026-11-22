@@ -575,7 +575,7 @@ impl Voxa {
                 }
                 let same_tab = !os::browser_name(fg).is_some() || os::app_name(fg) == target.app;
                 let result = if fg as u64 == target.window && same_tab {
-                    if os::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed }
+                    if os::paste_here(&text, self.settings.keep_on_clipboard) { Delivery::Pasted } else { Delivery::Failed }
                 } else {
                     let app = os::app_name(fg);
                     os::cache_app_icon(fg, os::icon_owner(fg));
@@ -585,7 +585,7 @@ impl Voxa {
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::PasteHere { job, text } => {
-                let result = if os::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed };
+                let result = if os::paste_here(&text, self.settings.keep_on_clipboard) { Delivery::Pasted } else { Delivery::Failed };
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::OpenSignIn if !fake_mode() => {

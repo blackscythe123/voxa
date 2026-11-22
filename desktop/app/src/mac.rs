@@ -262,8 +262,9 @@ fn set_pasteboard_text(text: Option<&str>) -> bool {
     }
 }
 
-/// Paste `text` into the app in front with Cmd+V, then put the user's clipboard back.
-pub fn paste_here(text: &str) -> bool {
+/// Paste `text` into the app in front with Cmd+V. With `keep`, the text stays on the clipboard;
+/// without, the user's previous clipboard text is put back.
+pub fn paste_here(text: &str, keep: bool) -> bool {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     let pool = unsafe { NSAutoreleasePool::new(nil) };
@@ -285,9 +286,11 @@ pub fn paste_here(text: &str) -> bool {
     })()
     .is_some();
     log(&format!("sent Cmd+V ({sent}) to {}", describe(foreground())));
-    std::thread::sleep(Duration::from_millis(250));
-    let restored = set_pasteboard_text(before.as_deref());
-    log(&format!("clipboard restored={restored}"));
+    if !keep {
+        std::thread::sleep(Duration::from_millis(250));
+        let restored = set_pasteboard_text(before.as_deref());
+        log(&format!("clipboard restored={restored}"));
+    }
     unsafe {
         let _: () = msg_send![pool, drain];
     }

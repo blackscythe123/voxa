@@ -1818,6 +1818,17 @@ impl Home {
                 .child(toggle("hold-to-talk", s.hold_to_talk).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.hold_to_talk = !s.hold_to_talk, cx)))))
                 .into_any_element(),
         );
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon(I_COPY, 18.).w(px(20.)))
+                .child(row_text(
+                    "Keep on the clipboard",
+                    if s.keep_on_clipboard { format!("After pasting, your words stay copied: press {} to paste them again anywhere.", if cfg!(target_os = "macos") { "Cmd+V" } else { "Ctrl+V" }) } else { "After pasting, Voxa puts back whatever you had copied before.".to_string() },
+                ))
+                .child(toggle("keep-clipboard", s.keep_on_clipboard).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.keep_on_clipboard = !s.keep_on_clipboard, cx)))))
+                .into_any_element(),
+        );
         // Microphone: follow the system, or pick one; the list has a live meter.
         let chosen = s.mic_device.clone();
         let mic_sub = match &chosen {
