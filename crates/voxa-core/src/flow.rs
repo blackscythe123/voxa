@@ -71,6 +71,8 @@ pub enum Event {
     Transcribed { job: JobId, result: Result<String, TranscribeError> },
     Delivered { job: JobId, result: Delivery },
     Readiness(Readiness),
+    /// Send a waiting or failed dictation again now (History's "Send now").
+    Retry { job: JobId },
 }
 
 /// Work for the shell to do.
@@ -138,6 +140,7 @@ impl Flow {
             Event::Transcribed { job, result } => self.on_transcribed(job, result, &mut fx),
             Event::Delivered { job, result } => self.on_delivered(job, result, &mut fx),
             Event::Readiness(r) => self.on_readiness(r, &mut fx),
+            Event::Retry { job } => self.on_retry(job, &mut fx),
         }
         fx
     }
@@ -218,12 +221,9 @@ impl Flow {
                         fx.push(Effect::PasteHere { job, text });
                     }
                 }
-                // The offline state's action is Discard.
-                Problem::WaitingForNetwork { job } => {
-                    self.set_job(job, JobState::Discarded, fx);
-                    self.state = State::Idle;
-                    fx.push(Effect::HideStrip { after_ms: 0 });
-                }
+                // Offline: "Retry now" tries at once (a dropped connection often isn't offline).
+                // The close button keeps it waiting; nothing is thrown away from the strip.
+                Problem::WaitingForNetwork { job } => self.retry(job, fx),
                 Problem::NoSpeech { .. } => {}
             },
             _ => {}
@@ -238,6 +238,16 @@ impl Flow {
                 fx.push(Effect::HideStrip { after_ms: 0 });
             }
             _ => {}
+        }
+    }
+
+    /// History's "Send now": only for a dictation that is waiting or failed, and never over one
+    /// the user is recording or that is being written out.
+    fn on_retry(&mut self, job: JobId, fx: &mut Vec<Effect>) {
+        let retryable = matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::WaitingForNetwork | JobState::Failed(_)));
+        let busy = matches!(self.state, State::Recording { .. } | State::Transcribing { .. } | State::Delivering { .. });
+        if retryable && !busy {
+            self.retry(job, fx);
         }
     }
 
@@ -282,7 +292,11 @@ impl Flow {
                 }
                 let problem = match e {
                     TranscribeError::SignedOut | TranscribeError::SessionExpired => Problem::SignInToSend { job },
-                    TranscribeError::Offline => Problem::WaitingForNetwork { job },
+                    TranscribeError::Offline => {
+                        // Remember we're offline, so the network coming back resends it.
+                        self.readiness.network = Network::Down;
+                        Problem::WaitingForNetwork { job }
+                    }
                     TranscribeError::Blocked | TranscribeError::Timeout | TranscribeError::Server(_) => {
                         Problem::Unreachable { job }
                     }

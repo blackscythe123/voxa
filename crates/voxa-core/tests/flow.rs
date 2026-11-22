@@ -123,6 +123,42 @@ fn going_offline_during_transcription_queues_the_job() {
     f.handle(Event::Transcribed { job, result: Err(TranscribeError::Offline) });
     assert_eq!(f.state(), &State::NeedsYou(Problem::WaitingForNetwork { job }));
     assert_eq!(f.job(job).unwrap().state, JobState::WaitingForNetwork);
+    // Owner bug, 2026-11-22: a dropped upload said "sends when you're back" but never did,
+    // because the network was never marked down, so its coming back never resent it.
+    assert_eq!(f.readiness().network, Network::Down);
+    let fx = f.handle(Event::Readiness(ready()));
+    assert!(has(&fx, &Effect::Transcribe { job }), "sends itself when the network is back");
+}
+
+#[test]
+fn offline_strip_offers_retry_now_and_history_can_send_it() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Err(TranscribeError::Offline) });
+    assert_eq!(strip_text(&f).unwrap().action.as_deref(), Some("Retry now"));
+    let fx = f.handle(Event::Action);
+    assert!(has(&fx, &Effect::Transcribe { job }), "Retry now tries at once");
+    assert_ne!(f.job(job).unwrap().state, JobState::Discarded, "nothing is thrown away");
+    // Fails again, the strip is closed; History's Send now still works.
+    f.handle(Event::Transcribed { job, result: Err(TranscribeError::Offline) });
+    f.handle(Event::Dismiss);
+    assert_eq!(f.job(job).unwrap().state, JobState::WaitingForNetwork, "closing keeps it waiting");
+    let fx = f.handle(Event::Retry { job });
+    assert!(has(&fx, &Effect::Transcribe { job }));
+}
+
+#[test]
+fn history_retry_never_interrupts_a_recording() {
+    let mut f = Flow::new(ready());
+    let old = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job: old, result: Err(TranscribeError::Server(500)) });
+    f.handle(Event::Dismiss);
+    let now = started(&mut f);
+    let fx = f.handle(Event::Retry { job: old });
+    assert!(fx.iter().all(|e| !matches!(e, Effect::Transcribe { .. })));
+    assert_eq!(f.state(), &State::Recording { job: now, offline: false });
 }
 
 #[test]

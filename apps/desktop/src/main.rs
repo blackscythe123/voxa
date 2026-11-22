@@ -9,10 +9,15 @@ mod link;
 mod prepare;
 mod remote;
 mod store;
-mod tab;
 mod audio;
 mod stand_in;
-mod win;
+mod common;
+#[cfg(windows)]
+mod tab;
+/// The per-OS layer: win.rs on Windows, mac.rs on macOS. Same functions on both.
+#[cfg_attr(windows, path = "win.rs")]
+#[cfg_attr(target_os = "macos", path = "mac.rs")]
+mod os;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -88,7 +93,7 @@ fn save_account(a: &voxa_chatgpt::Account) {
                 .and_then(|b| image::load_from_memory(&b).ok());
             if let Some(img) = img {
                 let _ = img.resize_to_fill(96, 96, image::imageops::FilterType::Lanczos3).save_with_format(&out, image::ImageFormat::Png);
-                win::log("profile picture saved");
+                os::log("profile picture saved");
             }
         });
     }
@@ -151,12 +156,12 @@ impl Voxa {
         let built = audio::Mic::new();
         let mic = match &built {
             Ok(m) => {
-                win::log(&format!("microphone ready (paused): {}", m.device_name()));
+                os::log(&format!("microphone ready (paused): {}", m.device_name()));
                 Mic::Granted
             }
             Err(audio::MicError::NoDevice) => Mic::Missing,
             Err(e) => {
-                win::log(&format!("microphone unavailable: {e:?}"));
+                os::log(&format!("microphone unavailable: {e:?}"));
                 Mic::Denied
             }
         };
@@ -164,16 +169,16 @@ impl Voxa {
         let mut settings = Settings::load(&data_dir());
         let mut history = History::load(&data_dir());
         if let Some(n) = import::run_once(&electron_dir(), &data_dir(), &mut history, &mut settings) {
-            win::log(&format!("imported {n} dictations from the old Voxa"));
+            os::log(&format!("imported {n} dictations from the old Voxa"));
         }
         if history.prune(settings.keep_days, now_ms()) > 0 {
             history.save();
         }
         let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.via.clone().unwrap_or_else(|| e.app.clone())).collect();
-        for site in history.entries.iter().map(|e| e.app.as_str()).filter(|a| win::is_known_site(a)) {
-            win::cache_site_icon(site);
+        for site in history.entries.iter().map(|e| e.app.as_str()).filter(|a| os::is_known_site(a)) {
+            os::cache_site_icon(site);
         }
-        std::thread::spawn(move || win::cache_open_app_icons(apps));
+        std::thread::spawn(move || os::cache_open_app_icons(apps));
         let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
         let main_key = settings.hotkey.parse::<HotKey>().unwrap_or_else(|_| {
             settings.hotkey = Settings::default().hotkey;
@@ -182,11 +187,11 @@ impl Voxa {
         let esc_key = HotKey::new(None, Code::Escape);
         let mut main_key = main_key;
         match hotkeys.register(main_key) {
-            Ok(()) => win::log(&format!("hotkey {} registered", settings.hotkey)),
+            Ok(()) => os::log(&format!("hotkey {} registered", settings.hotkey)),
             Err(e) => {
                 // Taken by another app (e.g. the old Voxa still running): never end up with no
                 // shortcut; fall back to the default and say so in Settings.
-                win::log(&format!("hotkey {} unavailable ({e}); using the default", settings.hotkey));
+                os::log(&format!("hotkey {} unavailable ({e}); using the default", settings.hotkey));
                 let fallback = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
                 if fallback.id() != main_key.id() && hotkeys.register(fallback).is_ok() {
                     main_key = fallback;
@@ -216,7 +221,7 @@ impl Voxa {
                         if ev.id == v.menu_open {
                             v.open_home(None, cx);
                         } else if ev.id == v.menu_quit {
-                            win::log("quit from tray");
+                            os::log("quit from tray");
                             v.mic_test(false, cx);
                             cx.quit();
                         }
@@ -229,8 +234,8 @@ impl Voxa {
                     for cmd in link::take_commands() {
                         v.on_command(cmd, cx);
                     }
-                    if win::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                        win::log("another launch asked to open the window");
+                    if os::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        os::log("another launch asked to open the window");
                         v.open_home(None, cx);
                     }
                     if v.mic_testing {
@@ -249,13 +254,13 @@ impl Voxa {
                             if v.mic_testing {
                                 v.mic_test(false, cx);
                             }
-                            let fg = win::foreground();
-                            let target = Target { app: win::app_name(fg), window: fg as u64 };
-                            win::cache_app_icon(fg, win::icon_owner(fg));
-                            win::cache_site_icon(&target.app);
-                            win::log(&format!("hotkey in {}", win::describe(fg)));
-                            let browser = win::browser_name(fg);
-                            let (pid, stem) = win::window_process(fg);
+                            let fg = os::foreground();
+                            let target = Target { app: os::app_name(fg), window: fg as u64 };
+                            os::cache_app_icon(fg, os::icon_owner(fg));
+                            os::cache_site_icon(&target.app);
+                            os::log(&format!("hotkey in {}", os::describe(fg)));
+                            let browser = os::browser_name(fg);
+                            let (pid, stem) = os::window_process(fg);
                             v.handle(Event::Hotkey { target }, cx);
                             // What exactly is in front (the site in a browser tab, Claude Code in an
                             // editor): read while the user talks, off the UI thread.
@@ -264,11 +269,11 @@ impl Voxa {
                                 let hwnd = fg as usize;
                                 std::thread::spawn(move || {
                                     let found = match browser {
-                                        Some(b) => tab::domain_of(hwnd).map(|d| {
-                                            win::cache_domain_icon_or_site(&d);
-                                            (win::site_for_domain(&d), b)
+                                        Some(b) => os::domain_of(hwnd).map(|d| {
+                                            os::cache_domain_icon_or_site(&d);
+                                            (os::site_for_domain(&d), b)
                                         }),
-                                        None => tab::coding_agent(&stem, pid).inspect(|(name, _)| win::cache_named_icon(name, "claude.ai")),
+                                        None => os::coding_agent(&stem, pid).inspect(|(name, _)| os::cache_named_icon(name, "claude.ai")),
                                     };
                                     if let Some(f) = found {
                                         map.lock().unwrap().insert(job, f);
@@ -289,7 +294,10 @@ impl Voxa {
                             v.levels.pop_front();
                         }
                     }
-                    if !fake_mode() && v.last_check.elapsed() > RECHECK && matches!(v.flow.state(), State::Idle) {
+                    let offline = v.flow.readiness().network == Network::Down;
+                    let every = if offline { Duration::from_secs(5) } else { RECHECK };
+                    let quiet = matches!(v.flow.state(), State::Idle | State::NeedsYou(_));
+                    if !fake_mode() && v.last_check.elapsed() > every && quiet {
                         v.check_session(cx);
                     }
                     if matches!(v.flow.state(), State::Recording { .. } | State::Transcribing { .. } | State::Delivering { .. }) {
@@ -367,7 +375,7 @@ impl Voxa {
                 })
                 .await;
             let _ = this.update(cx, |v, cx| {
-                win::log(&format!("session check: {state:?}, network {network:?}"));
+                os::log(&format!("session check: {state:?}, network {network:?}"));
                 v.session = session;
                 let r = Readiness { session: state, network, ..v.flow.readiness() };
                 if r != v.flow.readiness() {
@@ -379,9 +387,9 @@ impl Voxa {
     }
 
     fn handle(&mut self, event: Event, cx: &mut Context<Self>) {
-        win::log(&format!("event {event:?}"));
+        os::log(&format!("event {event:?}"));
         let effects = self.flow.handle(event);
-        win::log(&format!("  -> {:?} | effects {effects:?}", self.flow.state()));
+        os::log(&format!("  -> {:?} | effects {effects:?}", self.flow.state()));
         for e in effects {
             self.run(e, cx);
         }
@@ -394,8 +402,8 @@ impl Voxa {
 
     fn run(&mut self, effect: Effect, cx: &mut Context<Self>) {
         match effect {
-            Effect::ShowStrip => win::strip_visible(true),
-            Effect::HideStrip { after_ms: 0 } => win::strip_visible(false),
+            Effect::ShowStrip => os::strip_visible(true),
+            Effect::HideStrip { after_ms: 0 } => os::strip_visible(false),
             Effect::HideStrip { after_ms } => {
                 let shown = self.flow.state().clone();
                 cx.spawn(async move |this, cx| {
@@ -431,13 +439,13 @@ impl Voxa {
                 };
                 match started {
                     Ok(()) => {
-                        win::log(&format!("  recording to {}", path.display()));
+                        os::log(&format!("  recording to {}", path.display()));
                         self.audio_paths.insert(job, path);
                         self.mic_on = true;
                     }
                     Err(e) => {
                         // The mic would not open: undo the recording and show the blocker instead.
-                        win::log(&format!("  mic failed: {e:?}"));
+                        os::log(&format!("  mic failed: {e:?}"));
                         let target = self.flow.job(job).map(|j| j.target.clone());
                         let mic = if matches!(e, audio::MicError::NoDevice) { Mic::Missing } else { Mic::Denied };
                         self.handle(Event::Cancel, cx);
@@ -454,7 +462,7 @@ impl Voxa {
                 if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
                     self.mic_on = false;
                     let peak = m.finish();
-                    win::log(&format!("  recording stopped, peak rms {peak:.4}"));
+                    os::log(&format!("  recording stopped, peak rms {peak:.4}"));
                     self.peaks.insert(job, peak);
                 }
             }
@@ -466,7 +474,7 @@ impl Voxa {
             }
             Effect::Transcribe { job } if !fake_mode() => {
                 if self.peaks.get(&job).is_some_and(|p| *p < SILENCE) {
-                    win::log("  silence: not sending");
+                    os::log("  silence: not sending");
                     self.handle(Event::Transcribed { job, result: Ok(String::new()) }, cx);
                     return;
                 }
@@ -480,12 +488,23 @@ impl Voxa {
                         .spawn(async move {
                             let Some(session) = session else { return Err(TranscribeError::SignedOut) };
                             let Some(audio) = path.and_then(|p| prepare::audio_for_upload(&p)) else { return Err(TranscribeError::Server(0)) };
-                            gpt.transcribe(&session, audio, "recording.wav", "audio/wav").map(|t| prepare::finish_text(t, &data_dir()))
+                            // A dropped connection is common on flaky Wi-Fi: try twice more before
+                            // calling it offline.
+                            let mut result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
+                            for wait in [1500u64, 4000] {
+                                if !matches!(result, Err(TranscribeError::Offline | TranscribeError::Timeout)) {
+                                    break;
+                                }
+                                os::log(&format!("  upload failed ({:?}); retrying in {wait} ms", result.as_ref().err()));
+                                std::thread::sleep(Duration::from_millis(wait));
+                                result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
+                            }
+                            result.map(|t| prepare::finish_text(t, &data_dir()))
                         })
                         .await;
                     let result = match result {
                         Ok(t) if invented_for_silence(&t, peak) => {
-                            win::log(&format!("  dropped {t:?}: near-silent take (peak {peak:.4})"));
+                            os::log(&format!("  dropped {t:?}: near-silent take (peak {peak:.4})"));
                             Ok(String::new())
                         }
                         other => other,
@@ -503,32 +522,32 @@ impl Voxa {
                 .detach();
             }
             Effect::Paste { job, target, text } => {
-                let fg = win::foreground();
-                let same_tab = !win::browser_name(fg).is_some() || win::app_name(fg) == target.app;
+                let fg = os::foreground();
+                let same_tab = !os::browser_name(fg).is_some() || os::app_name(fg) == target.app;
                 let result = if fg as u64 == target.window && same_tab {
-                    if win::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed }
+                    if os::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed }
                 } else {
-                    let app = win::app_name(fg);
-                    win::cache_app_icon(fg, win::icon_owner(fg));
-                    win::cache_site_icon(&app);
+                    let app = os::app_name(fg);
+                    os::cache_app_icon(fg, os::icon_owner(fg));
+                    os::cache_site_icon(&app);
                     Delivery::TargetChanged(Target { app, window: fg as u64 })
                 };
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::PasteHere { job, text } => {
-                let result = if win::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed };
+                let result = if os::paste_here(&text) { Delivery::Pasted } else { Delivery::Failed };
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::OpenSignIn if !fake_mode() => {
                 let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("voxa-signin.exe")));
                 let Some(exe) = exe.filter(|p| p.exists()) else {
-                    win::log("FAIL sign-in window not found next to voxa-desktop.exe");
+                    os::log("FAIL sign-in window not found next to voxa-desktop.exe");
                     return;
                 };
                 if self.signing_in {
                     return;
                 }
-                win::log("sign-in: opening the sign-in window");
+                os::log("sign-in: opening the sign-in window");
                 self.signing_in = true;
                 cx.spawn(async move |this, cx| {
                     let code = cx
@@ -536,7 +555,7 @@ impl Voxa {
                         .spawn(async move { std::process::Command::new(exe).status().ok().and_then(|s| s.code()) })
                         .await;
                     let _ = this.update(cx, |v, cx| {
-                        win::log(&format!("sign-in window closed (exit {code:?})"));
+                        os::log(&format!("sign-in window closed (exit {code:?})"));
                         v.signing_in = false;
                         cx.notify();
                         // Signed in or not, re-check: the core resends a waiting dictation when the session is valid.
@@ -546,7 +565,7 @@ impl Voxa {
                 .detach();
             }
             Effect::OpenSignIn => {
-                win::log("STAND-IN sign-in: pretending the user signs in");
+                os::log("STAND-IN sign-in: pretending the user signs in");
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(Duration::from_millis(1500)).await;
                     let _ = this.update(cx, |v, cx| {
@@ -561,7 +580,7 @@ impl Voxa {
             }
             Effect::SaveJob { job } => {
                 if let Some(j) = self.flow.job(job) {
-                    win::log(&format!("  job {:?} for {} -> {:?}", j.id, j.target.app, j.state));
+                    os::log(&format!("  job {:?} for {} -> {:?}", j.id, j.target.app, j.state));
                 }
             }
         }
@@ -592,7 +611,7 @@ impl Voxa {
                 // The browser, when the app is a site; kept once known (the window may close later).
                 via: host
                     .clone()
-                    .or_else(|| win::browser_name(job.target.window as _))
+                    .or_else(|| os::browser_name(job.target.window as _))
                     .filter(|b| *b != app)
                     .or_else(|| self.history.get(id).and_then(|e| e.via.clone())),
             };
@@ -634,8 +653,8 @@ impl Voxa {
             c.arg("--tour");
         }
         match c.spawn() {
-            Ok(_) => win::log("window process started"),
-            Err(e) => win::log(&format!("FAIL window process: {e}")),
+            Ok(_) => os::log("window process started"),
+            Err(e) => os::log(&format!("FAIL window process: {e}")),
         }
     }
 
@@ -652,7 +671,7 @@ impl Voxa {
 
     fn on_command(&mut self, cmd: link::Command, cx: &mut Context<Self>) {
         use link::Command::*;
-        win::log(&format!("window asks: {}", match &cmd { SetHotkey(_) => "SetHotkey".into(), c => format!("{c:?}") }));
+        os::log(&format!("window asks: {}", match &cmd { SetHotkey(_) => "SetHotkey".into(), c => format!("{c:?}") }));
         match cmd {
             SignIn => self.sign_in(cx),
             SignOut => self.sign_out(cx),
@@ -667,7 +686,10 @@ impl Voxa {
                     self.history.save();
                 }
             }
-            Resend(id) => self.resend(id, cx),
+            Resend(id) => match self.job_entries.iter().find(|(_, e)| **e == id).map(|(j, _)| *j) {
+                Some(job) => self.handle(Event::Retry { job }, cx),
+                None => self.resend(id, cx),
+            },
             ResendAll => self.resend_all(cx),
             DeleteEntry(id) => self.delete_entry(id, cx),
             DeleteAll => self.delete_history(cx),
@@ -689,7 +711,7 @@ impl Voxa {
         let _ = std::fs::remove_file(dir.join("account.json"));
         let _ = std::fs::remove_file(dir.join("avatar.png"));
         self.session = None;
-        win::log("signed out");
+        os::log("signed out");
         let r = Readiness { session: Session::Expired, ..self.flow.readiness() };
         self.handle(Event::Readiness(r), cx);
     }
@@ -700,7 +722,7 @@ impl Voxa {
             return;
         }
         let r = if pause { self.hotkeys.unregister(self.main_key) } else { self.hotkeys.register(self.main_key) };
-        win::log(&format!("shortcut {} ({r:?})", if pause { "paused" } else { "resumed" }));
+        os::log(&format!("shortcut {} ({r:?})", if pause { "paused" } else { "resumed" }));
         self.hotkey_paused = pause;
     }
 
@@ -711,11 +733,11 @@ impl Voxa {
         }
         let _ = self.hotkeys.unregister(self.main_key);
         if let Err(e) = self.hotkeys.register(new) {
-            win::log(&format!("shortcut {s} refused: {e}"));
+            os::log(&format!("shortcut {s} refused: {e}"));
             let _ = self.hotkeys.register(self.main_key);
             return Err(format!("{s} is already used by another app. Try a different one."));
         }
-        win::log(&format!("shortcut changed to {s}"));
+        os::log(&format!("shortcut changed to {s}"));
         self.main_key = new;
         self.update_settings(|st| st.hotkey = s.to_string(), cx);
         Ok(())
@@ -732,7 +754,7 @@ impl Voxa {
 
     pub(crate) fn delete_history(&mut self, cx: &mut Context<Self>) {
         self.history.delete_all();
-        win::log("history deleted");
+        os::log("history deleted");
         cx.notify();
     }
 
@@ -758,7 +780,7 @@ impl Voxa {
                 })
                 .await;
             let _ = this.update(cx, |v, cx| {
-                win::log(&format!("resend {id}: {}", if result.is_ok() { "ok" } else { "failed" }));
+                os::log(&format!("resend {id}: {}", if result.is_ok() { "ok" } else { "failed" }));
                 let next = match result {
                     Ok(t) if !t.trim().is_empty() => Entry { text: t, status: Status::Ready, ..entry },
                     Ok(_) => Entry { status: Status::Failed("No speech in the recording".into()), ..entry },
@@ -779,7 +801,7 @@ impl Voxa {
         }
         if self.history.remove(id) {
             self.history.save();
-            win::log("history entry deleted");
+            os::log("history entry deleted");
         }
         cx.notify();
     }
@@ -812,7 +834,7 @@ impl Voxa {
                     self.mic_testing = true;
                     self.mic_on = true;
                     self.levels.clear();
-                    win::log("mic test on");
+                    os::log("mic test on");
                 }
             }
         } else {
@@ -823,7 +845,7 @@ impl Voxa {
             self.mic_testing = false;
             self.levels.clear();
             let _ = std::fs::remove_file(std::env::temp_dir().join("voxa-mic-test.wav"));
-            win::log("mic test off");
+            os::log("mic test off");
         }
         cx.notify();
     }
@@ -834,7 +856,7 @@ impl Voxa {
         if want != self.esc_bound {
             let r = if want { self.hotkeys.register(self.esc_key) } else { self.hotkeys.unregister(self.esc_key) };
             self.esc_bound = want && r.is_ok();
-            win::log(&format!("Esc {} ({r:?})", if want { "bound" } else { "released" }));
+            os::log(&format!("Esc {} ({r:?})", if want { "bound" } else { "released" }));
         }
     }
 
@@ -1158,7 +1180,7 @@ impl Render for Voxa {
 /// `voxa-desktop --window`: just the Voxa window. Exits when the window closes, returning its
 /// memory; the tray process keeps running.
 fn run_window(tour: bool) {
-    if !win::single_window_instance() {
+    if !os::single_window_instance() {
         return; // already open: it was asked to come to the front
     }
     Application::new().run(move |cx: &mut App| {
@@ -1176,22 +1198,22 @@ fn run_window(tour: bool) {
         };
         let opened = cx.open_window(options, move |window, cx| {
             if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
-                win::light_caption(w.hwnd.get() as _);
-                win::bring_to_front(w.hwnd.get() as _);
+                os::light_caption(w.hwnd.get() as _);
+                os::bring_to_front(w.hwnd.get() as _);
             }
             cx.new(|cx| Home::new(backend, first, window, cx))
         });
         match opened {
             Ok(h) => {
-                win::log(&format!("window opened on {first:?}"));
+                os::log(&format!("window opened on {first:?}"));
                 // Another "Open Voxa" while open: come to the front.
                 cx.spawn(async move |cx| loop {
                     cx.background_executor().timer(Duration::from_millis(150)).await;
-                    if win::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                    if os::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         let r = h.update(cx, |_, window, _| {
                             window.activate_window();
                             if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
-                                win::bring_to_front(w.hwnd.get() as _);
+                                os::bring_to_front(w.hwnd.get() as _);
                             }
                         });
                         if r.is_err() {
@@ -1201,7 +1223,7 @@ fn run_window(tour: bool) {
                 })
                 .detach();
             }
-            Err(e) => win::log(&format!("FAIL open window: {e}")),
+            Err(e) => os::log(&format!("FAIL open window: {e}")),
         }
     });
 }
@@ -1211,17 +1233,17 @@ fn main() {
     if args.iter().any(|a| a == "--window") {
         return run_window(args.iter().any(|a| a == "--tour"));
     }
-    if !win::single_instance() {
+    if !os::single_instance() {
         // Voxa is already running: it opens its window.
         return;
     }
     let background = std::env::args().any(|a| a == "--background");
     let _ = std::fs::create_dir_all(data_dir());
-    let _ = std::fs::remove_file(win::log_path());
-    win::log("voxa-desktop starting");
+    let _ = std::fs::remove_file(os::log_path());
+    os::log("voxa-desktop starting");
     Application::new().run(move |cx: &mut App| {
         let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
-        win::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
+        os::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
         let (w, h) = (px(760.), px(84.));
         let db = cx.primary_display().expect("display").bounds();
         let origin = point(db.origin.x + (db.size.width - w) / 2., db.origin.y + db.size.height - h - px(64.));
@@ -1237,16 +1259,16 @@ fn main() {
             window_background: WindowBackgroundAppearance::Transparent,
             ..Default::default()
         };
-        let prev = win::foreground() as usize;
+        let prev = os::foreground() as usize;
         let opened = cx.open_window(options, move |window, cx| {
             if let Ok(RawWindowHandle::Win32(h)) = window.window_handle().map(|h| h.as_raw()) {
-                win::make_overlay(h.hwnd.get() as _);
-                win::STRIP.store(h.hwnd.get() as usize, std::sync::atomic::Ordering::Relaxed);
+                os::make_overlay(h.hwnd.get() as _);
+                os::STRIP.store(h.hwnd.get() as usize, std::sync::atomic::Ordering::Relaxed);
             }
             cx.new(Voxa::new)
         });
         if let Err(e) = &opened {
-            win::log(&format!("FAIL open_window: {e}"));
+            os::log(&format!("FAIL open_window: {e}"));
         }
         // Started by the user (not at Windows sign-in): show the window; the tour on first run.
         if let Ok(h) = &opened {
@@ -1258,18 +1280,18 @@ fn main() {
             }
         }
         // GPUI shows (and activates) the window once; give focus back and hide until the hotkey.
-        win::give_focus_back(prev as _);
+        os::give_focus_back(prev as _);
         // Hide only after the first frame is painted, or the strip comes back blank later.
         let demo = std::env::var_os("VOXA_DEMO_RECORD").is_some() && fake_mode();
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_millis(500)).await;
-            win::strip_visible(false);
+            os::strip_visible(false);
             // Dev only (with VOXA_FAKE): start a stand-in recording without touching the keyboard,
             // so the strip can be screen-recorded while someone is using the PC.
             if let (true, Ok(handle)) = (demo, opened) {
                 cx.background_executor().timer(Duration::from_millis(400)).await;
-                let fg = win::foreground();
-                let target = Target { app: win::app_name(fg), window: fg as u64 };
+                let fg = os::foreground();
+                let target = Target { app: os::app_name(fg), window: fg as u64 };
                 let _ = handle.update(cx, |v, _, cx| v.handle(Event::Hotkey { target }, cx));
             }
         })

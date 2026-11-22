@@ -314,7 +314,7 @@ fn toggle(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
 /// The app's badge, with the browser's icon in the corner when the app is a site in a tab.
 fn app_badge_via(app: &str, via: Option<&str>, size: f32) -> gpui::Div {
     let base = app_badge(app, size);
-    match via.map(crate::win::icon_file).filter(|f| f.exists()) {
+    match via.map(crate::os::icon_file).filter(|f| f.exists()) {
         Some(f) => div().relative().size(px(size)).flex_none().child(base).child(
             div()
                 .absolute()
@@ -334,7 +334,7 @@ fn app_badge_via(app: &str, via: Option<&str>, size: f32) -> gpui::Div {
 
 /// The app's real icon (cached from its exe), or a coloured square with its initial.
 fn app_badge(app: &str, size: f32) -> gpui::Div {
-    let file = crate::win::icon_file(app);
+    let file = crate::os::icon_file(app);
     if file.exists() {
         return div().size(px(size)).flex_none().child(gpui::img(file).size(px(size)));
     }
@@ -746,8 +746,9 @@ impl Home {
         if has_audio {
             let playing = self.playing == Some(id);
             actions = actions.child(self.icon_btn(format!("play-{id}"), if playing { I_STOP } else { I_PLAY }, if playing { "Stop" } else { "Play the recording" }, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_play(id, cx))));
-            if !live {
-                let (glyph, tip) = if matches!(e.status, Status::Waiting(_) | Status::Failed(_)) { (I_SEND, "Send it now") } else { (I_RETRY, "Write it out again") };
+            let unsent = matches!(e.status, Status::Waiting(_) | Status::Failed(_));
+            if !live || unsent {
+                let (glyph, tip) = if unsent { (I_SEND, "Send it now") } else { (I_RETRY, "Write it out again") };
                 actions = actions.child(self.icon_btn(format!("retry-{id}"), glyph, tip, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend(id, cx)))));
             }
             actions = actions.child(self.icon_btn(format!("folder-{id}"), I_FOLDER, "Show the recording in its folder", false, cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, _| v.show_in_folder(id)))));
@@ -764,7 +765,7 @@ impl Home {
                             this.confirm_entry = None;
                             if this.playing == Some(id) {
                                 this.playing = None;
-                                crate::win::stop_audio();
+                                crate::os::stop_audio();
                             }
                             this.voxa.update(cx, |v, cx| v.delete_entry(id, cx));
                         })),
@@ -829,7 +830,7 @@ impl Home {
 
     fn toggle_play(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.playing == Some(id) {
-            crate::win::stop_audio();
+            crate::os::stop_audio();
             self.playing = None;
             cx.notify();
             return;

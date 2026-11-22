@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::win;
+use crate::os;
 
 /// Takes shorter than this are sent as recorded.
 const TRIM_FROM_SECS: f32 = 30.0;
@@ -19,7 +19,7 @@ fn silero_ready() -> bool {
         match dll.map(|d| voxa_vad::init(&d)) {
             Some(Ok(())) => true,
             Some(Err(e)) => {
-                win::log(&format!("  trim: Silero unavailable ({}), long takes go untrimmed", e.0));
+                os::log(&format!("  trim: Silero unavailable ({}), long takes go untrimmed", e.0));
                 false
             }
             None => false,
@@ -41,7 +41,7 @@ pub fn audio_for_upload(path: &Path) -> Option<Vec<u8>> {
     match voxa_vad::trim_speech(&samples) {
         Ok(out) if out.trimmed => {
             let kept = out.samples.len() as f32 / spec.sample_rate as f32;
-            win::log(&format!("  trim: {secs:.1}s -> {kept:.1}s in {} phrases ({:?})", out.spans.len(), t.elapsed()));
+            os::log(&format!("  trim: {secs:.1}s -> {kept:.1}s in {} phrases ({:?})", out.spans.len(), t.elapsed()));
             let mut buf = std::io::Cursor::new(Vec::new());
             let mut w = hound::WavWriter::new(&mut buf, spec).ok()?;
             for s in &out.samples {
@@ -51,11 +51,11 @@ pub fn audio_for_upload(path: &Path) -> Option<Vec<u8>> {
             Some(buf.into_inner())
         }
         Ok(_) => {
-            win::log(&format!("  trim: {secs:.1}s, too little speech found to trim safely, sending as recorded"));
+            os::log(&format!("  trim: {secs:.1}s, too little speech found to trim safely, sending as recorded"));
             Some(original)
         }
         Err(e) => {
-            win::log(&format!("  trim failed ({}), sending as recorded", e.0));
+            os::log(&format!("  trim failed ({}), sending as recorded", e.0));
             Some(original)
         }
     }

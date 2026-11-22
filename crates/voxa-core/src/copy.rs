@@ -59,7 +59,7 @@ pub fn strip_text(flow: &Flow) -> Option<StripText> {
                 true,
             ),
             Problem::WaitingForNetwork { .. } => {
-                text("No connection. Sends when you're back", s("Your recording is kept"), s("Discard"), true)
+                text("No connection. Sends when you're back", s("Your recording is kept"), s("Retry now"), true)
             }
             Problem::Unreachable { .. } => {
                 text("Couldn't reach ChatGPT", s("Your recording is kept. Your sign-in is fine"), s("Retry"), true)

@@ -9,7 +9,7 @@ use voxa_core::Readiness;
 
 use crate::link::{self, Command, Live};
 use crate::store::{History, Settings, Status};
-use crate::{audio, data_dir, win};
+use crate::{audio, data_dir, os};
 
 pub(crate) struct Backend {
     pub(crate) history: History,
@@ -30,7 +30,7 @@ impl Backend {
         let mut me = Self {
             history: History::load(&data_dir()),
             settings: Settings::load(&data_dir()),
-            start_with_windows: win::starts_with_windows(),
+            start_with_windows: os::starts_with_windows(),
             mic_name: live.mic_name.clone(),
             levels: VecDeque::new(),
             signing_in: live.signing_in,
@@ -174,10 +174,10 @@ impl Backend {
 
     pub fn set_autostart(&mut self, on: bool, cx: &mut Context<Self>) {
         // The tray app's exe, which is this same exe.
-        if let Err(e) = win::set_start_with_windows(on) {
-            win::log(&format!("FAIL start with Windows: {e}"));
+        if let Err(e) = os::set_start_with_windows(on) {
+            os::log(&format!("FAIL start with Windows: {e}"));
         }
-        self.start_with_windows = win::starts_with_windows();
+        self.start_with_windows = os::starts_with_windows();
         cx.notify();
     }
 
@@ -202,7 +202,7 @@ impl Backend {
             return None;
         }
         let secs = hound::WavReader::open(&path).ok().map(|r| r.duration() as f32 / r.spec().sample_rate as f32)?;
-        win::play_audio(&path).then_some(secs)
+        os::play_audio(&path).then_some(secs)
     }
 
     pub fn show_in_folder(&self, id: u64) {
@@ -223,7 +223,7 @@ impl Backend {
                     self.mic = Some(m);
                     self.levels.clear();
                 }
-                Err(e) => win::log(&format!("mic test failed: {e:?}")),
+                Err(e) => os::log(&format!("mic test failed: {e:?}")),
             }
         } else if let Some(mut m) = self.mic.take() {
             m.discard();
