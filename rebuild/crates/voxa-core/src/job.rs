@@ -31,6 +31,9 @@ pub enum JobState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Job {
     pub id: JobId,
+    /// Where the text goes: the app the user started in, or the one they chose to paste into.
     pub target: Target,
+    /// Set when the user moved apps and chose to paste in the new one: where they started.
+    pub started_in: Option<Target>,
     pub state: JobState,
 }

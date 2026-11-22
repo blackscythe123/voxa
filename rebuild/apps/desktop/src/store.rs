@@ -29,6 +29,9 @@ pub struct Entry {
     pub status: Status,
     #[serde(default)]
     pub audio: Option<PathBuf>,
+    /// The app the user started in, when they moved and chose to paste somewhere else.
+    #[serde(default)]
+    pub started_in: Option<String>,
 }
 
 impl Entry {
@@ -246,7 +249,7 @@ mod tests {
         Local.with_ymd_and_hms(y, m, d, h, 0, 0).single().unwrap()
     }
     fn entry(t: DateTime<Local>, app: &str, text: &str, secs: f32, status: Status) -> Entry {
-        Entry { id: t.timestamp_millis() as u64, app: app.into(), text: text.into(), secs, status, audio: None }
+        Entry { id: t.timestamp_millis() as u64, app: app.into(), text: text.into(), secs, status, audio: None, started_in: None }
     }
 
     #[test]

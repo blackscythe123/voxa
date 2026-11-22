@@ -482,7 +482,15 @@ impl Voxa {
         for job in jobs {
             let Some(&id) = self.job_entries.get(&job.id) else { continue };
             let secs = self.job_secs.get(&job.id).copied().unwrap_or(0.0);
-            let entry = |text: String, status: Status| Entry { id, app: job.target.app.clone(), text, secs, status, audio: self.audio_paths.get(&job.id).cloned() };
+            let entry = |text: String, status: Status| Entry {
+                id,
+                app: job.target.app.clone(),
+                text,
+                secs,
+                status,
+                audio: self.audio_paths.get(&job.id).cloned(),
+                started_in: job.started_in.as_ref().map(|t| t.app.clone()),
+            };
             let next = match &job.state {
                 JobState::Recording | JobState::Transcribing => continue,
                 JobState::WaitingForNetwork => Some(entry(String::new(), Status::Waiting("Sends when you're back online".into()))),

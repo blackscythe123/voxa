@@ -162,7 +162,7 @@ impl Flow {
                 }
                 let id = JobId(self.next_id);
                 self.next_id += 1;
-                self.jobs.insert(id, Job { id, target, state: JobState::Recording });
+                self.jobs.insert(id, Job { id, target, started_in: None, state: JobState::Recording });
                 let offline = self.readiness.network == Network::Down;
                 self.state = State::Recording { job: id, offline };
                 fx.extend([Effect::SaveJob { job: id }, Effect::StartCapture { job: id }, Effect::ShowStrip]);
@@ -201,10 +201,18 @@ impl Flow {
         match self.state.clone() {
             State::Blocked(Blocker::SignedOut) => fx.push(Effect::OpenSignIn),
             State::Blocked(Blocker::MicDenied | Blocker::MicMissing) => fx.push(Effect::OpenMicSettings),
-            State::NeedsYou(p) => match p {
+            State::NeedsYou(p) => match p.clone() {
                 Problem::SignInToSend { .. } => fx.push(Effect::OpenSignIn),
                 Problem::Unreachable { job } => self.retry(job, fx),
                 Problem::TargetChanged { job, .. } | Problem::PasteFailed { job } => {
+                    // "Paste in X": the text now belongs to X. Remember where it started.
+                    if let Problem::TargetChanged { now_in, .. } = &p {
+                        if let Some(j) = self.jobs.get_mut(&job) {
+                            let started = std::mem::replace(&mut j.target, now_in.clone());
+                            j.started_in.get_or_insert(started);
+                            fx.push(Effect::SaveJob { job });
+                        }
+                    }
                     if let Some(text) = self.ready_text(job) {
                         self.state = State::Delivering { job };
                         fx.push(Effect::PasteHere { job, text });

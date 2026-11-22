@@ -718,6 +718,7 @@ impl Home {
                     .text_color(rgb(MUTED))
                     .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(time_label(e)))
                     .child(e.app.clone())
+                    .children(e.started_in.as_ref().filter(|s| **s != e.app).map(|s| div().child(format!("from {s}"))))
                     .children(note.map(|(n, _)| div().text_color(rgb(note_color)).child(n))),
             )
             .child(

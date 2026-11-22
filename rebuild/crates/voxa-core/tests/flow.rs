@@ -137,6 +137,12 @@ fn switching_apps_asks_instead_of_pasting_into_the_wrong_chat() {
     assert_eq!(t.action.as_deref(), Some("Paste in Slack"));
     let fx = f.handle(Event::Action);
     assert!(has(&fx, &Effect::PasteHere { job, text: "hi".into() }));
+    // Owner bug, 2026-11-22: started in VS Code, pasted in Brave, History said VS Code.
+    let j = f.job(job).unwrap();
+    assert_eq!(j.target, slack(), "the text now belongs to the app it was pasted into");
+    assert_eq!(j.started_in.as_ref().map(|t| t.app.as_str()), Some("WhatsApp"), "and remembers where it started");
+    f.handle(Event::Delivered { job, result: Delivery::Pasted });
+    assert_eq!(f.job(job).unwrap().target, slack());
 }
 
 #[test]
