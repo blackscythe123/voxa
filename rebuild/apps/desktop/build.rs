@@ -1,5 +1,15 @@
-// Put onnxruntime.dll (silence trimming) next to voxa-desktop.exe.
+// Put onnxruntime.dll (silence trimming) next to voxa-desktop.exe, and embed the app icon
+// (resource 1, which GPUI uses for its windows; Explorer and the taskbar use it too).
 fn main() {
+    println!("cargo:rerun-if-changed=assets/icon.ico");
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon("assets/icon.ico");
+    res.set("FileDescription", "Voxa");
+    res.set("ProductName", "Voxa");
+    if let Err(e) = res.compile() {
+        println!("cargo:warning=icon not embedded: {e}");
+    }
+
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/onnxruntime/onnxruntime.dll");
     println!("cargo:rerun-if-changed={}", src.display());
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());

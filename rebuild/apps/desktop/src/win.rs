@@ -248,6 +248,19 @@ pub fn strip_visible(show: bool) {
     log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
 }
 
+/// Light caption bar in the nav colour, so the window reads as one surface (the default follows
+/// the system's dark mode and looks like a different app).
+pub fn light_caption(hwnd: HWND) {
+    unsafe {
+        let off: i32 = 0;
+        DwmSetWindowAttribute(hwnd, 20, &off as *const i32 as *const c_void, 4);
+        let caption: u32 = 0x00EAEEF1; // #F1EEEA as COLORREF (BGR)
+        DwmSetWindowAttribute(hwnd, 35, &caption as *const u32 as *const c_void, 4);
+        let text: u32 = 0x001A1A1A;
+        DwmSetWindowAttribute(hwnd, 36, &text as *const u32 as *const c_void, 4);
+    }
+}
+
 // ── single instance ──────────────────────────────────────────────────────
 
 /// Set when a second launch (or the Start menu shortcut) asks this instance to show its window.
@@ -316,5 +329,21 @@ pub fn set_start_with_windows(on: bool) -> std::io::Result<()> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             r => r,
         }
+    }
+}
+
+// ── playback ─────────────────────────────────────────────────────────────
+
+/// Play a WAV file without blocking. Returns false if Windows could not start it.
+pub fn play_audio(path: &std::path::Path) -> bool {
+    use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+    let w = wide(&path.to_string_lossy());
+    unsafe { PlaySoundW(w.as_ptr(), std::ptr::null_mut(), SND_ASYNC | SND_FILENAME | SND_NODEFAULT) != 0 }
+}
+
+pub fn stop_audio() {
+    use windows_sys::Win32::Media::Audio::PlaySoundW;
+    unsafe {
+        PlaySoundW(std::ptr::null(), std::ptr::null_mut(), 0);
     }
 }

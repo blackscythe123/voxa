@@ -51,7 +51,7 @@ fn fake_mode() -> bool {
 }
 
 /// %APPDATA%\voxa-next, or VOXA_DATA (tests use a throwaway folder so real history is untouched).
-fn data_dir() -> PathBuf {
+pub(crate) fn data_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("VOXA_DATA") {
         return d.into();
     }
@@ -80,6 +80,8 @@ pub(crate) struct Voxa {
     job_secs: HashMap<JobId, f32>,
     home: Option<WindowHandle<Home>>,
     hotkey_paused: bool,
+    /// The ChatGPT sign-in window is open.
+    pub(crate) signing_in: bool,
     menu_open: MenuId,
     menu_quit: MenuId,
     rec_started: Instant,
@@ -229,6 +231,7 @@ impl Voxa {
             job_secs: HashMap::new(),
             home: None,
             hotkey_paused: false,
+            signing_in: false,
             menu_open: open_item.id().clone(),
             menu_quit: quit_item.id().clone(),
             rec_started: Instant::now(),
@@ -429,7 +432,11 @@ impl Voxa {
                     win::log("FAIL sign-in window not found next to voxa-desktop.exe");
                     return;
                 };
+                if self.signing_in {
+                    return;
+                }
                 win::log("sign-in: opening the sign-in window");
+                self.signing_in = true;
                 cx.spawn(async move |this, cx| {
                     let code = cx
                         .background_executor()
@@ -437,6 +444,8 @@ impl Voxa {
                         .await;
                     let _ = this.update(cx, |v, cx| {
                         win::log(&format!("sign-in window closed (exit {code:?})"));
+                        v.signing_in = false;
+                        cx.notify();
                         // Signed in or not, re-check: the core resends a waiting dictation when the session is valid.
                         v.check_session(cx);
                     });
@@ -614,6 +623,30 @@ impl Voxa {
         .detach();
     }
 
+    pub(crate) fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(a) = self.history.get(id).and_then(|e| e.audio.clone()) {
+            let _ = std::fs::remove_file(a);
+        }
+        if self.history.remove(id) {
+            self.history.save();
+            win::log("history entry deleted");
+        }
+        cx.notify();
+    }
+
+    /// Play an entry's recording; returns its length in seconds.
+    pub(crate) fn play_entry(&self, id: u64) -> Option<f32> {
+        let path = self.history.get(id)?.audio.clone().filter(|a| a.exists())?;
+        let secs = hound::WavReader::open(&path).ok().map(|r| r.duration() as f32 / r.spec().sample_rate as f32)?;
+        win::play_audio(&path).then_some(secs)
+    }
+
+    pub(crate) fn show_in_folder(&self, id: u64) {
+        if let Some(a) = self.history.get(id).and_then(|e| e.audio.clone()) {
+            let _ = std::process::Command::new("explorer").arg(format!("/select,{}", a.display())).spawn();
+        }
+    }
+
     pub(crate) fn resend_all(&mut self, cx: &mut Context<Self>) {
         let ids: Vec<u64> = self
             .history
@@ -682,20 +715,23 @@ impl Voxa {
 }
 
 fn tray_icon(dot: Option<[u8; 3]>) -> Icon {
-    let (w, h) = (32u32, 32u32);
-    let mut px_ = vec![0u8; (w * h * 4) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let i = ((y * w + x) * 4) as usize;
-            let (dx, dy) = (x as i32 - 24, y as i32 - 24);
-            if let Some(c) = dot.filter(|_| dx * dx + dy * dy <= 49) {
-                px_[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
-            } else if (2..26).contains(&x) && (2..26).contains(&y) {
-                px_[i..i + 4].copy_from_slice(&[0x8F, 0x4C, 0x2C, 255]);
+    // The app icon (32x32 RGBA, from assets/make_icon.py), with a status dot when Voxa needs you.
+    let mut px_ = include_bytes!("../assets/tray.rgba").to_vec();
+    if let Some(c) = dot {
+        for y in 0..32i32 {
+            for x in 0..32i32 {
+                let (dx, dy) = (x - 25, y - 25);
+                let d2 = dx * dx + dy * dy;
+                let i = ((y * 32 + x) * 4) as usize;
+                if d2 <= 36 {
+                    px_[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+                } else if d2 <= 64 {
+                    px_[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
             }
         }
     }
-    Icon::from_rgba(px_, w, h).expect("icon")
+    Icon::from_rgba(px_, 32, 32).expect("icon")
 }
 
 // ── view ──────────────────────────────────────────────────────────────────
@@ -788,7 +824,7 @@ fn glyph(state: &State, frame: u64) -> AnyElement {
 }
 
 /// Ticks per quill pass: 100 x 40 ms = 4 s, the old overlay's rhythm.
-const QUILL_CYCLE: usize = 100;
+pub(crate) const QUILL_CYCLE: usize = 100;
 
 /// The old overlay's quill (viewBox 0 0 16 16), as cubic/line segments. Nib tip is at (2, 15.6).
 const QUILL_NIB: (f32, f32) = (3.0, 15.2);
@@ -803,6 +839,11 @@ fn quill_point(x: f32, y: f32, scale: f32, angle: f32, at: gpui::Point<gpui::Pix
 /// `levels` are this pass's smoothed mic levels (0..1), one per 40 ms tick; `tick` is the position
 /// in the pass.
 pub(crate) fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
+    ink_line_faded(levels, tick, true)
+}
+
+/// `fade`: fade in and out with each 4 s pass (the strip); off for still uses in the window.
+pub(crate) fn ink_line_faded(levels: Vec<f32>, tick: usize, fade: bool) -> AnyElement {
     let ink: Hsla = rgb(INK).into();
     let pen: Hsla = rgb(0x2D2418).into();
     canvas(
@@ -825,7 +866,7 @@ pub(crate) fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
 
             let p_now = tick as f32 / n;
             // Fade in at the start of a pass and out at its end, like the old overlay.
-            let alpha = (p_now / 0.06).min(1.0).min((1.0 - p_now) / 0.08).clamp(0.0, 1.0);
+            let alpha = if fade { (p_now / 0.06).min(1.0).min((1.0 - p_now) / 0.08).clamp(0.0, 1.0) } else { 1.0 };
 
             // Ink trail, from the left edge up to the nib.
             if tick >= 1 {
@@ -1003,7 +1044,12 @@ fn show_home(voxa: Entity<Voxa>, page: Option<Page>, cx: &mut App) {
     };
     let first = page.unwrap_or(if voxa.read(cx).settings.onboarded { Page::History } else { Page::Setup(1) });
     let v2 = voxa.clone();
-    match cx.open_window(options, move |window, cx| cx.new(|cx| Home::new(v2, first, window, cx))) {
+    match cx.open_window(options, move |window, cx| {
+        if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
+            win::light_caption(w.hwnd.get() as _);
+        }
+        cx.new(|cx| Home::new(v2, first, window, cx))
+    }) {
         Ok(h) => {
             win::log(&format!("window opened on {first:?}"));
             voxa.update(cx, |v, _| v.home = Some(h));

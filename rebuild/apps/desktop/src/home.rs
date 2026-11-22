@@ -34,13 +34,20 @@ const I_CHECK: char = '\u{E73E}';
 const I_DOWN: char = '\u{E70D}';
 const I_TEXT: char = '\u{E8D2}';
 const I_SEND: char = '\u{E724}';
+const I_PLAY: char = '\u{E768}';
+const I_STOP: char = '\u{E71A}';
+const I_RETRY: char = '\u{E72C}';
+const I_FOLDER: char = '\u{E838}';
+const I_SORT: char = '\u{E8CB}';
+
+pub const SETUP_STEPS: u8 = 6;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Page {
     History,
     Insights,
     Settings,
-    /// Guided setup, steps 1 to 4.
+    /// Guided setup (the first-run tour), steps 1 to SETUP_STEPS.
     Setup(u8),
 }
 
@@ -59,6 +66,22 @@ pub struct Home {
     dismissed: Vec<&'static str>,
     /// Newest history id when the "Try it" step opened, to spot the first dictation.
     try_since: u64,
+    app_filter: Option<String>,
+    status_filter: StatusFilter,
+    oldest_first: bool,
+    /// Entry whose recording is playing.
+    playing: Option<u64>,
+    /// Entry whose Delete was pressed once (press again to delete).
+    confirm_entry: Option<u64>,
+    /// Start with Windows as chosen on the last setup step (On unless turned off).
+    autostart_choice: Option<bool>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum StatusFilter {
+    All,
+    NotPasted,
+    NotSent,
 }
 
 impl Home {
@@ -78,6 +101,12 @@ impl Home {
             search_active: false,
             dismissed: Vec::new(),
             try_since: 0,
+            app_filter: None,
+            status_filter: StatusFilter::All,
+            oldest_first: false,
+            playing: None,
+            confirm_entry: None,
+            autostart_choice: None,
         };
         me.go(page, cx);
         me
@@ -87,9 +116,9 @@ impl Home {
         if self.capturing {
             self.stop_capture(cx);
         }
-        let testing = matches!(page, Page::Setup(2));
+        let testing = matches!(page, Page::Setup(3));
         self.voxa.update(cx, |v, cx| v.mic_test(testing, cx));
-        if page == Page::Setup(3) {
+        if page == Page::Setup(4) {
             self.try_since = self.voxa.read(cx).history.entries.last().map(|e| e.id).unwrap_or(0);
         }
         self.confirm_delete = false;
@@ -248,14 +277,21 @@ fn toggle(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
 
 /// A coloured square with the app's initial (no emoji, no third-party logos).
 fn app_badge(app: &str, size: f32) -> gpui::Div {
-    const COLORS: [u32; 8] = [0x25D366, 0x4A154B, 0xEA4335, 0x0078D4, 0x8F4C2C, 0x5B5FC7, 0x107C10, 0xC239B3];
+    const COLORS: [u32; 10] = [0x0078D4, 0x8F4C2C, 0x107C10, 0xC239B3, 0x5B5FC7, 0xCA5010, 0x038387, 0x8764B8, 0x486860, 0xE3008C];
+    let known = [
+        ("whatsapp", 0x25D366), ("slack", 0x4A154B), ("gmail", 0xEA4335), ("outlook", 0x0F6CBD), ("vs code", 0x007ACC), ("visual studio", 0x68217A),
+        ("notion", 0x191919), ("chrome", 0x1A73E8), ("edge", 0x0C59A4), ("firefox", 0xE66000), ("teams", 0x5B5FC7), ("discord", 0x5865F2),
+        ("word", 0x185ABD), ("excel", 0x107C41), ("powerpoint", 0xC43E1C), ("notepad", 0x2B579A), ("telegram", 0x229ED9), ("chatgpt", 0x10A37F),
+    ];
+    let lower = app.to_lowercase();
+    let brand = known.iter().find(|(k, _)| lower.contains(k)).map(|(_, c)| *c);
     let h = app.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
     let letter = app.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
     div()
         .size(px(size))
         .flex_none()
         .rounded(px(6.))
-        .bg(rgb(COLORS[(h % 8) as usize]))
+        .bg(rgb(brand.unwrap_or(COLORS[(h % 10) as usize])))
         .text_color(rgb(0xFFFFFF))
         .text_size(px(size * 0.5))
         .font_weight(FontWeight::SEMIBOLD)
@@ -423,12 +459,35 @@ impl Home {
         };
         out.push(div().mt(px(14.)).text_size(px(14.)).text_color(rgb(0x3D3D3D)).child(status).into_any_element());
 
-        // Days, newest first, with search.
+        // Toolbar: search, sort, app and status filters.
         let today = chrono::Local::now().date_naive();
+        let all_count = entries.len();
+        let mut apps: Vec<(String, usize)> = Vec::new();
+        for e in &entries {
+            match apps.iter_mut().find(|(a, _)| *a == e.app) {
+                Some((_, n)) => *n += 1,
+                None => apps.push((e.app.clone(), 1)),
+            }
+        }
+        apps.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let mut entries: Vec<store::Entry> = entries
+            .into_iter()
+            .filter(|e| self.app_filter.as_ref().is_none_or(|a| *a == e.app))
+            .filter(|e| match self.status_filter {
+                StatusFilter::All => true,
+                StatusFilter::NotPasted => e.status == Status::Ready,
+                StatusFilter::NotSent => matches!(e.status, Status::Waiting(_) | Status::Failed(_)),
+            })
+            .collect();
+        if self.oldest_first {
+            entries.reverse();
+        }
+        let words: usize = entries.iter().map(|e| e.words()).sum();
+
         let search_box = div()
             .id("search")
             .h(px(32.))
-            .w(px(280.))
+            .w(px(300.))
             .px(px(10.))
             .flex()
             .items_center()
@@ -439,11 +498,10 @@ impl Home {
             .border_color(rgba(if self.search_active { 0x8F4C2CFF } else { 0x00000014 }))
             .border_b_2()
             .text_size(px(14.))
-            .font_weight(FontWeight::NORMAL)
             .cursor_text()
             .child(icon(I_SEARCH, 12.).text_color(rgb(MUTED)))
             .child(if query.is_empty() && !self.search_active {
-                div().text_color(rgb(MUTED)).child("Search history")
+                div().text_color(rgb(MUTED)).child("Search words or apps")
             } else {
                 div().text_color(rgb(TEXT)).child(format!("{query}{}", if self.search_active { "|" } else { "" }))
             })
@@ -452,33 +510,104 @@ impl Home {
                 window.focus(&this.focus);
                 cx.notify();
             }));
+        let sort = wbtn("sort", if self.oldest_first { "Oldest first" } else { "Newest first" }, false).child(icon(I_SORT, 12.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+            this.oldest_first = !this.oldest_first;
+            cx.notify();
+        }));
+        out.push(
+            div()
+                .mt(px(22.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .child(search_box)
+                .child(div().flex_1().text_size(px(13.)).text_color(rgb(MUTED)).child(format!(
+                    "{} dictation{}, {} words",
+                    entries.len(),
+                    if entries.len() == 1 { "" } else { "s" },
+                    fmt_thousands(words)
+                )))
+                .child(sort)
+                .into_any_element(),
+        );
+        if all_count > 0 {
+            let mut chips = div().mt(px(10.)).flex().flex_wrap().items_center().gap(px(6.));
+            chips = chips.child(self.chip("app-all", "All apps", self.app_filter.is_none(), cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.app_filter = None;
+                cx.notify();
+            })));
+            for (i, (app, n)) in apps.iter().take(6).enumerate() {
+                let a = app.clone();
+                let on = self.app_filter.as_deref() == Some(app.as_str());
+                chips = chips.child(self.chip(SharedString::from(format!("app-{i}")), &format!("{app}  {n}"), on, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.app_filter = if this.app_filter.as_deref() == Some(a.as_str()) { None } else { Some(a.clone()) };
+                    cx.notify();
+                })));
+            }
+            chips = chips.child(div().w(px(14.)));
+            for (id, label, f) in [("st-all", "Everything", StatusFilter::All), ("st-np", "Not pasted", StatusFilter::NotPasted), ("st-ns", "Not sent", StatusFilter::NotSent)] {
+                chips = chips.child(self.chip(id, label, self.status_filter == f, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.status_filter = f;
+                    cx.notify();
+                })));
+            }
+            out.push(chips.into_any_element());
+        }
 
         if entries.is_empty() {
-            out.push(section("").flex().justify_end().child(search_box).into_any_element());
-            let msg = if !query.is_empty() {
-                format!("Nothing matches \"{query}\".")
+            let msg = if all_count > 0 || !query.is_empty() {
+                "Nothing matches these filters.".to_string()
             } else {
                 format!("Nothing yet. Press {shortcut} in any app, talk, and what you say shows up here.")
             };
             out.push(div().mt(px(40.)).text_size(px(14.)).text_color(rgb(MUTED)).child(msg).into_any_element());
             return out;
         }
-        // The search box sits on the first day's header row.
-        let mut search_box = Some(search_box);
         let mut last_day = None;
-        for e in entries.iter().take(300) {
+        for e in entries.iter().take(400) {
             let d = e.local_time().date_naive();
             if last_day != Some(d) {
-                let mut s = section(store::day_label(d, today)).flex().items_center().justify_between();
-                if let Some(sb) = search_box.take() {
-                    s = s.child(sb);
-                }
-                out.push(s.into_any_element());
+                out.push(section(store::day_label(d, today)).into_any_element());
                 last_day = Some(d);
             }
             out.push(self.history_row(e, cx));
         }
         out
+    }
+
+    fn chip(&self, id: impl Into<gpui::ElementId>, label: &str, on: bool, f: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static) -> AnyElement {
+        div()
+            .id(id.into())
+            .h(px(28.))
+            .px(px(12.))
+            .flex()
+            .items_center()
+            .rounded(px(14.))
+            .text_size(px(13.))
+            .cursor_pointer()
+            .border_1()
+            .when(on, |d| d.bg(rgb(INK)).text_color(rgb(0xFFFFFF)).border_color(rgb(INK)))
+            .when(!on, |d| d.bg(rgb(0xFFFFFF)).border_color(rgba(0x0000001A)).hover(|s| s.bg(rgb(0xF6F4F1))))
+            .child(label.to_string())
+            .on_click(f)
+            .into_any_element()
+    }
+
+    fn icon_btn(&self, id: String, glyph: char, tip: &'static str, danger: bool, f: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static) -> AnyElement {
+        div()
+            .id(SharedString::from(id))
+            .size(px(28.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.))
+            .cursor_pointer()
+            .text_color(rgb(if danger { 0xC42B1C } else { 0x3D3D3D }))
+            .hover(|s| s.bg(rgba(0x0000000F)))
+            .tooltip(move |_, cx| cx.new(|_| Tip(tip)).into())
+            .child(icon(glyph, 13.))
+            .on_click(f)
+            .into_any_element()
     }
 
     fn close_btn(&self, key: &'static str, cx: &mut Context<Self>) -> AnyElement {
@@ -502,41 +631,71 @@ impl Home {
 
     fn history_row(&self, e: &store::Entry, cx: &mut Context<Self>) -> AnyElement {
         let id = e.id;
+        let live = self.voxa.read(cx).is_live(id);
+        let has_audio = e.audio.as_ref().is_some_and(|a| a.exists());
         let (body, muted) = match &e.status {
             Status::Pasted | Status::Ready => (e.text.clone(), false),
-            Status::Waiting(why) => (format!("{} of speech. {why}.", secs_label(e.secs)), true),
-            Status::Failed(why) => (format!("{} of speech. {why}.", secs_label(e.secs)), true),
-        };
-        let action = match &e.status {
-            Status::Pasted | Status::Ready => {
-                let copied = self.copied == Some(id);
-                let text = e.text.clone();
-                Some(
-                    wbtn(SharedString::from(format!("copy-{id}")), if copied { "Copied" } else { "Copy" }, false)
-                        .h(px(28.))
-                        .text_size(px(13.))
-                        .child(icon(if copied { I_CHECK } else { I_COPY }, 12.))
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                            this.copied = Some(id);
-                            cx.notify();
-                        }))
-                        .into_any_element(),
-                )
-            }
-            _ if e.audio.as_ref().is_some_and(|a| a.exists()) && !self.voxa.read(cx).is_live(id) => Some(
-                wbtn(SharedString::from(format!("send-{id}")), "Send", false)
-                    .h(px(28.))
-                    .text_size(px(13.))
-                    .child(icon(I_SEND, 12.))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend(id, cx))))
-                    .into_any_element(),
-            ),
-            _ => None,
+            Status::Waiting(why) | Status::Failed(why) => (format!("{} of speech. {why}.", secs_label(e.secs)), true),
         };
         let note = match &e.status {
-            Status::Ready => Some("Not pasted"),
-            _ => None,
+            Status::Ready => Some(("Not pasted", "You had moved to another app, so Voxa kept it here. Copy it, or paste it where you need it.")),
+            Status::Failed(_) => Some(("Not sent", "")),
+            Status::Waiting(_) => Some(("Waiting", "")),
+            Status::Pasted => None,
+        };
+        let mut actions = div().flex().items_center().gap(px(2.)).flex_none();
+        if matches!(e.status, Status::Pasted | Status::Ready) {
+            let copied = self.copied == Some(id);
+            let text = e.text.clone();
+            actions = actions.child(
+                wbtn(SharedString::from(format!("copy-{id}")), if copied { "Copied" } else { "Copy" }, false)
+                    .h(px(28.))
+                    .text_size(px(13.))
+                    .mr(px(6.))
+                    .child(icon(if copied { I_CHECK } else { I_COPY }, 12.))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        this.copied = Some(id);
+                        cx.notify();
+                    })),
+            );
+        }
+        if has_audio {
+            let playing = self.playing == Some(id);
+            actions = actions.child(self.icon_btn(format!("play-{id}"), if playing { I_STOP } else { I_PLAY }, if playing { "Stop" } else { "Play the recording" }, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_play(id, cx))));
+            if !live {
+                let (glyph, tip) = if matches!(e.status, Status::Waiting(_) | Status::Failed(_)) { (I_SEND, "Send it now") } else { (I_RETRY, "Write it out again") };
+                actions = actions.child(self.icon_btn(format!("retry-{id}"), glyph, tip, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend(id, cx)))));
+            }
+            actions = actions.child(self.icon_btn(format!("folder-{id}"), I_FOLDER, "Show the recording in its folder", false, cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, _| v.show_in_folder(id)))));
+        }
+        if !live {
+            if self.confirm_entry == Some(id) {
+                actions = actions.child(
+                    wbtn(SharedString::from(format!("del-yes-{id}")), "Delete", true)
+                        .h(px(28.))
+                        .text_size(px(13.))
+                        .bg(rgb(0xC42B1C))
+                        .hover(|s| s.bg(rgb(0xA32416)))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.confirm_entry = None;
+                            if this.playing == Some(id) {
+                                this.playing = None;
+                                crate::win::stop_audio();
+                            }
+                            this.voxa.update(cx, |v, cx| v.delete_entry(id, cx));
+                        })),
+                );
+            } else {
+                actions = actions.child(self.icon_btn(format!("del-{id}"), I_DELETE, "Delete this dictation and its recording", false, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.confirm_entry = Some(id);
+                    cx.notify();
+                })));
+            }
+        }
+        let note_color = match &e.status {
+            Status::Failed(_) => 0xC42B1C,
+            _ => 0x9D5D00,
         };
         div()
             .flex()
@@ -552,18 +711,50 @@ impl Home {
             .child(app_badge(&e.app, 28.).mt(px(2.)))
             .child(
                 div()
-                    .w(px(120.))
+                    .w(px(110.))
                     .flex_none()
                     .text_size(px(12.))
                     .line_height(px(18.))
                     .text_color(rgb(MUTED))
                     .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(time_label(e)))
                     .child(e.app.clone())
-                    .children(note.map(|n| div().text_color(rgb(0x9D5D00)).child(n))),
+                    .children(note.map(|(n, _)| div().text_color(rgb(note_color)).child(n))),
             )
-            .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).line_height(px(21.)).text_color(rgb(if muted { MUTED } else { TEXT })).child(body))
-            .children(action)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_size(px(14.))
+                    .line_height(px(21.))
+                    .child(div().text_color(rgb(if muted { MUTED } else { TEXT })).child(body))
+                    .children(note.filter(|(_, why)| !why.is_empty()).map(|(_, why)| div().mt(px(4.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(MUTED)).child(why))),
+            )
+            .child(actions)
             .into_any_element()
+    }
+
+    fn toggle_play(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.playing == Some(id) {
+            crate::win::stop_audio();
+            self.playing = None;
+            cx.notify();
+            return;
+        }
+        let secs = self.voxa.read(cx).play_entry(id);
+        if let Some(secs) = secs {
+            self.playing = Some(id);
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_secs_f32(secs + 0.3)).await;
+                let _ = this.update(cx, |h, cx| {
+                    if h.playing == Some(id) {
+                        h.playing = None;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+        cx.notify();
     }
 
     fn insights(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -583,11 +774,24 @@ impl Home {
         };
         let max = i.per_day.iter().copied().max().unwrap_or(0).max(1) as f32;
         let bars = div().flex().items_end().gap(px(18.)).h(px(150.)).children(i.per_day.iter().enumerate().map(|(d, w)| {
-            let h = if *w == 0 { 2.0 } else { 6.0 + 144.0 * (*w as f32 / max) };
-            div().flex_1().h(px(h)).rounded_t(px(3.)).bg(rgb(if d == i.today { INK } else { 0xE7E1DA }))
+            let col = div().flex_1().flex().flex_col().items_center().justify_end().h_full();
+            if *w == 0 {
+                col.child(div().size(px(6.)).rounded_full().bg(rgb(0xE7E1DA)))
+            } else {
+                let h = 8.0 + 142.0 * (*w as f32 / max);
+                col.child(div().text_size(px(11.)).text_color(rgb(MUTED)).mb(px(4.)).child(fmt_thousands(*w))).child(div().w_full().h(px(h - 18.0).max(px(4.))).rounded_t(px(3.)).bg(rgb(if d == i.today { INK } else { 0xE7E1DA })))
+            }
         }));
-        let labels = div().flex().gap(px(18.)).mt(px(8.)).children(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].iter().map(|d| {
-            div().flex_1().flex().justify_center().text_size(px(12.)).text_color(rgb(MUTED)).child(d.to_string())
+        let today_idx = i.today;
+        let labels = div().flex().gap(px(18.)).mt(px(8.)).children(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].iter().enumerate().map(move |(n, d)| {
+            div()
+                .flex_1()
+                .flex()
+                .justify_center()
+                .text_size(px(12.))
+                .text_color(rgb(if n == today_idx { INK } else { MUTED }))
+                .when(n == today_idx, |x| x.font_weight(FontWeight::SEMIBOLD))
+                .child(if n == today_idx { "Today".to_string() } else { d.to_string() })
         }));
         let mut out: Vec<AnyElement> = vec![
             div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Insights").into_any_element(),
@@ -641,7 +845,7 @@ impl Home {
         let count = v.history.entries.len();
         let mb = v.history.audio_bytes() as f64 / 1e6;
         let row_text = |h: &str, sub: String| {
-            div().flex_1().child(div().text_size(px(14.)).line_height(px(20.)).child(h.to_string())).child(div().mt(px(1.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(MUTED)).child(sub))
+            div().flex_1().min_w(px(0.)).child(div().text_size(px(14.)).line_height(px(20.)).child(h.to_string())).child(div().mt(px(1.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(MUTED)).child(sub))
         };
         let mut out: Vec<AnyElement> = vec![div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Settings").into_any_element()];
 
@@ -678,7 +882,9 @@ impl Home {
         };
         let sub = self.hotkey_error.clone().unwrap_or_else(|| "Press to start, press again to stop. Esc cancels while recording.".into());
         out.push(card().mb(px(3.)).child(icon(I_KEYBOARD, 18.).w(px(20.))).child(row_text("Shortcut", sub)).child(shortcut_right).into_any_element());
-        out.push(card().mb(px(3.)).child(icon(I_MIC, 18.).w(px(20.))).child(row_text("Microphone", "Voxa uses the Windows default microphone. Change it in Windows sound settings.".into())).child(div().text_size(px(14.)).text_color(rgb(MUTED)).max_w(px(260.)).child(mic)).into_any_element());
+        out.push(card().mb(px(3.)).child(icon(I_MIC, 18.).w(px(20.))).child(row_text("Microphone", "Voxa uses the Windows default microphone. Change it in Windows sound settings.".into())).child(div().flex_none().text_size(px(13.)).text_color(rgb(MUTED)).max_w(px(200.)).child(mic)).child(wbtn("sound-settings", "Change", false).on_click(|_, _, _| {
+            let _ = std::process::Command::new("explorer").arg("ms-settings:sound").spawn();
+        })).into_any_element());
         out.push(
             card()
                 .mb(px(3.))
@@ -728,11 +934,11 @@ impl Home {
             div()
                 .flex()
                 .gap(px(8.))
-                .child(wbtn("delete-cancel", "Keep", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                .child(wbtn("delete-cancel", "Cancel", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.confirm_delete = false;
                     cx.notify();
                 })))
-                .child(wbtn("delete-confirm", "Delete everything", true).bg(rgb(0xC42B1C)).hover(|s| s.bg(rgb(0xA32416))).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                .child(wbtn("delete-confirm", format!("Delete {count} dictation{}", if count == 1 { "" } else { "s" }), true).bg(rgb(0xC42B1C)).hover(|s| s.bg(rgb(0xA32416))).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.confirm_delete = false;
                     this.voxa.update(cx, |v, cx| v.delete_history(cx));
                 })))
@@ -746,7 +952,7 @@ impl Home {
             card()
                 .mb(px(3.))
                 .child(icon(I_DELETE, 18.).w(px(20.)))
-                .child(row_text("Delete history", format!("{count} dictation{}, {mb:.1} MB", if count == 1 { "" } else { "s" })))
+                .child(row_text("Delete history", format!("{count} dictation{} and {mb:.1} MB of recordings on this PC", if count == 1 { "" } else { "s" })))
                 .child(delete)
                 .into_any_element(),
         );
@@ -760,127 +966,249 @@ impl Home {
                 .child(toggle("autostart", autostart).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.set_autostart(!v.start_with_windows, cx)))))
                 .into_any_element(),
         );
+        out.push(section("Help").into_any_element());
         out.push(
-            div()
-                .mt(px(16.))
-                .flex()
-                .items_center()
-                .gap(px(12.))
-                .text_size(px(12.))
-                .text_color(rgb(MUTED))
-                .child(format!("Voxa {}", env!("CARGO_PKG_VERSION")))
-                .child(div().id("rerun-setup").text_color(rgb(INK)).cursor_pointer().child("Run setup again").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::Setup(1), cx))))
+            card()
+                .mb(px(3.))
+                .child(icon('\u{E897}', 18.).w(px(20.)))
+                .child(row_text("Take the tour again", "How to dictate, what the strip shows, and your shortcut".into()))
+                .child(wbtn("rerun-setup", "Start tour", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::Setup(1), cx))))
                 .into_any_element(),
         );
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon('\u{E946}', 18.).w(px(20.)))
+                .child(row_text(&format!("Voxa {}", env!("CARGO_PKG_VERSION")), "Your words go to ChatGPT only while you dictate. Everything else stays on this PC.".into()))
+                .child(wbtn("open-logs", "Open data folder", false).on_click(cx.listener(|_, _: &ClickEvent, _, _| {
+                    let _ = std::process::Command::new("explorer").arg(crate::data_dir()).spawn();
+                })))
+                .into_any_element(),
+        );
+        out.push(div().h(px(24.)).into_any_element());
         out
     }
 
     fn setup(&mut self, step: u8, cx: &mut Context<Self>) -> AnyElement {
-        let v = self.voxa.read(cx);
-        let shortcut = v.settings.hotkey.clone();
-        let session = v.flow.readiness().session;
-        let p = |t: String| div().mt(px(10.)).text_size(px(14.)).line_height(px(21.)).text_color(rgb(0x3D3D3D)).child(t);
-        let h2 = |t: &str| div().mt(px(10.)).text_size(px(24.)).line_height(px(32.)).font_weight(FontWeight::SEMIBOLD).child(t.to_string());
-        let mut body: Vec<AnyElement> = vec![div().text_size(px(12.)).text_color(rgb(MUTED)).child(format!("Step {step} of 4")).into_any_element()];
-        let mut can_next = true;
+        let (shortcut, session, signing_in, mic, levels, latest) = {
+            let v = self.voxa.read(cx);
+            let latest = v.history.entries.iter().rev().find(|e| e.id > self.try_since && matches!(e.status, Status::Pasted | Status::Ready)).cloned();
+            (v.settings.hotkey.clone(), v.flow.readiness().session, v.signing_in, v.mic_name.clone(), v.levels.iter().copied().collect::<Vec<f32>>(), latest)
+        };
+        let p = |t: &str| div().mt(px(10.)).text_size(px(15.)).line_height(px(22.)).text_color(rgb(0x3D3D3D)).child(t.to_string());
+        let h2 = |t: &str| div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child(t.to_string());
+        let point = |glyph: char, title: &str, body: &str| {
+            div()
+                .flex()
+                .items_start()
+                .gap(px(14.))
+                .mt(px(14.))
+                .child(div().size(px(32.)).flex_none().rounded(px(8.)).bg(rgb(0xF3E7DE)).text_color(rgb(INK)).flex().items_center().justify_center().child(icon(glyph, 15.)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title.to_string()))
+                        .child(div().text_size(px(13.)).line_height(px(19.)).text_color(rgb(MUTED)).child(body.to_string())),
+                )
+        };
+        let mut body: Vec<AnyElement> = Vec::new();
+        let mut next: Option<&'static str> = Some("Next");
         match step {
             1 => {
-                body.push(h2("Voxa writes through your ChatGPT account").into_any_element());
-                body.push(p("Press a shortcut in any app, talk, and Voxa pastes the text where your cursor is. Your voice goes to ChatGPT to become text; your history stays on this PC.".into()).into_any_element());
-                let state = match session {
-                    Session::Valid => div().flex().items_center().gap(px(8.)).text_color(rgb(0x0F7B0F)).child(icon(I_CHECK, 14.)).child("Signed in to ChatGPT"),
-                    _ => div().flex().items_center().gap(px(12.)).child(wbtn("setup-signin", "Sign in to ChatGPT", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.sign_in(cx))))).child(
-                        div().text_size(px(13.)).text_color(rgb(MUTED)).child(if session == Session::Unknown { "Checking..." } else { "A sign-in window opens" }),
-                    ),
-                };
-                body.push(div().mt(px(20.)).text_size(px(14.)).child(state).into_any_element());
+                body.push(div().font_family("Fraunces NonWonky").font_weight(FontWeight::SEMIBOLD).text_size(px(56.)).line_height(px(60.)).text_color(rgb(INK)).child("voxa").into_any_element());
+                let demo: Vec<f32> = (0..crate::QUILL_CYCLE).map(|i| demo_level(i)).collect();
+                body.push(div().mt(px(6.)).child(crate::ink_line_faded(demo, crate::QUILL_CYCLE - 1, false)).into_any_element());
+                body.push(h2("Your voice, written down.").mt(px(18.)).into_any_element());
+                body.push(p("Press a shortcut in any app, talk, and your words appear where your cursor is. No window to switch to, nothing to copy.").into_any_element());
+                body.push(point(I_KEYBOARD, "Works in every app", "Chats, email, documents, code: anywhere you can type.").into_any_element());
+                body.push(point(I_ACCOUNT, "Uses your ChatGPT account", "Your words are written out by ChatGPT. No extra account, no extra cost.").into_any_element());
+                body.push(point(I_KEEP, "Your history stays on this PC", "Every dictation is kept here, so nothing you say is ever lost.").into_any_element());
+                next = Some("Get started");
             }
             2 => {
+                body.push(h2("Sign in to ChatGPT").into_any_element());
+                body.push(p("Voxa sends what you say to ChatGPT, through your own account, to turn it into text.").into_any_element());
+                body.push(point(I_MIC, "Only while you dictate", "The microphone is used only while the Voxa strip is showing. Nothing is sent at any other time.").into_any_element());
+                body.push(point(I_KEEP, "History stays here", "Text and recordings are saved on this PC, not in your ChatGPT chats. Delete them any time in Settings.").into_any_element());
+                body.push(point(I_ACCOUNT, "You stay in control", "Sign out any time in Settings. Voxa never sees your password: you sign in on ChatGPT's own page.").into_any_element());
+                let state = match (session, signing_in) {
+                    (Session::Valid, _) => div().flex().items_center().gap(px(10.)).px(px(14.)).py(px(10.)).rounded(px(4.)).bg(rgb(0xDFF6DD)).text_color(rgb(0x0E5C0E)).child(icon(I_CHECK, 14.)).child("Signed in to ChatGPT. You're ready to dictate."),
+                    (_, true) => div().flex().items_center().gap(px(10.)).text_color(rgb(MUTED)).child(icon('\u{E895}', 14.)).child("Finish signing in in the window that opened. Voxa carries on by itself."),
+                    _ => div().flex().items_center().gap(px(12.)).child(wbtn("setup-signin", "Sign in to ChatGPT", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.sign_in(cx))))).child(
+                        div().text_size(px(13.)).text_color(rgb(MUTED)).child(if session == Session::Unknown { "Checking your sign-in..." } else { "Opens ChatGPT's sign-in page in a small window" }),
+                    ),
+                };
+                body.push(div().mt(px(22.)).text_size(px(14.)).child(state).into_any_element());
+                if session != Session::Valid {
+                    next = Some("Not now");
+                }
+            }
+            3 => {
                 body.push(h2("Say something").into_any_element());
-                body.push(p("If the line moves, Voxa can hear you. Nothing is recorded or sent on this step.".into()).into_any_element());
-                let mic = v.mic_name.clone();
-                let levels: Vec<f32> = v.levels.iter().copied().collect();
+                body.push(p("If the line moves when you talk, Voxa can hear you. Nothing is recorded or sent on this step.").into_any_element());
                 let tick = levels.len().saturating_sub(1);
+                let heard = levels.iter().any(|l| *l > 0.2);
                 body.push(
                     div()
                         .mt(px(20.))
-                        .px(px(16.))
-                        .py(px(12.))
+                        .px(px(18.))
+                        .py(px(14.))
                         .bg(rgb(0xFFFFFF))
                         .border_1()
                         .border_color(rgba(CARD_BORDER))
-                        .rounded(px(4.))
+                        .rounded(px(6.))
                         .flex()
                         .items_center()
                         .gap(px(16.))
-                        .child(icon(I_MIC, 18.))
-                        .child(crate::ink_line(levels, tick))
-                        .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(mic))
+                        .child(icon(I_MIC, 18.).text_color(rgb(if heard { INK } else { MUTED })))
+                        .child(crate::ink_line_faded(levels, tick, false))
+                        .child(div().flex_1().text_size(px(12.)).text_color(rgb(MUTED)).child(mic))
+                        .into_any_element(),
+                );
+                body.push(
+                    div()
+                        .mt(px(14.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .text_size(px(13.))
+                        .text_color(rgb(MUTED))
+                        .child(if heard { "Sounds right." } else { "Is the line flat while you talk?" })
+                        .when(!heard, |d| {
+                            d.child(wbtn("mic-privacy", "Microphone privacy settings", false).h(px(28.)).text_size(px(13.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.open_mic_settings(cx)))))
+                                .child(wbtn("mic-sound", "Choose a microphone", false).h(px(28.)).text_size(px(13.)).on_click(|_, _, _| {
+                                    let _ = std::process::Command::new("explorer").arg("ms-settings:sound").spawn();
+                                }))
+                        })
                         .into_any_element(),
                 );
             }
-            3 => {
-                body.push(h2("Try it").into_any_element());
-                body.push(
-                    p(String::new())
+            4 => {
+                body.push(h2("Your shortcut").into_any_element());
+                body.push(p("Press it once to start, talk, then press it again to stop. Voxa writes it out and pastes it where your cursor is.").into_any_element());
+                let caps = div().mt(px(18.)).flex().items_center().gap(px(14.)).child(div().flex().gap(px(6.)).children(shortcut.split('+').map(|k| {
+                    div()
+                        .h(px(44.))
+                        .min_w(px(44.))
+                        .px(px(14.))
                         .flex()
-                        .flex_wrap()
                         .items_center()
-                        .gap(px(6.))
-                        .child("Open any app with a text box, like Notepad. Click in it, press")
-                        .child(keycaps(&shortcut))
-                        .child(", say a sentence, then press it again.")
+                        .justify_center()
+                        .rounded(px(6.))
+                        .bg(rgb(0xFFFFFF))
+                        .border_1()
+                        .border_b_4()
+                        .border_color(rgba(0x0000002A))
+                        .text_size(px(18.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(k.to_string())
+                })));
+                let caps = if self.capturing {
+                    caps.child(div().text_size(px(14.)).text_color(rgb(INK)).child("Press the new shortcut..."))
+                } else {
+                    caps.child(wbtn("setup-change", "Change", false).on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.capturing = true;
+                        this.hotkey_error = None;
+                        this.voxa.update(cx, |v, _| v.pause_hotkey(true));
+                        window.focus(&this.focus);
+                        cx.notify();
+                    })))
+                };
+                body.push(caps.into_any_element());
+                if let Some(err) = self.hotkey_error.clone() {
+                    body.push(div().mt(px(6.)).text_size(px(12.)).text_color(rgb(0xC42B1C)).child(err).into_any_element());
+                }
+                // Practice: dictate with this window in front; the text lands here.
+                let (text, done) = match &latest {
+                    Some(e) => (e.text.clone(), true),
+                    None => (format!("Try it now: press {shortcut}, say a sentence, then press it again. Your words appear here."), false),
+                };
+                body.push(
+                    div()
+                        .mt(px(22.))
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(rgba(if done { 0x0F7B0F66 } else { 0x0000001F }))
+                        .bg(rgb(0xFFFFFF))
+                        .child(div().px(px(14.)).py(px(8.)).border_b_1().border_color(rgba(CARD_BORDER)).text_size(px(12.)).text_color(rgb(MUTED)).child("Practice"))
+                        .child(div().px(px(14.)).py(px(14.)).min_h(px(64.)).text_size(px(15.)).line_height(px(22.)).text_color(rgb(if done { TEXT } else { MUTED })).child(text))
                         .into_any_element(),
                 );
-                let first = v.history.entries.iter().rev().find(|e| e.id > self.try_since && matches!(e.status, Status::Pasted | Status::Ready));
-                body.push(match first {
-                    Some(e) => div()
-                        .mt(px(20.))
-                        .px(px(16.))
-                        .py(px(12.))
-                        .bg(rgb(0xDFF6DD))
-                        .rounded(px(4.))
+                if done {
+                    body.push(div().mt(px(10.)).flex().items_center().gap(px(8.)).text_size(px(13.)).text_color(rgb(0x0E5C0E)).child(icon(I_CHECK, 13.)).child("That's it. It works the same in every app.").into_any_element());
+                }
+            }
+            5 => {
+                body.push(h2("The strip tells you what's happening").into_any_element());
+                body.push(p("It sits just above the taskbar while you dictate and never takes your cursor away.").into_any_element());
+                let row = |dot: u32, glyph: char, title: &str, body: &str| {
+                    div()
                         .flex()
-                        .gap(px(10.))
-                        .text_size(px(14.))
-                        .child(icon(I_CHECK, 14.).text_color(rgb(0x0F7B0F)).mt(px(3.)))
-                        .child(div().flex_1().child(format!("It worked. Voxa wrote \"{}\" into {}.", e.text, e.app)))
-                        .into_any_element(),
-                    None => div().mt(px(20.)).text_size(px(14.)).text_color(rgb(MUTED)).child("Waiting for your first dictation. You can also skip this.").into_any_element(),
-                });
+                        .items_start()
+                        .gap(px(14.))
+                        .mt(px(12.))
+                        .child(div().mt(px(2.)).size(px(24.)).flex_none().rounded_full().bg(rgb(dot)).text_color(rgb(0xFFFFFF)).flex().items_center().justify_center().child(icon(glyph, 11.)))
+                        .child(div().flex_1().min_w(px(0.)).child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title.to_string())).child(div().text_size(px(13.)).line_height(px(19.)).text_color(rgb(MUTED)).child(body.to_string())))
+                };
+                body.push(row(0xE5483D, I_MIC, "Listening", "The quill writes while you talk. Press the shortcut again to finish, or Esc to cancel; nothing is sent if you cancel.").into_any_element());
+                body.push(row(INK, '\u{E895}', "Writing it out", "ChatGPT is turning your words into text. Long pauses are trimmed first, so long dictations work too.").into_any_element());
+                body.push(row(0x0F7B0F, I_CHECK, "Pasted", "The text is in the app you were using. It's also in History.").into_any_element());
+                body.push(row(0x9D5D00, '!', "Needs you", "Signed out, offline, or you moved to another app: Voxa keeps your words and tells you the one thing to do. Nothing is lost.").into_any_element());
             }
             _ => {
                 body.push(h2("You're set").into_any_element());
-                body.push(p(format!("Voxa lives in the tray. Press {shortcut} in any app to dictate. Open this window from the tray icon to see your history.")).into_any_element());
-                let autostart = v.start_with_windows;
+                body.push(p(&format!("Voxa lives in the tray, next to the clock. Press {shortcut} in any app to dictate. Click the Voxa icon to open this window and find everything you've said.")).into_any_element());
                 body.push(
-                    card()
-                        .mt(px(20.))
-                        .child(icon(I_POWER, 18.).w(px(20.)))
-                        .child(div().flex_1().text_size(px(14.)).child("Start Voxa when I sign in to Windows"))
-                        .child(toggle("setup-autostart", autostart).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.set_autostart(!v.start_with_windows, cx)))))
+                    div()
+                        .mt(px(18.))
+                        .flex()
+                        .items_center()
+                        .gap(px(12.))
+                        .px(px(14.))
+                        .py(px(10.))
+                        .rounded(px(6.))
+                        .bg(rgb(0x202020))
+                        .text_color(rgb(0xFFFFFF))
+                        .text_size(px(12.))
+                        .child(icon('\u{E70E}', 10.).text_color(rgb(0xBBBBBB)))
+                        .child(div().size(px(18.)).rounded(px(4.)).bg(rgb(INK)).flex().items_center().justify_center().text_size(px(11.)).font_family("Fraunces NonWonky").child("v"))
+                        .child("Voxa is in the tray. If you can't see it, click the arrow and drag it onto the taskbar.")
                         .into_any_element(),
                 );
-                can_next = true;
+                let on = self.autostart_choice.unwrap_or(true);
+                body.push(
+                    card()
+                        .mt(px(16.))
+                        .child(icon(I_POWER, 18.).w(px(20.)))
+                        .child(div().flex_1().child(div().text_size(px(14.)).child("Start Voxa when I sign in to Windows")).child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Recommended, so the shortcut always works")))
+                        .child(toggle("setup-autostart", on).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.autostart_choice = Some(!on);
+                            cx.notify();
+                        })))
+                        .into_any_element(),
+                );
+                next = Some("Finish");
             }
         }
-        let next_label = if step >= 4 { "Finish" } else { "Next" };
+
+        let progress = div().flex().gap(px(4.)).children((1..=SETUP_STEPS).map(|i| div().flex_1().h(px(4.)).rounded(px(2.)).bg(rgb(if i <= step { INK } else { 0xE7E1DA }))));
         let buttons = div()
             .flex()
-            .justify_end()
+            .items_center()
             .gap(px(8.))
-            .px(px(32.))
-            .py(px(20.))
+            .px(px(36.))
+            .py(px(18.))
             .bg(rgb(NAV_BG))
             .border_t_1()
             .border_color(rgba(CARD_BORDER))
+            .child(div().flex_1().text_size(px(12.)).text_color(rgb(MUTED)).child(format!("{step} of {SETUP_STEPS}")))
             .when(step > 1, |d| d.child(wbtn("setup-back", "Back", false).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.go(Page::Setup(step - 1), cx)))))
-            .when(step < 4, |d| d.child(wbtn("setup-skip", "Skip setup", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.finish_setup(cx)))))
-            .when(can_next, |d| {
-                d.child(wbtn("setup-next", next_label, true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    if step >= 4 { this.finish_setup(cx) } else { this.go(Page::Setup(step + 1), cx) }
-                })))
-            });
+            .children(next.map(|label| {
+                wbtn("setup-next", label, label != "Not now").on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if step >= SETUP_STEPS { this.finish_setup(cx) } else { this.go(Page::Setup(step + 1), cx) }
+                }))
+            }));
         div()
             .size_full()
             .flex()
@@ -889,23 +1217,51 @@ impl Home {
             .bg(rgb(NAV_BG))
             .child(
                 div()
-                    .w(px(640.))
-                    .rounded(px(8.))
+                    .w(px(720.))
+                    .rounded(px(10.))
                     .overflow_hidden()
                     .bg(rgb(PAGE_BG))
                     .border_1()
                     .border_color(rgba(0x0000001A))
                     .shadow_lg()
-                    .child(div().px(px(32.)).pt(px(28.)).pb(px(24.)).min_h(px(300.)).children(body))
+                    .child(
+                        div()
+                            .px(px(36.))
+                            .pt(px(22.))
+                            .flex()
+                            .items_center()
+                            .gap(px(16.))
+                            .child(div().flex_1().child(progress))
+                            .when(step < SETUP_STEPS, |d| {
+                                d.child(div().id("skip-tour").text_size(px(13.)).text_color(rgb(MUTED)).cursor_pointer().hover(|s| s.text_color(rgb(INK))).child("Skip tour").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.finish_setup(cx))))
+                            }),
+                    )
+                    .child(div().px(px(36.)).pt(px(26.)).pb(px(28.)).min_h(px(440.)).children(body))
                     .child(buttons),
             )
             .into_any_element()
     }
 
     fn finish_setup(&mut self, cx: &mut Context<Self>) {
-        self.voxa.update(cx, |v, cx| v.update_settings(|s| s.onboarded = true, cx));
+        let autostart = self.autostart_choice.take();
+        self.voxa.update(cx, |v, cx| {
+            if let Some(on) = autostart.or(if v.settings.onboarded { None } else { Some(true) }) {
+                if on != v.start_with_windows {
+                    v.set_autostart(on, cx);
+                }
+            }
+            v.update_settings(|s| s.onboarded = true, cx)
+        });
         self.go(Page::History, cx);
     }
+}
+
+/// A made-up speech envelope for the welcome screen's ink line: two phrases and a pause.
+fn demo_level(i: usize) -> f32 {
+    let t = i as f32;
+    let phrase = |c: f32, w: f32| (1.0 - ((t - c) / w).powi(2)).max(0.0);
+    let v = phrase(28.0, 18.0) * (0.55 + 0.45 * (t * 0.9).sin().abs()) + phrase(72.0, 20.0) * (0.5 + 0.5 * (t * 1.3).cos().abs());
+    v.min(1.0)
 }
 
 fn fmt_thousands(n: usize) -> String {
@@ -992,5 +1348,14 @@ mod tests {
         assert_eq!(fmt_thousands(2418), "2,418");
         assert_eq!(fmt_thousands(999), "999");
         assert_eq!(fmt_thousands(1_000_000), "1,000,000");
+    }
+}
+
+/// Plain tooltip.
+struct Tip(&'static str);
+
+impl Render for Tip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().px(px(8.)).py(px(4.)).rounded(px(4.)).bg(rgb(0xFFFFFF)).border_1().border_color(rgba(0x00000026)).shadow_md().font_family("Segoe UI").text_size(px(12.)).text_color(rgb(TEXT)).child(self.0)
     }
 }
