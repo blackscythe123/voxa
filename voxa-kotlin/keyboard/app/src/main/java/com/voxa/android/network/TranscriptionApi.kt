@@ -1,4 +1,4 @@
-﻿package com.voxa.android.network
+package com.voxa.android.network
 
 import com.voxa.android.data.Prefs
 import kotlinx.coroutines.Dispatchers
@@ -16,8 +16,12 @@ object TranscriptionApi {
 
     private const val SESSION_URL = "https://chatgpt.com/api/auth/session"
     private const val TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe"
-    private const val UA =
+    private const val FALLBACK_UA =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+
+    // cf_clearance is bound to the User-Agent it was issued to, so API calls must
+    // reuse the sign-in WebView's UA or Cloudflare rejects the cookies.
+    private val UA: String get() = Prefs.get().getUserAgent() ?: FALLBACK_UA
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -54,23 +58,38 @@ object TranscriptionApi {
             .build()
 
         val response = client.newCall(request).execute()
-        if (response.code == 401 || response.code == 403) throw Exception("SESSION_EXPIRED")
-
         val body = response.body?.string() ?: throw Exception("Empty response")
-        // Cloudflare challenge returns HTML, not JSON
-        if (body.trimStart().startsWith("<")) throw Exception("CLOUDFLARE_CHALLENGE")
+        // Cloudflare blocks come back as a 403 HTML page. Check that first, or a
+        // blocked device is misread as an expired session and sent to sign-in.
+        if (body.trimStart().startsWith("<") || response.header("cf-mitigated") != null) {
+            throw Exception("CLOUDFLARE_CHALLENGE")
+        }
+        if (response.code == 401 || response.code == 403) throw Exception("SESSION_EXPIRED")
 
         val json = try { JSONObject(body) } catch (e: Exception) { throw Exception("Invalid response") }
         json.optString("accessToken").takeIf { it.isNotEmpty() }
             ?: throw Exception("NO_ACCESS_TOKEN")
     }
 
-    suspend fun validateSession(): Boolean = try {
+    enum class SessionStatus { VALID, INVALID, UNREACHABLE }
+
+    /**
+     * Distinguishes a dead session from a network problem. Only a real auth
+     * rejection (or no stored session) is INVALID; DNS failures, timeouts and
+     * Cloudflare challenges are UNREACHABLE so callers don't bounce the user to
+     * the login screen just because chatgpt.com couldn't be reached.
+     */
+    suspend fun checkSession(): SessionStatus = try {
         getAccessToken()
-        true
-    } catch (_: Exception) {
-        false
+        SessionStatus.VALID
+    } catch (e: Exception) {
+        when (e.message) {
+            "NOT_LOGGED_IN", "SESSION_EXPIRED", "NO_ACCESS_TOKEN" -> SessionStatus.INVALID
+            else -> SessionStatus.UNREACHABLE
+        }
     }
+
+    suspend fun validateSession(): Boolean = checkSession() == SessionStatus.VALID
 
     suspend fun transcribeAudio(filePath: String): String = withContext(Dispatchers.IO) {
         val accessToken = getAccessToken()

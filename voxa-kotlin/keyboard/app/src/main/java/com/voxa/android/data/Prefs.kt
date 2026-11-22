@@ -17,6 +17,10 @@ class Prefs(context: Context) {
     fun getCookieHeader(): String? = sp.getString(KEY_COOKIE_HEADER, null)
     fun setCookieHeader(value: String) = sp.edit().putString(KEY_COOKIE_HEADER, value).apply()
 
+    /** The exact WebView User-Agent the session (and Cloudflare's cf_clearance) was issued to. */
+    fun getUserAgent(): String? = sp.getString(KEY_USER_AGENT, null)
+    fun setUserAgent(value: String) = sp.edit().putString(KEY_USER_AGENT, value).apply()
+
     fun clearSession() = sp.edit()
         .remove(KEY_SESSION_COOKIE)
         .remove(KEY_COOKIE_HEADER)
@@ -90,5 +94,6 @@ class Prefs(context: Context) {
         private const val KEY_LANGUAGE = "voxa_language"
         private const val KEY_SAMPLE_RATE = "voxa_sample_rate"
         private const val KEY_MODEL = "voxa_model"
+        private const val KEY_USER_AGENT = "voxa_user_agent"
     }
 }

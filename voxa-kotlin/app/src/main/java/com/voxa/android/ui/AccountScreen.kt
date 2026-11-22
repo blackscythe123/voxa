@@ -31,7 +31,7 @@ fun AccountScreen(onBack: () -> Unit, onLogout: () -> Unit) {
     var lastResultMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        sessionValid = TranscriptionApi.validateSession()
+        sessionValid = TranscriptionApi.checkSession() != TranscriptionApi.SessionStatus.INVALID
     }
 
     SubpageScaffold(title = "Account", onBack = onBack) {
@@ -93,9 +93,13 @@ fun AccountScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                             refreshing = true
                             lastResultMessage = null
                             scope.launch {
-                                val ok = TranscriptionApi.validateSession()
-                                sessionValid = ok
-                                lastResultMessage = if (ok) "Session is live." else "Session expired. Sign in again."
+                                val status = TranscriptionApi.checkSession()
+                                sessionValid = status != TranscriptionApi.SessionStatus.INVALID
+                                lastResultMessage = when (status) {
+                                    TranscriptionApi.SessionStatus.VALID -> "Session is live."
+                                    TranscriptionApi.SessionStatus.INVALID -> "Session expired. Sign in again."
+                                    TranscriptionApi.SessionStatus.UNREACHABLE -> "Couldn't reach ChatGPT. Check your connection and try again."
+                                }
                                 refreshing = false
                             }
                         }

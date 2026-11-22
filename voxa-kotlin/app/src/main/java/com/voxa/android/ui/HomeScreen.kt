@@ -49,7 +49,8 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        sessionValid = TranscriptionApi.validateSession()
+        // Unreachable (offline, DNS) is not the same as expired; only flag a real rejection.
+        sessionValid = TranscriptionApi.checkSession() != TranscriptionApi.SessionStatus.INVALID
         checkImeEnabled()
     }
 

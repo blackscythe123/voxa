@@ -97,7 +97,10 @@ private fun VoxaNavHost() {
         sessionResolved = if (cookie == null) {
             Screen.Auth
         } else {
-            if (TranscriptionApi.validateSession()) Screen.Home else Screen.Auth
+            // Only a rejected session goes back to sign-in. If chatgpt.com is
+            // unreachable (no network, DNS, Cloudflare) keep the saved session
+            // and open Home, which shows its own "session" status.
+            if (TranscriptionApi.checkSession() == TranscriptionApi.SessionStatus.INVALID) Screen.Auth else Screen.Home
         }
     }
 

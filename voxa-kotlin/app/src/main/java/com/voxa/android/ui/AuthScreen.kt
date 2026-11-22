@@ -31,39 +31,31 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val LOGIN_URL = "https://chatgpt.com/auth/login"
-private const val CHROME_UA =
-    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
-    "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+// Use the device's real WebView engine version (a hardcoded Chrome version that
+// doesn't match the engine trips Cloudflare). Only the "; wv" token is removed,
+// because Google sign-in refuses embedded WebViews that advertise it.
+private fun signInUserAgent(context: android.content.Context): String =
+    android.webkit.WebSettings.getDefaultUserAgent(context).replace("; wv", "")
 
-// CSS injected into the ChatGPT auth WebView to vertically center the login form
-// (fixes "content jammed top 75%" complaint). Marketing-hiding is intentionally
-// narrow: only anchors pointing at /pricing or marketing.openai are hidden — the
-// earlier text-phrase scan nuked the whole login subtree, so it has been removed.
-private const val AUTH_CLEANUP_PAYLOAD = """
-(function() {
-    var STYLE_ID = '__voxa_auth_cleanup_style';
-    var css = ''
-        + 'html, body { background: #FFFFFF !important; min-height: 100vh !important; overflow-x: hidden !important; }'
-        + 'body { display: flex !important; flex-direction: column !important; justify-content: center !important; }'
-        + '.__voxa_hidden { display: none !important; }';
-    if (!document.getElementById(STYLE_ID)) {
-        var s = document.createElement('style');
-        s.id = STYLE_ID;
-        s.textContent = css;
-        (document.head || document.documentElement).appendChild(s);
+/**
+ * NextAuth splits large session tokens across `__Secure-next-auth.session-token.0`,
+ * `.1`, ... cookies. Reassemble them in index order; fall back to the single
+ * unsplit cookie when ChatGPT didn't chunk it.
+ */
+internal fun extractSessionToken(cookieHeader: String): String? {
+    val base = "__Secure-next-auth.session-token"
+    val pairs = cookieHeader.split(";").mapNotNull {
+        val kv = it.trim()
+        val i = kv.indexOf('=')
+        if (i <= 0) null else kv.substring(0, i) to kv.substring(i + 1).trim()
     }
-
-    var BAD_HREF = /\/pricing|marketing\.openai|openai\.com\/chatgpt\/(plus|pro|team|enterprise)/i;
-    function hideMarketingLinks() {
-        var anchors = document.querySelectorAll('a[href]');
-        for (var i = 0; i < anchors.length; i++) {
-            var href = anchors[i].getAttribute('href') || '';
-            if (BAD_HREF.test(href)) anchors[i].classList.add('__voxa_hidden');
-        }
-    }
-    hideMarketingLinks();
-})();
-"""
+    pairs.firstOrNull { it.first == base }?.second?.takeIf { it.isNotEmpty() }?.let { return it }
+    val chunks = pairs.mapNotNull { (k, v) ->
+        k.removePrefix("$base.").takeIf { k.startsWith("$base.") }?.toIntOrNull()?.let { it to v }
+    }.sortedBy { it.first }
+    if (chunks.isEmpty() || chunks.first().first != 0) return null
+    return chunks.joinToString("") { it.second }.takeIf { it.isNotEmpty() }
+}
 
 @Composable
 fun AuthScreen(onLoginSuccess: () -> Unit) {
@@ -84,12 +76,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 val cookieHeader = CookieManager.getInstance().getCookie("https://chatgpt.com") ?: return@repeat
                 if (!cookieHeader.contains("__Secure-next-auth.session-token")) return@repeat
 
-                val sessionToken = cookieHeader.split(";")
-                    .map { it.trim() }
-                    .find { it.startsWith("__Secure-next-auth.session-token") }
-                    ?.substringAfter("=")
-                    ?.trim()
-                    ?: return@repeat
+                val sessionToken = extractSessionToken(cookieHeader) ?: return@repeat
 
                 VoxaApp.prefs.setSessionCookie(sessionToken)
                 VoxaApp.prefs.setCookieHeader(cookieHeader)
@@ -197,12 +184,18 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
                         val wv = WebView(ctx)
+                        // AndroidView defaults to WRAP_CONTENT, which puts WebView in
+                        // "size to content" mode with a 0px layout viewport: every vh/dvh/svh
+                        // and html{height:100%} resolves to 0 and ChatGPT's sign-in page
+                        // collapses to a blank screen. Force a real, fixed-size viewport.
+                        wv.layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
                         wv.settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
                             builtInZoomControls = false
                             displayZoomControls = false
                             setSupportZoom(false)
@@ -210,7 +203,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             @Suppress("DEPRECATION")
                             allowFileAccessFromFileURLs = false
-                            userAgentString = CHROME_UA
+                            userAgentString = signInUserAgent(ctx).also { VoxaApp.prefs.setUserAgent(it) }
                         }
                         CookieManager.getInstance().apply {
                             setAcceptCookie(true)
@@ -219,9 +212,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                         wv.webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 loading = false
-                                if (url != null && url.contains("chatgpt.com/auth", ignoreCase = true)) {
-                                    view?.evaluateJavascript(AUTH_CLEANUP_PAYLOAD, null)
-                                }
                                 url?.let { tryCaptureSession(it) }
                             }
                             override fun shouldOverrideUrlLoading(
