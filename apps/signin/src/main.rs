@@ -20,7 +20,12 @@ const LOGIN_URL: &str = "https://chatgpt.com/auth/login";
 const SESSION_COOKIE: &str = "__Secure-next-auth.session-token";
 
 fn data_dir() -> PathBuf {
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa-next")
+    let root = if cfg!(target_os = "macos") {
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join("Library").join("Application Support")
+    } else {
+        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
+    };
+    root.join("voxa-next")
 }
 
 fn main() {

@@ -237,3 +237,14 @@ mod icon_probe {
     }
 }
 
+
+/// "https://www.mangafire.to/home?x=1" -> "mangafire.to". None for search text or local addresses.
+#[cfg_attr(windows, allow(dead_code))]
+pub fn url_host(address: &str) -> Option<String> {
+    let a = address.trim();
+    let a = a.split_once("://").map(|(_, r)| r).unwrap_or(a);
+    let host = a.split(['/', '?', '#']).next()?.split('@').next_back()?.split(':').next()?.to_ascii_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
+    let ok = host.contains('.') && !host.starts_with('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    ok.then_some(host)
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>app.voxa.desktop</string>
+  <key>CFBundleName</key><string>Voxa</string>
+  <key>CFBundleDisplayName</key><string>Voxa</string>
+  <key>CFBundleExecutable</key><string>Voxa</string>
+  <key>CFBundleIconFile</key><string>Voxa</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>VERSION</string>
+  <key>CFBundleVersion</key><string>VERSION</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <!-- Lives in the menu bar; the Voxa window shows in the Dock while it is open. -->
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Voxa records your voice while you dictate, to turn it into text.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Voxa asks your browser which website is open, so History can show where you dictated. Only the site name is kept.</string>
+</dict>
+</plist>

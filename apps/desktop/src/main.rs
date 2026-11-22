@@ -31,7 +31,6 @@ use gpui::{
     WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, canvas, div, point, prelude::*, px, rgb,
     rgba, size,
 };
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -60,12 +59,21 @@ fn fake_mode() -> bool {
     std::env::var("VOXA_FAKE").is_ok_and(|v| !v.is_empty())
 }
 
-/// %APPDATA%\voxa-next, or VOXA_DATA (tests use a throwaway folder so real history is untouched).
+/// Where the OS keeps per-user app data: %APPDATA% on Windows, ~/Library/Application Support on Mac.
+fn app_data_root() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join("Library").join("Application Support")
+    } else {
+        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
+    }
+}
+
+/// Voxa's data folder (voxa-next), or VOXA_DATA (tests use a throwaway folder so real history is untouched).
 pub(crate) fn data_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("VOXA_DATA") {
         return d.into();
     }
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa-next")
+    app_data_root().join("voxa-next")
 }
 
 /// Keep who is signed in for the Settings page, and their picture (fetched only when it changes).
@@ -105,7 +113,7 @@ fn now_ms() -> u64 {
 
 /// Where the current (Electron) Voxa saved its session. Used once, to carry a user's sign-in over.
 fn electron_dir() -> PathBuf {
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa")
+    app_data_root().join(if cfg!(target_os = "macos") { "Voxa" } else { "voxa" })
 }
 
 pub(crate) struct Voxa {
@@ -212,6 +220,10 @@ impl Voxa {
             .build()
             .ok();
         let mic_name = built.as_ref().map(|m| m.device_name().to_string()).unwrap_or_else(|_| "No microphone".into());
+        // macOS: pasting into other apps needs the Accessibility permission (asks once).
+        if !fake_mode() && !os::can_paste() {
+            os::log("paste needs the Accessibility permission (System Settings > Privacy & Security)");
+        }
 
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_millis(40)).await;
@@ -583,7 +595,7 @@ impl Voxa {
                 .detach();
             }
             Effect::OpenMicSettings => {
-                let _ = std::process::Command::new("explorer").arg("ms-settings:privacy-microphone").spawn();
+                os::open_mic_privacy();
             }
             Effect::SaveJob { job } => {
                 if let Some(j) = self.flow.job(job) {
@@ -1195,6 +1207,7 @@ fn run_window(tour: bool) {
         return; // already open: it was asked to come to the front
     }
     Application::new().run(move |cx: &mut App| {
+        os::show_in_dock();
         let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
         let backend = cx.new(Backend::new);
         let first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::Home };
@@ -1208,9 +1221,9 @@ fn run_window(tour: bool) {
             ..Default::default()
         };
         let opened = cx.open_window(options, move |window, cx| {
-            if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
-                os::light_caption(w.hwnd.get() as _);
-                os::bring_to_front(w.hwnd.get() as _);
+            if let Some(w) = os::window_ptr(window) {
+                os::light_caption(w);
+                os::bring_to_front(w);
             }
             cx.new(|cx| Home::new(backend, first, window, cx))
         });
@@ -1223,8 +1236,8 @@ fn run_window(tour: bool) {
                     if os::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         let r = h.update(cx, |_, window, _| {
                             window.activate_window();
-                            if let Ok(RawWindowHandle::Win32(w)) = window.window_handle().map(|h| h.as_raw()) {
-                                os::bring_to_front(w.hwnd.get() as _);
+                            if let Some(w) = os::window_ptr(window) {
+                                os::bring_to_front(w);
                             }
                         });
                         if r.is_err() {
@@ -1272,9 +1285,9 @@ fn main() {
         };
         let prev = os::foreground() as usize;
         let opened = cx.open_window(options, move |window, cx| {
-            if let Ok(RawWindowHandle::Win32(h)) = window.window_handle().map(|h| h.as_raw()) {
-                os::make_overlay(h.hwnd.get() as _);
-                os::STRIP.store(h.hwnd.get() as usize, std::sync::atomic::Ordering::Relaxed);
+            if let Some(h) = os::window_ptr(window) {
+                os::make_overlay(h);
+                os::STRIP.store(h as usize, std::sync::atomic::Ordering::Relaxed);
             }
             cx.new(Voxa::new)
         });

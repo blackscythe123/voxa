@@ -1,0 +1,84 @@
+name: Desktop
+
+# Builds Voxa for Windows (installer) and macOS (universal .dmg) from the same Rust code.
+#  - Every push and pull request: test, build both, attach the files to the run.
+#  - Push a tag like v0.4.0: also publish a GitHub release with both files.
+
+on:
+  push:
+    branches: [main, mac-port]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --release
+      - name: ONNX runtime (silence trimming)
+        shell: pwsh
+        run: scripts/fetch-onnxruntime.ps1
+      - name: Build
+        run: cargo build --release -p voxa-desktop -p voxa-signin
+      - name: Installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress | Out-Null
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q installer\voxa.iss
+          Get-ChildItem target\dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxa-windows
+          path: target/dist/*.exe
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --release
+      - name: Build and package (universal .app and .dmg)
+        run: scripts/package-mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxa-macos
+          path: target/dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Voxa $GITHUB_REF_NAME" --generate-notes

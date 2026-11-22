@@ -7600,11 +7600,15 @@ name = "voxa-desktop"
 version = "0.3.3"
 dependencies = [
  "chrono",
+ "cocoa 0.26.0",
+ "core-foundation 0.10.0",
+ "core-graphics 0.24.0",
  "cpal",
  "global-hotkey",
  "gpui",
  "hound",
  "image",
+ "objc",
  "png 0.17.16",
  "raw-window-handle",
  "reqwest",

@@ -5,6 +5,9 @@
 use std::ffi::c_void;
 
 pub use crate::common::*;
+
+pub const START_AT_LOGIN: &str = "Start with Windows";
+pub const START_AT_LOGIN_LONG: &str = "Start Voxa when I sign in to Windows";
 pub use crate::tab::{coding_agent, domain_of};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -554,6 +557,9 @@ pub fn window_ptr(w: &gpui::Window) -> Option<HWND> {
         _ => None,
     }
 }
+
+/// The window process shows in the taskbar on its own; nothing to do on Windows.
+pub fn show_in_dock() {}
 
 /// Windows can always paste with SendInput; nothing to ask for.
 pub fn can_paste() -> bool {

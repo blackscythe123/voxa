@@ -1241,8 +1241,8 @@ impl Home {
         };
         let sub = self.hotkey_error.clone().unwrap_or_else(|| "Press to start, press again to stop. Esc cancels while recording.".into());
         out.push(card().mb(px(3.)).child(icon(I_KEYBOARD, 18.).w(px(20.))).child(row_text("Shortcut", sub)).child(shortcut_right).into_any_element());
-        out.push(card().mb(px(3.)).child(icon(I_MIC, 18.).w(px(20.))).child(row_text("Microphone", "Voxa uses the Windows default microphone. Change it in Windows sound settings.".into())).child(div().flex_none().text_size(px(13.)).text_color(rgb(MUTED)).max_w(px(200.)).child(mic)).child(wbtn("sound-settings", "Change", false).on_click(|_, _, _| {
-            let _ = std::process::Command::new("explorer").arg("ms-settings:sound").spawn();
+        out.push(card().mb(px(3.)).child(icon(I_MIC, 18.).w(px(20.))).child(row_text("Microphone", "Voxa uses the default microphone. Change it in your sound settings.".into())).child(div().flex_none().text_size(px(13.)).text_color(rgb(MUTED)).max_w(px(200.)).child(mic)).child(wbtn("sound-settings", "Change", false).on_click(|_, _, _| {
+            crate::os::open_sound_settings();
         })).into_any_element());
         out.push(
             card()
@@ -1321,7 +1321,7 @@ impl Home {
             card()
                 .mb(px(3.))
                 .child(icon(I_POWER, 18.).w(px(20.)))
-                .child(row_text("Start with Windows", "Starts quietly in the tray when you sign in".into()))
+                .child(row_text(crate::os::START_AT_LOGIN, "Starts quietly in the tray when you sign in".into()))
                 .child(toggle("autostart", autostart).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.set_autostart(!v.start_with_windows, cx)))))
                 .into_any_element(),
         );
@@ -1340,7 +1340,7 @@ impl Home {
                 .child(icon('\u{E946}', 18.).w(px(20.)))
                 .child(row_text(&format!("Voxa {}", env!("CARGO_PKG_VERSION")), "Your words go to ChatGPT only while you dictate. Everything else stays on this PC.".into()))
                 .child(wbtn("open-logs", "Open data folder", false).on_click(cx.listener(|_, _: &ClickEvent, _, _| {
-                    let _ = std::process::Command::new("explorer").arg(crate::data_dir()).spawn();
+                    crate::os::open(crate::data_dir().as_os_str());
                 })))
                 .into_any_element(),
         );
@@ -1437,7 +1437,7 @@ impl Home {
                         .when(!heard, |d| {
                             d.child(wbtn("mic-privacy", "Microphone privacy settings", false).h(px(28.)).text_size(px(13.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.open_mic_settings(cx)))))
                                 .child(wbtn("mic-sound", "Choose a microphone", false).h(px(28.)).text_size(px(13.)).on_click(|_, _, _| {
-                                    let _ = std::process::Command::new("explorer").arg("ms-settings:sound").spawn();
+                                    crate::os::open_sound_settings();
                                 }))
                         })
                         .into_any_element(),
@@ -1540,7 +1540,7 @@ impl Home {
                     card()
                         .mt(px(16.))
                         .child(icon(I_POWER, 18.).w(px(20.)))
-                        .child(div().flex_1().child(div().text_size(px(14.)).child("Start Voxa when I sign in to Windows")).child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Recommended, so the shortcut always works")))
+                        .child(div().flex_1().child(div().text_size(px(14.)).child(crate::os::START_AT_LOGIN_LONG)).child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Recommended, so the shortcut always works")))
                         .child(toggle("setup-autostart", on).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.autostart_choice = Some(!on);
                             cx.notify();

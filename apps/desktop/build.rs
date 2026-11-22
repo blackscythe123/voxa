@@ -2,12 +2,18 @@
 // (resource 1, which GPUI uses for its windows; Explorer and the taskbar use it too).
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
-    let mut res = winresource::WindowsResource::new();
-    res.set_icon("assets/icon.ico");
-    res.set("FileDescription", "Voxa");
-    res.set("ProductName", "Voxa");
-    if let Err(e) = res.compile() {
-        println!("cargo:warning=icon not embedded: {e}");
+    #[cfg(windows)]
+    {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/icon.ico");
+        res.set("FileDescription", "Voxa");
+        res.set("ProductName", "Voxa");
+        if let Err(e) = res.compile() {
+            println!("cargo:warning=icon not embedded: {e}");
+        }
+    }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return; // the ONNX runtime is bundled by the macOS packaging script
     }
 
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/onnxruntime/onnxruntime.dll");

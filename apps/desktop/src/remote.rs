@@ -122,7 +122,7 @@ impl Backend {
     }
 
     pub fn open_mic_settings(&mut self, _: &mut Context<Self>) {
-        let _ = std::process::Command::new("explorer").arg("ms-settings:privacy-microphone").spawn();
+        os::open_mic_privacy();
     }
 
     pub fn pause_hotkey(&mut self, pause: bool) {
@@ -198,7 +198,7 @@ impl Backend {
         let path = self.history.get(id)?.audio.clone().filter(|a| a.exists())?;
         // Recordings from the old Voxa are .webm: open them in the default player.
         if path.extension().is_some_and(|e| e != "wav") {
-            let _ = std::process::Command::new("explorer").arg(&path).spawn();
+            os::open(path.as_os_str());
             return None;
         }
         let secs = hound::WavReader::open(&path).ok().map(|r| r.duration() as f32 / r.spec().sample_rate as f32)?;
@@ -207,7 +207,7 @@ impl Backend {
 
     pub fn show_in_folder(&self, id: u64) {
         if let Some(a) = self.history.get(id).and_then(|e| e.audio.clone()) {
-            let _ = std::process::Command::new("explorer").arg(format!("/select,{}", a.display())).spawn();
+            os::reveal(&a);
         }
     }
 

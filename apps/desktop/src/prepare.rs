@@ -5,16 +5,22 @@ use std::sync::OnceLock;
 
 use crate::os;
 
+/// The ONNX runtime library Silero needs, next to the app.
+#[cfg(windows)]
+const ORT_LIB: &str = "onnxruntime.dll";
+#[cfg(target_os = "macos")]
+const ORT_LIB: &str = "libonnxruntime.dylib";
+
 /// Takes shorter than this are sent as recorded.
 const TRIM_FROM_SECS: f32 = 30.0;
 
 fn silero_ready() -> bool {
     static READY: OnceLock<bool> = OnceLock::new();
     *READY.get_or_init(|| {
-        let mut dll = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("onnxruntime.dll")));
+        let mut dll = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(ORT_LIB)));
         // Test binaries live in cargo's build dir, not beside the app.
         if cfg!(test) && !dll.as_ref().is_some_and(|d| d.exists()) {
-            dll = Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/onnxruntime/onnxruntime.dll"));
+            dll = Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/onnxruntime").join(ORT_LIB));
         }
         match dll.map(|d| voxa_vad::init(&d)) {
             Some(Ok(())) => true,
