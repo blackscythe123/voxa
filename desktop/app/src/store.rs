@@ -154,11 +154,13 @@ pub struct Settings {
     pub onboarded: bool,
     /// The old (Electron) Voxa's history and shortcut were brought over.
     pub imported_old_voxa: bool,
+    /// Hold the shortcut while talking; a quick tap still toggles.
+    pub hold_to_talk: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false }
     }
 }
 

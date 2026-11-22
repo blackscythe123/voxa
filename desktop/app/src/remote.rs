@@ -102,6 +102,11 @@ impl Backend {
         std::fs::read(data_dir().join("account.json")).ok().and_then(|b| serde_json::from_slice(&b).ok())
     }
 
+    /// What the strip is doing now (from the tray process).
+    pub fn live_state(&self) -> String {
+        self.live.state.clone()
+    }
+
     pub fn readiness(&self) -> Readiness {
         self.live.readiness()
     }

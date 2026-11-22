@@ -136,6 +136,8 @@ pub(crate) struct Voxa {
     job_context: Arc<std::sync::Mutex<HashMap<JobId, (String, String)>>>,
     /// The ChatGPT sign-in window is open.
     pub(crate) signing_in: bool,
+    /// When the shortcut went down, while it is held.
+    holding: Option<Instant>,
     menu_open: MenuId,
     menu_quit: MenuId,
     rec_started: Instant,
@@ -261,10 +263,25 @@ impl Voxa {
                         cx.notify();
                     }
                     while let Ok(ev) = GlobalHotKeyEvent::receiver().try_recv() {
+                        // Hold to talk: letting go after holding finishes the dictation. A quick
+                        // tap leaves it on, and the next press stops it, as in toggle mode.
+                        if ev.id == v.main_key.id() && ev.state == HotKeyState::Released {
+                            let held = std::mem::replace(&mut v.holding, None);
+                            if v.settings.hold_to_talk && held.is_some_and(|t| t.elapsed() > Duration::from_millis(400)) && matches!(v.flow.state(), State::Recording { .. }) {
+                                os::log("shortcut released: finishing");
+                                v.handle(Event::Stop, cx);
+                            }
+                            continue;
+                        }
                         if ev.state != HotKeyState::Pressed {
                             continue;
                         }
                         if ev.id == v.main_key.id() {
+                            // Key repeat while held must not toggle again.
+                            if v.holding.is_some() {
+                                continue;
+                            }
+                            v.holding = Some(Instant::now());
                             if v.mic_testing {
                                 v.mic_test(false, cx);
                             }
@@ -349,6 +366,7 @@ impl Voxa {
             hotkey_paused: false,
             job_context: Arc::new(std::sync::Mutex::new(HashMap::new())),
             signing_in: false,
+            holding: None,
             menu_open: open_item.id().clone(),
             menu_quit: quit_item.id().clone(),
             rec_started: Instant::now(),
@@ -685,7 +703,7 @@ impl Voxa {
         let Ok(exe) = std::env::current_exe() else { return };
         let mut c = std::process::Command::new(exe);
         c.arg("--window");
-        if page == Some(Page::Setup(1)) {
+        if page.is_none() && !self.settings.onboarded {
             c.arg("--tour");
         }
         match c.spawn() {
@@ -698,7 +716,16 @@ impl Voxa {
     fn publish(&mut self) {
         let (session, online, mic) = link::Live::from_readiness(self.flow.readiness());
         let live_ids = self.job_entries.values().copied().filter(|id| self.is_live(*id)).collect();
-        let live = link::Live { session, online, mic, mic_name: self.mic_name.clone(), signing_in: self.signing_in, live_ids, hotkey_result: self.hotkey_result.clone() };
+        let state = match self.flow.state() {
+            State::Recording { .. } => "recording",
+            State::Transcribing { .. } | State::Delivering { .. } => "writing",
+            State::Delivered { .. } => "pasted",
+            State::NeedsYou(_) => "needs",
+            State::Blocked(_) => "blocked",
+            State::Idle => "idle",
+        }
+        .to_string();
+        let live = link::Live { session, online, mic, mic_name: self.mic_name.clone(), signing_in: self.signing_in, live_ids, hotkey_result: self.hotkey_result.clone(), state };
         if self.published.as_ref() != Some(&live) {
             link::write_live(&live);
             self.published = Some(live);
@@ -1231,7 +1258,8 @@ fn run_window(tour: bool) {
         input::bind_keys(cx);
         let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
         let backend = cx.new(Backend::new);
-        let mut first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::Home };
+        let start_tour = tour || !backend.read(cx).settings.onboarded;
+        let mut first = Page::Home;
         // Developer switch: VOXA_PAGE=words | history | insights | settings | detail (newest dictation).
         if let Ok(p) = std::env::var("VOXA_PAGE") {
             first = match p.as_str() {
@@ -1262,6 +1290,11 @@ fn run_window(tour: bool) {
         match opened {
             Ok(h) => {
                 os::log(&format!("window opened on {first:?}"));
+                if let Some(n) = std::env::var("VOXA_TOUR").ok().and_then(|n| n.parse().ok()) {
+                    let _ = h.update(cx, |home, _, cx| home.start_tour_at(n, cx));
+                } else if start_tour && std::env::var_os("VOXA_PAGE").is_none() {
+                    let _ = h.update(cx, |home, _, cx| home.start_tour(cx));
+                }
                 // Another "Open Voxa" while open: come to the front.
                 cx.spawn(async move |cx| loop {
                     cx.background_executor().timer(Duration::from_millis(150)).await;
