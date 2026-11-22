@@ -3,6 +3,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod prepare;
 mod audio;
 mod stand_in;
 mod win;
@@ -289,8 +290,8 @@ impl Voxa {
                         .background_executor()
                         .spawn(async move {
                             let Some(session) = session else { return Err(TranscribeError::SignedOut) };
-                            let Some(audio) = path.and_then(|p| std::fs::read(p).ok()) else { return Err(TranscribeError::Server(0)) };
-                            gpt.transcribe(&session, audio, "recording.wav", "audio/wav")
+                            let Some(audio) = path.and_then(|p| prepare::audio_for_upload(&p)) else { return Err(TranscribeError::Server(0)) };
+                            gpt.transcribe(&session, audio, "recording.wav", "audio/wav").map(|t| prepare::finish_text(t, &data_dir()))
                         })
                         .await;
                     let result = match result {

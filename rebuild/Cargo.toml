@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/voxa-core", "crates/voxa-chatgpt", "apps/desktop", "apps/signin"]
+members = ["crates/voxa-core", "crates/voxa-chatgpt", "crates/voxa-vad", "apps/desktop", "apps/signin"]
 
 [workspace.package]
 edition = "2024"

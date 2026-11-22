@@ -18,6 +18,8 @@ pub mod error;
 pub mod flow;
 pub mod job;
 pub mod readiness;
+pub mod text;
+pub mod trim;
 
 pub use error::TranscribeError;
 pub use flow::{Effect, Event, Flow, Problem, State};

@@ -1,1 +1,3 @@
 target/
+# Fetched by scripts/fetch-onnxruntime.ps1 (pinned, Microsoft-signed), not committed.
+vendor/onnxruntime/*.dll
