@@ -746,8 +746,17 @@ impl Home {
                     .text_color(rgb(MUTED))
                     .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(time_label(e)))
                     .child(e.app.clone())
-                    .children(e.via.as_ref().map(|b| div().child(format!("in {b}"))))
-                    .children(e.started_in.as_ref().filter(|s| **s != e.app).map(|s| div().child(format!("from {s}"))))
+                    .children({
+                        // One line: "in Brave, from Gmail".
+                        let from = e.started_in.as_ref().filter(|s| **s != e.app);
+                        let line = match (e.via.as_ref(), from) {
+                            (Some(b), Some(f)) => Some(format!("in {b}, from {f}")),
+                            (Some(b), None) => Some(format!("in {b}")),
+                            (None, Some(f)) => Some(format!("from {f}")),
+                            _ => None,
+                        };
+                        line.map(|l| div().child(l))
+                    })
                     .children(note.map(|(n, _)| div().text_color(rgb(note_color)).child(n))),
             )
             .child(

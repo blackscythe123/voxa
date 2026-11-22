@@ -7606,6 +7606,7 @@ dependencies = [
  "hound",
  "png 0.17.16",
  "raw-window-handle",
+ "reqwest",
  "serde",
  "serde_json",
  "tray-icon",

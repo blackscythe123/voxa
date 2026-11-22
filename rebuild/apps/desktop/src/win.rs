@@ -213,15 +213,17 @@ const BROWSERS: &[(&str, &str)] = &[
     ("opera", "Opera"), ("vivaldi", "Vivaldi"), ("arc", "Arc"),
 ];
 
-/// Sites recognised from a browser tab's title: (text to find, name to show).
-const SITES: &[(&str, &str)] = &[
-    ("chatgpt", "ChatGPT"), ("gmail", "Gmail"), ("whatsapp", "WhatsApp"), ("slack", "Slack"),
-    ("claude", "Claude"), ("google docs", "Google Docs"), ("google sheets", "Google Sheets"),
-    ("google meet", "Google Meet"), ("notion", "Notion"), ("github", "GitHub"), ("linkedin", "LinkedIn"),
-    ("youtube", "YouTube"), ("outlook", "Outlook"), ("discord", "Discord"), ("telegram", "Telegram"),
-    ("messenger", "Messenger"), ("instagram", "Instagram"), ("reddit", "Reddit"), ("figma", "Figma"),
-    ("jira", "Jira"), ("microsoft teams", "Teams"), ("gemini", "Gemini"), ("perplexity", "Perplexity"),
-    (" / x", "X"),
+/// Sites recognised from a browser tab's title: (text to find, name to show, domain for its icon).
+const SITES: &[(&str, &str, &str)] = &[
+    ("chatgpt", "ChatGPT", "chatgpt.com"), ("gmail", "Gmail", "mail.google.com"), ("whatsapp", "WhatsApp", "whatsapp.com"),
+    ("slack", "Slack", "slack.com"), ("claude", "Claude", "claude.ai"), ("google docs", "Google Docs", "docs.google.com"),
+    ("google sheets", "Google Sheets", "sheets.google.com"), ("google meet", "Google Meet", "meet.google.com"),
+    ("notion", "Notion", "notion.so"), ("github", "GitHub", "github.com"), ("linkedin", "LinkedIn", "linkedin.com"),
+    ("youtube", "YouTube", "youtube.com"), ("outlook", "Outlook", "outlook.live.com"), ("discord", "Discord", "discord.com"),
+    ("telegram", "Telegram", "telegram.org"), ("messenger", "Messenger", "messenger.com"), ("instagram", "Instagram", "instagram.com"),
+    ("reddit", "Reddit", "reddit.com"), ("figma", "Figma", "figma.com"), ("jira", "Jira", "atlassian.com"),
+    ("microsoft teams", "Teams", "teams.microsoft.com"), ("gemini", "Gemini", "gemini.google.com"),
+    ("perplexity", "Perplexity", "perplexity.ai"), (" / x", "X", "x.com"),
 ];
 
 fn window_title(hwnd: HWND) -> String {
@@ -244,7 +246,43 @@ pub fn site_in_tab(hwnd: HWND) -> Option<String> {
 
 pub fn site_from_title(title: &str) -> Option<String> {
     let title = title.to_lowercase();
-    SITES.iter().find(|(k, _)| title.contains(k)).map(|(_, n)| n.to_string())
+    SITES.iter().find(|(k, _, _)| title.contains(k)).map(|(_, n, _)| n.to_string())
+}
+
+/// Fetch a known site's icon once (64 px PNG) and keep it with the app icons. Only the site's
+/// domain from the list above is sent, never the page. Nothing is fetched again once cached.
+pub fn cache_site_icon(site: &str) {
+    let Some(domain) = SITES.iter().find(|(_, n, _)| *n == site).map(|(_, _, d)| *d) else { return };
+    let out = icon_file(site);
+    if out.exists() {
+        return;
+    }
+    let site = site.to_string();
+    std::thread::spawn(move || {
+        let url = format!("https://www.google.com/s2/favicons?domain={domain}&sz=64");
+        let got = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .and_then(|c| c.get(url).send())
+            .ok()
+            .filter(|r| r.status().is_success())
+            .and_then(|r| r.bytes().ok());
+        match got {
+            // A real PNG only; a missing icon (404) keeps the letter badge.
+            Some(b) if b.starts_with(b"\x89PNG") => {
+                let _ = std::fs::create_dir_all(out.parent().unwrap());
+                let tmp = out.with_extension("tmp");
+                if std::fs::write(&tmp, &b).and_then(|_| std::fs::rename(&tmp, &out)).is_ok() {
+                    log(&format!("site icon cached for {site}"));
+                }
+            }
+            _ => log(&format!("no site icon for {site}")),
+        }
+    });
+}
+
+pub fn is_known_site(name: &str) -> bool {
+    SITES.iter().any(|(_, n, _)| *n == name)
 }
 
 #[cfg(test)]
@@ -283,6 +321,7 @@ pub fn app_name(hwnd: HWND) -> String {
         "firefox" => Some("Firefox"),
         "notepad" => Some("Notepad"),
         "code" => Some("VS Code"),
+        "explorer" => Some("File Explorer"),
         "outlook" | "olk" => Some("Outlook"),
         "winword" => Some("Word"),
         "teams" | "ms-teams" => Some("Teams"),

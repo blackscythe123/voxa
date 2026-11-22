@@ -127,6 +127,9 @@ impl Voxa {
             history.save();
         }
         let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.via.clone().unwrap_or_else(|| e.app.clone())).collect();
+        for site in history.entries.iter().map(|e| e.app.as_str()).filter(|a| win::is_known_site(a)) {
+            win::cache_site_icon(site);
+        }
         std::thread::spawn(move || win::cache_open_app_icons(apps));
         let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
         let main_key = settings.hotkey.parse::<HotKey>().unwrap_or_else(|_| {
@@ -192,6 +195,7 @@ impl Voxa {
                             let fg = win::foreground();
                             let target = Target { app: win::app_name(fg), window: fg as u64 };
                             win::cache_app_icon(fg, win::icon_owner(fg));
+                            win::cache_site_icon(&target.app);
                             win::log(&format!("hotkey in {}", win::describe(fg)));
                             v.handle(Event::Hotkey { target }, cx);
                         } else if ev.id == v.esc_key.id() {
@@ -424,6 +428,7 @@ impl Voxa {
                 } else {
                     let app = win::app_name(fg);
                     win::cache_app_icon(fg, win::icon_owner(fg));
+                    win::cache_site_icon(&app);
                     Delivery::TargetChanged(Target { app, window: fg as u64 })
                 };
                 self.handle(Event::Delivered { job, result }, cx);
