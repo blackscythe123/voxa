@@ -1,0 +1,97 @@
+name: Desktop macOS build
+
+# Builds the universal macOS app (dmg + zip) on GitHub's Mac runners.
+#  - Pull requests that touch the desktop app: build only; the files are attached to the run.
+#  - Push a tag like desktop-mac-v0.2.6: build and publish a GitHub release with the dmg and zip.
+#  - Run manually (Actions > Desktop macOS build > Run workflow): build, optionally publish.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "build/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/desktop-mac.yml"
+  push:
+    tags:
+      - "desktop-mac-v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a release (tag desktop-mac-v<package.json version>)"
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark the release as a pre-release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build universal dmg and zip
+        env:
+          # No Developer ID yet: scripts/adhoc-sign.js ad-hoc signs the app so macOS keeps the
+          # microphone and Accessibility grants. Stop electron-builder looking for a certificate.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run build:mac -- --publish never
+
+      - name: Check the app
+        run: |
+          APP=$(find dist -maxdepth 3 -name "Voxa.app" | head -1)
+          echo "app: $APP"
+          codesign --verify --deep --strict "$APP"
+          codesign -d --entitlements - "$APP" 2>&1 | grep -q "com.apple.security.device.audio-input"
+          lipo -archs "$APP/Contents/MacOS/Voxa"
+          ls -lh dist/*.dmg dist/*.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxa-macos-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/desktop-mac-v') || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || 'true' }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="$GITHUB_REF_NAME"
+          case "$TAG" in desktop-mac-v*) ;; *) TAG="desktop-mac-v$VERSION" ;; esac
+          FLAGS=""
+          [ "$PRERELEASE" = "true" ] && FLAGS="--prerelease"
+          {
+            echo "Voxa for macOS, universal (Apple Silicon and Intel), built by GitHub Actions from ${GITHUB_SHA::7}."
+            echo
+            echo "1. Download \`Voxa-$VERSION-universal.dmg\` and drag Voxa to Applications."
+            echo "2. The app is not notarized yet. The first time, right-click Voxa in Applications and choose Open, then Open again. After that it opens normally."
+            echo "3. Allow the microphone, and Accessibility (System Settings > Privacy & Security) so Voxa can paste."
+          } > notes.md
+          gh release create "$TAG" dist/*.dmg dist/*.zip --title "Voxa Desktop v$VERSION (macOS)" --notes-file notes.md --target "$GITHUB_SHA" $FLAGS
