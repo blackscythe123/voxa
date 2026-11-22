@@ -79,10 +79,11 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
         }
         if n > 0 {
             let rms = (sum / n as f32).sqrt();
-            // Decibel scale, like an audio meter: -50 dB (room) .. -15 dB (loud) -> 0..1.
+            // Decibel scale, like an audio meter: -52 dB (room) .. -24 dB (normal speech up close) -> 0..1.
+            // Was -15 dB at the top, which only shouting reached.
             // Measured speech here: soft 0.016 (-36 dB), normal 0.037 (-29 dB), loud 0.07 (-23 dB).
             let db = 20.0 * rms.max(1e-6).log10();
-            LEVEL.store(((db + 50.0) / 35.0).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+            LEVEL.store(((db + 52.0) / 28.0).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
             let p = f32::from_bits(shared.peak.load(Ordering::Relaxed)).max(rms);
             shared.peak.store(p.to_bits(), Ordering::Relaxed);
         }

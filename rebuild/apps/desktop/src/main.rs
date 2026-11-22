@@ -119,9 +119,12 @@ impl Voxa {
                         }
                     }
                     if matches!(v.flow.state(), State::Recording { .. }) {
-                        let lvl = if fake_mode() { stand_in::level(v.frame as f32 * 0.35) } else { audio::level() };
+                        let raw = if fake_mode() { stand_in::level(v.frame as f32 * 0.35) } else { audio::level() };
+                        // Rises at once with the voice, settles over ~0.3 s, so the ink doesn't flicker.
+                        let last = v.levels.back().copied().unwrap_or(0.0);
+                        let lvl = raw.max(last * 0.88);
                         v.levels.push_back(lvl);
-                        while v.levels.len() > 90 {
+                        while v.levels.len() > QUILL_CYCLE {
                             v.levels.pop_front();
                         }
                     }
@@ -497,31 +500,96 @@ fn glyph(state: &State, frame: u64) -> AnyElement {
     .into_any_element()
 }
 
-fn ink_line(levels: Vec<f32>) -> AnyElement {
+/// Ticks per quill pass: 100 x 40 ms = 4 s, the old overlay's rhythm.
+const QUILL_CYCLE: usize = 100;
+
+/// The old overlay's quill (viewBox 0 0 16 16), as cubic/line segments. Nib tip is at (2, 15.6).
+const QUILL_NIB: (f32, f32) = (3.0, 15.2);
+
+fn quill_point(x: f32, y: f32, scale: f32, angle: f32, at: gpui::Point<gpui::Pixels>) -> gpui::Point<gpui::Pixels> {
+    let (dx, dy) = ((x - QUILL_NIB.0) * scale, (y - QUILL_NIB.1) * scale);
+    let (s, c) = angle.sin_cos();
+    point(at.x + px(dx * c - dy * s), at.y + px(dx * s + dy * c))
+}
+
+/// The writing quill: glides across every 4 s, leaving an ink line whose waves follow the voice.
+/// `levels` are this pass's smoothed mic levels (0..1), one per 40 ms tick; `tick` is the position
+/// in the pass.
+fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
     let ink: Hsla = rgb(INK).into();
+    let pen: Hsla = rgb(0x2D2418).into();
     canvas(
         |_, _, _| {},
         move |b, _, window, _| {
-            let mid = b.origin.y + b.size.height / 2.;
             let w = f32::from(b.size.width);
-            let mut p = PathBuilder::stroke(px(2.));
-            // Newest level on the right; older speech scrolls left. Alternate up and down like a pen stroke.
-            let n = 90usize;
-            let pad = n.saturating_sub(levels.len());
-            p.move_to(point(b.origin.x, mid));
-            for i in 1..=n {
-                let x = w * i as f32 / n as f32;
-                let lvl = if i < pad { 0.0 } else { levels.get(i - pad).copied().unwrap_or(0.0) };
-                let y = if i % 2 == 0 { lvl } else { -lvl } * 12.;
-                p.line_to(point(b.origin.x + px(x), mid + px(y)));
+            let base = b.origin.y + px(f32::from(b.size.height) * 0.68);
+            let n = QUILL_CYCLE as f32;
+            // Quiet speech should still move the ink: lift the low end of the level curve.
+            let amp = |lvl: f32| 1.6 + lvl.clamp(0.0, 1.0).powf(0.6) * 7.5;
+            let wave = |frac: f32| (frac * std::f32::consts::TAU * 2.0).sin();
+            let at = |k: usize| {
+                let lvl = |i: usize| levels.get(i).copied().unwrap_or(0.0);
+                // A little neighbour smoothing so the stroke is a curve, not a zigzag.
+                let l = (lvl(k.saturating_sub(1)) + 2.0 * lvl(k) + lvl(k + 1)) / 4.0;
+                let frac = k as f32 / n;
+                (b.origin.x + px(frac * w), base - px(wave(frac) * amp(l)))
+            };
+
+            let p_now = tick as f32 / n;
+            // Fade in at the start of a pass and out at its end, like the old overlay.
+            let alpha = (p_now / 0.06).min(1.0).min((1.0 - p_now) / 0.08).clamp(0.0, 1.0);
+
+            // Ink trail, from the left edge up to the nib.
+            if tick >= 1 {
+                let mut path = PathBuilder::stroke(px(1.6));
+                let (x0, y0) = at(0);
+                path.move_to(point(x0, y0));
+                for k in 1..=tick.min(levels.len().saturating_sub(1)) {
+                    let (x, y) = at(k);
+                    path.line_to(point(x, y));
+                }
+                if let Ok(path) = path.build() {
+                    window.paint_path(path, ink.opacity(0.9 * alpha));
+                }
             }
-            if let Ok(p) = p.build() {
-                window.paint_path(p, ink);
+
+            // The quill, nib on the head of the line; it tilts with the stroke (-15 deg up, -9 down)
+            // and leans a little further when you speak up.
+            let (hx, hy) = at(tick.min(levels.len().saturating_sub(1)));
+            let lvl = levels.get(tick).copied().unwrap_or(0.0);
+            let deg = -12.0 - 3.0 * wave(p_now) - 4.0 * lvl;
+            let (sc, ang, head) = (1.45, deg.to_radians(), point(hx, hy));
+            let q = |x: f32, y: f32| quill_point(x, y, sc, ang, head);
+            let mut body = PathBuilder::fill();
+            body.move_to(q(12.5, 1.5));
+            body.cubic_bezier_to(q(5.5, 13.0), q(9.0, 4.0), q(6.5, 8.0));
+            body.line_to(q(4.5, 14.5));
+            body.line_to(q(4.0, 15.0));
+            body.cubic_bezier_to(q(9.5, 11.0), q(6.0, 14.5), q(8.0, 13.0));
+            body.cubic_bezier_to(q(12.5, 1.5), q(11.5, 8.5), q(13.0, 5.0));
+            body.close();
+            if let Ok(path) = body.build() {
+                window.paint_path(path, pen.opacity(alpha));
+            }
+            let mut nib = PathBuilder::fill();
+            nib.move_to(q(4.0, 15.0));
+            nib.line_to(q(2.0, 15.6));
+            nib.line_to(q(3.0, 14.0));
+            nib.close();
+            if let Ok(path) = nib.build() {
+                window.paint_path(path, pen.opacity(alpha));
+            }
+            // Spine highlight down the feather.
+            let mut spine = PathBuilder::stroke(px(0.7));
+            spine.move_to(q(12.2, 2.0));
+            spine.cubic_bezier_to(q(5.5, 13.0), q(9.5, 4.5), q(7.0, 8.5));
+            if let Ok(path) = spine.build() {
+                window.paint_path(path, gpui::hsla(0.08, 0.3, 0.75, 0.55 * alpha));
             }
         },
     )
-    .w(px(180.))
-    .h(px(28.))
+    .w(px(200.))
+    .h(px(36.))
     .into_any_element()
 }
 
@@ -547,7 +615,10 @@ impl Render for Voxa {
                 let app = self.flow.job(*job).map(|j| j.target.app.clone()).unwrap_or_default();
                 let secs = self.rec_started.elapsed().as_secs();
                 row.push(div().text_size(px(12.)).text_color(rgb(0x5F5F5F)).child(app).into_any_element());
-                row.push(ink_line(self.levels.iter().copied().collect()));
+                // This pass's levels: the last (tick + 1) ticks.
+                let tick = self.frame as usize % QUILL_CYCLE;
+                let pass: Vec<f32> = self.levels.iter().skip(self.levels.len().saturating_sub(tick + 1)).copied().collect();
+                row.push(ink_line(pass, tick));
                 row.push(div().w(px(36.)).child(format!("{}:{:02}", secs / 60, secs % 60)).into_any_element());
                 if let Some(t) = &text {
                     if t.title != "Listening" {
@@ -645,15 +716,24 @@ fn main() {
             }
             cx.new(Voxa::new)
         });
-        if let Err(e) = opened {
+        if let Err(e) = &opened {
             win::log(&format!("FAIL open_window: {e}"));
         }
         // GPUI shows (and activates) the window once; give focus back and hide until the hotkey.
         win::give_focus_back(prev as _);
         // Hide only after the first frame is painted, or the strip comes back blank later.
+        let demo = std::env::var_os("VOXA_DEMO_RECORD").is_some() && fake_mode();
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_millis(500)).await;
             win::strip_visible(false);
+            // Dev only (with VOXA_FAKE): start a stand-in recording without touching the keyboard,
+            // so the strip can be screen-recorded while someone is using the PC.
+            if let (true, Ok(handle)) = (demo, opened) {
+                cx.background_executor().timer(Duration::from_millis(400)).await;
+                let fg = win::foreground();
+                let target = Target { app: win::app_name(fg), window: fg as u64 };
+                let _ = handle.update(cx, |v, _, cx| v.handle(Event::Hotkey { target }, cx));
+            }
         })
         .detach();
     });
