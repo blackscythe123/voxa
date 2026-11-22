@@ -275,8 +275,12 @@ fn toggle(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
         )
 }
 
-/// A coloured square with the app's initial (no emoji, no third-party logos).
+/// The app's real icon (cached from its exe), or a coloured square with its initial.
 fn app_badge(app: &str, size: f32) -> gpui::Div {
+    let file = crate::win::icon_file(app);
+    if file.exists() {
+        return div().size(px(size)).flex_none().child(gpui::img(file).size(px(size)));
+    }
     const COLORS: [u32; 10] = [0x0078D4, 0x8F4C2C, 0x107C10, 0xC239B3, 0x5B5FC7, 0xCA5010, 0x038387, 0x8764B8, 0x486860, 0xE3008C];
     let known = [
         ("whatsapp", 0x25D366), ("slack", 0x4A154B), ("gmail", 0xEA4335), ("outlook", 0x0F6CBD), ("vs code", 0x007ACC), ("visual studio", 0x68217A),

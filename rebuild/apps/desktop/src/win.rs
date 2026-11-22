@@ -187,12 +187,13 @@ pub fn paste_here(text: &str) -> bool {
 }
 
 /// Friendly app name for a window: known apps by exe, otherwise the window title.
-pub fn app_name(hwnd: HWND) -> String {
+/// Full path of the exe that owns a window ("" if Windows won't say).
+pub fn exe_path(hwnd: HWND) -> String {
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
     use windows_sys::Win32::Foundation::CloseHandle;
     let mut pid = 0u32;
-    let exe = unsafe {
+    unsafe {
         GetWindowThreadProcessId(hwnd, &mut pid);
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if h.is_null() {
@@ -204,7 +205,11 @@ pub fn app_name(hwnd: HWND) -> String {
             CloseHandle(h);
             if ok != 0 { String::from_utf16_lossy(&buf[..len as usize]) } else { String::new() }
         }
-    };
+    }
+}
+
+pub fn app_name(hwnd: HWND) -> String {
+    let exe = exe_path(hwnd);
     let stem = std::path::Path::new(&exe).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
     let known = match stem.as_str() {
         "whatsapp" | "whatsapp.root" => Some("WhatsApp"),
@@ -345,5 +350,124 @@ pub fn stop_audio() {
     use windows_sys::Win32::Media::Audio::PlaySoundW;
     unsafe {
         PlaySoundW(std::ptr::null(), std::ptr::null_mut(), 0);
+    }
+}
+
+// ── app icons ────────────────────────────────────────────────────────────
+
+/// Where an app's icon is cached, keyed by the name History shows.
+pub fn icon_file(app: &str) -> std::path::PathBuf {
+    let slug: String = app.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    crate::data_dir().join("icons").join(format!("{}.png", slug.trim_matches('-')))
+}
+
+/// Save the real icon of the app that owns `hwnd` (64 px PNG), once per app. Runs off the UI thread.
+pub fn cache_app_icon(hwnd: HWND, app: String) {
+    let out = icon_file(&app);
+    if out.exists() || app.is_empty() {
+        return;
+    }
+    let exe = exe_path(hwnd);
+    if exe.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || match exe_icon_rgba(&exe, 64) {
+        Some((rgba, n)) => {
+            if write_png(&out, &rgba, n).is_ok() {
+                log(&format!("icon cached for {app}"));
+            }
+        }
+        None => log(&format!("no icon for {app}")),
+    });
+}
+
+fn exe_icon_rgba(exe: &str, size: u32) -> Option<(Vec<u8>, u32)> {
+    use windows_sys::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDIBits};
+    use windows_sys::Win32::UI::Shell::SHDefExtractIconW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+    unsafe {
+        let mut icon: HICON = std::ptr::null_mut();
+        let path = wide(exe);
+        if SHDefExtractIconW(path.as_ptr(), 0, 0, &mut icon, std::ptr::null_mut(), size) != 0 || icon.is_null() {
+            return None;
+        }
+        let mut info: ICONINFO = std::mem::zeroed();
+        let ok = GetIconInfo(icon, &mut info) != 0;
+        let mut out = None;
+        if ok && !info.hbmColor.is_null() {
+            let dc = CreateCompatibleDC(std::ptr::null_mut());
+            let mut bmi: BITMAPINFO = std::mem::zeroed();
+            bmi.bmiHeader = BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: size as i32,
+                biHeight: -(size as i32), // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                ..std::mem::zeroed()
+            };
+            let mut px = vec![0u8; (size * size * 4) as usize];
+            if GetDIBits(dc, info.hbmColor, 0, size, px.as_mut_ptr() as _, &mut bmi, DIB_RGB_COLORS) > 0 {
+                // BGRA -> RGBA. Old-style icons have no alpha: treat non-black as opaque.
+                let has_alpha = px.chunks(4).any(|p| p[3] != 0);
+                for p in px.chunks_mut(4) {
+                    p.swap(0, 2);
+                    if !has_alpha {
+                        p[3] = if p[0] | p[1] | p[2] != 0 { 255 } else { 0 };
+                    }
+                }
+                out = Some((px, size));
+            }
+            DeleteDC(dc);
+        }
+        if !info.hbmColor.is_null() {
+            DeleteObject(info.hbmColor as _);
+        }
+        if !info.hbmMask.is_null() {
+            DeleteObject(info.hbmMask as _);
+        }
+        DestroyIcon(icon);
+        out
+    }
+}
+
+fn write_png(out: &std::path::Path, rgba: &[u8], n: u32) -> std::io::Result<()> {
+    if let Some(d) = out.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = out.with_extension("tmp");
+    {
+        let f = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
+        let mut enc = png::Encoder::new(f, n, n);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(std::io::Error::other)?;
+        w.write_image_data(rgba).map_err(std::io::Error::other)?;
+    }
+    std::fs::rename(tmp, out)
+}
+
+/// Cache icons for apps in `wanted` (names already in History) that have a window open now, so
+/// rows saved before icons existed get theirs too.
+pub fn cache_open_app_icons(wanted: std::collections::HashSet<String>) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, IsWindowVisible};
+    unsafe extern "system" fn each(h: HWND, l: LPARAM) -> i32 {
+        unsafe {
+            let wanted = &*(l as *const std::collections::HashSet<String>);
+            if IsWindowVisible(h) != 0 {
+                let name = app_name(h);
+                if wanted.contains(&name) {
+                    cache_app_icon(h, name);
+                }
+            }
+        }
+        1
+    }
+    let missing: std::collections::HashSet<String> = wanted.into_iter().filter(|a| !icon_file(a).exists()).collect();
+    if missing.is_empty() {
+        return;
+    }
+    unsafe {
+        EnumWindows(Some(each), &missing as *const _ as LPARAM);
     }
 }
