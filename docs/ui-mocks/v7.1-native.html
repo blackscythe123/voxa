@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voxa v7.1, native screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block" rel="stylesheet" />
+<style>
+/* Voxa v7.1: v7 with every fix from docs/rebuild/03-ui-critique-v7.md, plus Insights and guided setup.
+   One scenario across every screen: it is 10:45, the ChatGPT session expired at 10:40, a Gmail dictation
+   at 10:42 is waiting, the keyboard is set up. Every surface shows the same sign-in state. */
+* { box-sizing:border-box; margin:0; padding:0; }
+html { background:#262423; }
+body { color:#eee; font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif; }
+.page { max-width:1320px; margin:0 auto; padding:40px 24px 90px; }
+.rv h1 { font:600 26px "Segoe UI Variable Display","Segoe UI"; color:#fff; }
+.rv p { margin-top:8px; font-size:14px; line-height:1.55; color:#cfcac4; max-width:900px; }
+.lbl { font:600 12px ui-monospace,Consolas,monospace; letter-spacing:.08em; text-transform:uppercase; color:#a39d95; margin:52px 0 6px; }
+.lbl-sub { font-size:13.5px; color:#bdb7af; margin-bottom:18px; max-width:880px; line-height:1.5; }
+.row { display:flex; gap:30px; flex-wrap:wrap; align-items:flex-start; }
+.cap { font-size:13px; color:#c2bcb4; margin-top:12px; line-height:1.45; max-width:390px; }
+.cap b { color:#fff; font-weight:600; }
+.ms { font-family:"Material Symbols Rounded"; font-weight:normal; font-size:24px; line-height:1; display:inline-block; font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24; }
+.ms.f { font-variation-settings:"FILL" 1,"wght" 400,"GRAD" 0,"opsz" 24; }
+.fi { font-family:"Segoe Fluent Icons","Segoe MDL2 Assets"; font-style:normal; line-height:1; display:inline-block; }
+.wordmark { font-family:"Fraunces",Georgia,serif !important; font-weight:600 !important; letter-spacing:-.02em; }
+
+/* ═══════ Android, Material 3, warm paper neutrals (fixes "blush") ═══════ */
+.device { width:390px; background:#141312; border-radius:46px; padding:9px; box-shadow:0 30px 60px rgba(0,0,0,.45),0 0 0 1.5px #3a3836 inset; }
+.screen {
+  --primary:#8F4C2C; --on-primary:#fff; --primary-c:#F6DCCB; --on-primary-c:#3A1A08;
+  --sec-c:#ECE3D8; --on-sec-c:#2A221A;
+  --surface:#FBF8F4; --s-low:#F6F2EC; --s-c:#F1ECE5; --s-high:#EBE5DD; --s-highest:#E5DED5;
+  --on-s:#1F1B16; --on-s-var:#4E463D; --outline:#80766B; --outline-var:#D3C9BD;
+  --error:#BA1A1A; --error-c:#FFDAD6; --on-error-c:#410002; --tert-c:#DCE6CF; --on-tert-c:#18210F;
+  width:372px; height:808px; border-radius:38px; overflow:hidden; background:var(--surface); color:var(--on-s); font-family:Roboto,system-ui; position:relative; display:flex; flex-direction:column; }
+.sbar { height:36px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 22px 0 26px; font:500 14px Roboto; position:relative; }
+.sbar .cam { position:absolute; left:50%; top:11px; width:13px; height:13px; margin-left:-6.5px; border-radius:50%; background:#0b0b0b; }
+.sbar .ic { display:flex; gap:4px; } .sbar .ic .ms { font-size:17px; }
+.gbar { height:22px; flex:none; display:grid; place-items:center; } .gbar i { width:108px; height:4px; border-radius:2px; background:#1d1b20; opacity:.85; display:block; }
+.icb { width:48px; height:48px; border-radius:50%; display:grid; place-items:center; color:var(--on-s-var); flex:none; }
+
+/* host chat app */
+.chat { flex:1; display:flex; flex-direction:column; background:#EFEAE2; min-height:0; }
+.chat .ab { height:60px; background:#F7F5F2; display:flex; align-items:center; gap:8px; padding:0 6px; }
+.chat .av { width:38px; height:38px; border-radius:50%; background:#7D5260; color:#fff; display:grid; place-items:center; font:500 16px Roboto; }
+.chat .nm { font:500 16px Roboto; color:#1d1b20; flex:1; } .chat .nm small { display:block; font:12px Roboto; color:#5f6368; }
+.chat .th { flex:1; padding:10px 12px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; }
+.chat .bb { align-self:flex-start; max-width:80%; background:#fff; border-radius:12px; border-top-left-radius:4px; padding:8px 12px; font:15px/1.35 Roboto; color:#1d1b20; box-shadow:0 1px 0 rgba(0,0,0,.07); }
+.chat .bb.me { align-self:flex-end; background:#D9FDD3; border-top-left-radius:12px; border-top-right-radius:4px; }
+.chat .bb small { font-size:11px; color:#667781; margin-left:8px; }
+.chat .cp { display:flex; gap:6px; padding:6px 8px; align-items:flex-end; }
+.chat .fld { flex:1; min-height:46px; border-radius:23px; background:#fff; display:flex; align-items:center; gap:8px; padding:0 14px; font:16px Roboto; color:#667781; }
+.chat .fld .t { color:#1d1b20; } .cur { display:inline-block; width:2px; height:20px; background:#00A884; vertical-align:-4px; margin-left:1px; }
+.chat .snd { width:46px; height:46px; border-radius:50%; background:#00A884; color:#fff; display:grid; place-items:center; }
+
+/* keyboard: flat keys, current proportions */
+.kb { flex:none; background:#EEE9E2; padding:0 3px 2px; }
+.kb-tool { height:48px; display:flex; align-items:center; gap:0; padding:0 2px; }
+.kb-tool .sug { flex:1; display:flex; justify-content:space-around; font:16px Roboto; color:#3A332B; }
+.kb-tool .sug span + span { border-left:1px solid #D9D1C6; padding-left:14px; }
+.kb-tool .tool { width:40px; height:40px; display:grid; place-items:center; color:#5A5045; }
+.vmic { position:relative; width:40px; height:40px; border-radius:20px; display:grid; place-items:center; color:var(--primary); }
+.vmic::after { content:""; position:absolute; right:6px; top:7px; width:8px; height:8px; border-radius:50%; background:#3F7A4C; border:1.5px solid #EEE9E2; }
+.vmic.warn::after { background:#C98A16; }
+.keys { padding:4px 0 2px; }
+.kr { display:flex; gap:4px; justify-content:center; margin-bottom:8px; }
+.k { flex:1 1 0; max-width:33px; height:48px; background:#FDFBF8; border-radius:6px; display:grid; place-items:center; font:21px Roboto; color:#1F1B16; }
+.kr.mid { padding:0 17px; }
+.k.w { max-width:none; flex:1.5 1 0; background:#DED6CB; } .k.w .ms { font-size:22px; }
+.k.sp { max-width:none; flex:4.6 1 0; font:14px Roboto; color:#5A5045; }
+.k.m { background:#DED6CB; font:500 14px Roboto; }
+.k.en { max-width:none; flex:1.4 1 0; background:var(--primary); color:#fff; }
+
+/* Voxa bar inside the keyboard toolbar (native toolbar height, keyboard surface) */
+.vb { height:48px; display:flex; align-items:center; gap:2px; padding:0 2px 0 6px; }
+.vb .mark { width:26px; height:26px; border-radius:7px; background:var(--primary); color:#fff; display:grid; place-items:center; flex:none; }
+.vb .mark svg { width:15px; height:15px; }
+.vb .ink { flex:1; min-width:0; height:28px; margin:0 6px; }
+.vb .ink path { fill:none; stroke:var(--primary); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.vb .ink circle { fill:var(--primary); }
+.vb .time { font:500 15px Roboto; font-variant-numeric:tabular-nums; color:#2A221A; padding:0 6px; }
+.vb .tx { flex:1; min-width:0; font:500 14px/1.25 Roboto; color:#2A221A; padding-left:8px; }
+.vb .tx small { display:block; font:400 12.5px Roboto; color:#5A5045; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vb .stop { width:40px; height:40px; border-radius:20px; background:var(--primary); color:#fff; display:grid; place-items:center; flex:none; }
+.vb .x { width:40px; height:40px; border-radius:20px; display:grid; place-items:center; color:#5A5045; flex:none; }
+.btn-f { height:36px; padding:0 16px; border-radius:18px; background:var(--primary); color:#fff; font:500 14px Roboto; display:inline-flex; align-items:center; gap:6px; border:none; flex:none; white-space:nowrap; }
+.btn-t { height:36px; padding:0 12px; border-radius:18px; background:none; color:var(--primary); font:500 14px Roboto; border:none; flex:none; white-space:nowrap; }
+.btn-o { height:40px; padding:0 20px; border-radius:20px; border:1px solid var(--outline); background:none; color:var(--primary); font:500 14px Roboto; }
+.spin { width:20px; height:20px; border-radius:50%; border:2.5px solid var(--primary); border-right-color:transparent; flex:none; margin:0 8px; }
+.okdot { width:26px; height:26px; border-radius:50%; background:var(--tert-c); color:var(--on-tert-c); display:grid; place-items:center; flex:none; } .okdot .ms { font-size:18px; }
+
+/* app screens */
+.lab { padding:8px 4px 0 16px; flex:none; display:flex; align-items:center; }
+.lab .grow { flex:1; }
+.lab-title { padding:12px 16px 16px; flex:none; }
+.lab-title .wordmark { font-size:32px; color:var(--on-s); }
+.lab-title .sub { font:14px Roboto; color:var(--on-s-var); margin-top:4px; }
+.content { flex:1; overflow:hidden; }
+.err-card { margin:0 16px 8px; background:var(--error-c); color:var(--on-error-c); border-radius:16px; padding:14px 16px; display:flex; gap:12px; }
+.err-card .h { font:500 15px/20px Roboto; } .err-card .s { font:13.5px/19px Roboto; margin-top:2px; color:#5C1511; }
+.err-card .acts { margin-top:10px; display:flex; gap:8px; } .err-card .btn-f { background:var(--error); }
+.sh { font:500 14px Roboto; color:var(--primary); padding:16px 16px 4px; }
+.li { display:flex; gap:16px; padding:12px 16px; align-items:flex-start; }
+.li .lead { width:40px; height:40px; border-radius:50%; display:grid; place-items:center; flex:none; color:#fff; font:500 15px Roboto; }
+.li .tx { flex:1; min-width:0; } .li .h { font:16px/24px Roboto; color:var(--on-s); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; } .li .s { font:14px/20px Roboto; color:var(--on-s-var); }
+.li .ms.tr { color:var(--on-s-var); font-size:22px; margin-top:8px; }
+.set .li { align-items:center; min-height:72px; }
+.set .li .ic { width:24px; color:var(--on-s-var); }
+.sw { width:52px; height:32px; border-radius:16px; background:var(--primary); position:relative; flex:none; } .sw::after { content:""; position:absolute; right:4px; top:4px; width:24px; height:24px; border-radius:50%; background:#fff; }
+.note-sm { font:12.5px/18px Roboto; color:var(--on-s-var); padding:12px 16px; }
+.pillwarn { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 8px; border-radius:6px; background:var(--error-c); color:var(--on-error-c); font:500 12px Roboto; }
+
+/* insights (Android + Windows share content) */
+.big { font:400 48px/1 Roboto; letter-spacing:-.5px; } .big small { font:400 16px Roboto; color:var(--on-s-var); margin-left:6px; letter-spacing:0; }
+.bars { display:flex; align-items:flex-end; gap:10px; height:120px; margin-top:12px; }
+.bars div { flex:1; border-radius:6px 6px 2px 2px; background:var(--s-highest); position:relative; }
+.bars div.on { background:var(--primary); }
+.bars-l { display:flex; gap:10px; margin-top:6px; } .bars-l span { flex:1; text-align:center; font:12px Roboto; color:var(--on-s-var); }
+.mcard { margin:0 16px 12px; background:var(--s-c); border-radius:16px; padding:16px; }
+
+/* onboarding */
+.ob { flex:1; display:flex; flex-direction:column; padding:28px 24px 20px; }
+.ob .step { font:500 12px Roboto; color:var(--on-s-var); letter-spacing:.06em; }
+.ob .hero { width:72px; height:72px; border-radius:20px; background:var(--primary-c); color:var(--on-primary-c); display:grid; place-items:center; margin:22px 0 22px; }
+.ob .hero .ms { font-size:36px; }
+.ob h2 { font:400 30px/36px Roboto; } .ob h2 .wordmark { font-size:30px; }
+.ob p { font:16px/24px Roboto; color:var(--on-s-var); margin-top:12px; }
+.ob .pts { margin-top:18px; display:flex; flex-direction:column; gap:14px; }
+.ob .pts div { display:flex; gap:12px; font:15px/21px Roboto; color:var(--on-s); } .ob .pts .ms { color:var(--primary); font-size:22px; }
+.ob .foot { margin-top:auto; display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+.ob .dots { margin-right:auto; display:flex; gap:6px; } .ob .dots i { width:8px; height:8px; border-radius:4px; background:var(--outline-var); display:block; } .ob .dots i.on { width:22px; background:var(--primary); }
+.btn-big { height:48px; padding:0 24px; border-radius:24px; background:var(--primary); color:#fff; font:500 15px Roboto; border:none; }
+.levelbox { margin-top:26px; height:96px; border-radius:16px; background:var(--s-c); display:flex; align-items:center; padding:0 16px; gap:12px; }
+.levelbox svg { flex:1; height:48px; } .levelbox path { fill:none; stroke:var(--primary); stroke-width:2.2; stroke-linecap:round; }
+.tryfield { margin-top:22px; border:1px solid var(--outline); border-radius:12px; padding:14px 16px; font:16px Roboto; min-height:56px; color:var(--on-s); }
+
+/* keyboard state crops */
+.crops { display:grid; grid-template-columns:repeat(2,390px); gap:22px 40px; }
+.crop { width:390px; border-radius:16px; overflow:hidden; background:#EEE9E2; padding:0 3px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+.crop .screen { width:auto; height:auto; border-radius:0; background:transparent; }
+.crop .peek { height:58px; overflow:hidden; padding-top:4px; }
+
+/* ═══════ Windows 11 ═══════ */
+.desk { position:relative; width:1240px; border-radius:10px; overflow:hidden; background:radial-gradient(120% 90% at 70% 10%, #8fb6e6 0%, #3f6fb4 38%, #1f3f7a 70%, #142a55 100%); box-shadow:0 20px 50px rgba(0,0,0,.5); }
+.taskbar { position:absolute; left:0; right:0; bottom:0; height:48px; background:rgba(243,243,243,.92); border-top:1px solid rgba(0,0,0,.06); display:flex; align-items:center; justify-content:center; gap:4px; }
+.taskbar .a { width:40px; height:40px; border-radius:5px; display:grid; place-items:center; position:relative; }
+.taskbar .a.on { background:rgba(0,0,0,.05); } .taskbar .a.on::after { content:""; position:absolute; bottom:2px; width:16px; height:3px; border-radius:2px; background:#005FB8; }
+.tray { position:absolute; right:10px; top:0; height:48px; display:flex; align-items:center; gap:10px; font-size:12px; color:#1a1a1a; }
+.tray .clock { text-align:right; line-height:1.3; }
+.tray .vx { position:relative; width:22px; height:22px; border-radius:6px; background:#8F4C2C; color:#fff; display:grid; place-items:center; }
+.tray .vx svg { width:13px; height:13px; }
+.tray .vx i { position:absolute; right:-3px; bottom:-3px; width:9px; height:9px; border-radius:50%; background:#C98A16; border:1.5px solid #f3f3f3; }
+.appicon { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; color:#fff; }
+.appicon .ms { font-size:14px; }
+.wa { position:absolute; left:150px; top:36px; width:940px; height:470px; background:#fff; color:#111b21; border-radius:8px; box-shadow:0 26px 60px rgba(0,0,0,.35),0 0 0 1px rgba(0,0,0,.12); overflow:hidden; display:flex; flex-direction:column; }
+.wa .tb { height:38px; background:#F3F3F3; display:flex; align-items:center; gap:10px; padding-left:14px; font-size:12px; }
+.caps { margin-left:auto; display:flex; } .caps span { width:46px; height:38px; display:grid; place-items:center; font-family:"Segoe Fluent Icons","Segoe MDL2 Assets"; font-size:10px; }
+.wa .body { flex:1; display:flex; min-height:0; }
+.wa .rail { width:56px; background:#F0F2F5; border-right:1px solid #e3e3e3; }
+.wa .list { width:290px; border-right:1px solid #eee; padding:12px; font-size:14px; }
+.wa .rowc { display:flex; gap:12px; padding:9px 6px; border-radius:8px; align-items:center; } .wa .rowc.on { background:#F0F2F5; }
+.wa .av { width:42px; height:42px; border-radius:50%; color:#fff; display:grid; place-items:center; font-weight:600; flex:none; }
+.wa .rowc small { display:block; color:#667781; font-size:13px; margin-top:2px; }
+.wa .conv { flex:1; display:flex; flex-direction:column; background:#EFEAE2; }
+.wa .ch { height:54px; background:#F0F2F5; display:flex; align-items:center; gap:12px; padding:0 16px; font-weight:600; font-size:15px; }
+.wa .msgs { flex:1; padding:16px 36px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; font-size:14px; }
+.wa .b { align-self:flex-start; background:#fff; padding:7px 10px; border-radius:8px; box-shadow:0 1px 0 rgba(0,0,0,.08); } .wa .b span { font-size:11px; color:#667781; margin-left:8px; }
+.wa .inp { height:60px; background:#F0F2F5; display:flex; align-items:center; padding:0 16px; } .wa .inp div { flex:1; height:42px; border-radius:8px; background:#fff; display:flex; align-items:center; padding:0 14px; font-size:14px; color:#3b4a54; }
+
+/* the strip: Fluent overlay (acrylic in the app; rendered here with a translucent fill + blur) */
+.strip { display:flex; align-items:center; gap:10px; height:52px; padding:0 8px 0 10px; border-radius:8px; color:#1a1a1a; font-size:14px;
+  background:rgba(249,247,244,.86); backdrop-filter:blur(30px) saturate(1.4); box-shadow:0 8px 24px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.08); }
+.strip .vmark { width:24px; height:24px; border-radius:6px; background:#8F4C2C; color:#fff; display:grid; place-items:center; flex:none; } .strip .vmark svg { width:14px; height:14px; }
+.strip .tgt { display:flex; align-items:center; gap:6px; font-size:12px; color:#5f5f5f; padding-right:4px; border-right:1px solid rgba(0,0,0,.1); padding-right:10px; }
+.strip .ink { width:190px; height:28px; } .strip .ink path { fill:none; stroke:#8F4C2C; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; } .strip .ink circle { fill:#8F4C2C; }
+.strip .time { font-variant-numeric:tabular-nums; font-size:14px; color:#1a1a1a; min-width:34px; }
+.strip .hint { font-size:12px; color:#5f5f5f; white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+.strip .msg { line-height:18px; white-space:nowrap; } .strip .msg small { display:block; font-size:12px; color:#5f5f5f; }
+.strip .sev { width:20px; text-align:center; font-size:16px; }
+.wbtn { height:32px; padding:0 12px; border-radius:4px; border:1px solid rgba(0,0,0,.08); border-bottom-color:rgba(0,0,0,.2); background:rgba(255,255,255,.85); font:400 14px "Segoe UI Variable Text","Segoe UI"; color:#1a1a1a; white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+.wbtn.acc { background:#8F4C2C; color:#fff; border-color:rgba(0,0,0,.1); }
+.wbtn.icon { width:32px; padding:0; justify-content:center; }
+.strip .wbtn .fi { font-size:12px; }
+.anchor { position:absolute; left:50%; transform:translateX(-50%); bottom:64px; width:max-content; }
+.stripcrops { display:grid; grid-template-columns:repeat(2, 610px); gap:16px 20px; }
+.scrop { position:relative; height:140px; border-radius:10px; overflow:hidden; background:radial-gradient(140% 160% at 70% 0%, #6d93c8 0%, #2c548f 55%, #162d58 100%); }
+.scrop .taskbar { height:40px; } .scrop .anchor { bottom:52px; }
+.scrop .lbl2 { position:absolute; left:12px; top:10px; font-size:12px; color:#e6ecf5; }
+
+/* Voxa window (Fluent) */
+.fwin { width:1100px; border-radius:8px; overflow:hidden; display:flex; flex-direction:column; background:#F1EEEA; color:#1a1a1a; box-shadow:0 26px 60px rgba(0,0,0,.45),0 0 0 1px rgba(0,0,0,.18); }
+.ftb { height:40px; display:flex; align-items:center; padding-left:14px; gap:10px; font-size:12px; flex:none; }
+.ftb .vmark { width:16px; height:16px; border-radius:4px; background:#8F4C2C; color:#fff; display:grid; place-items:center; } .ftb .vmark svg { width:10px; height:10px; }
+.fbody { flex:1; display:flex; min-height:0; }
+.nav { width:240px; flex:none; padding:4px 6px 8px; display:flex; flex-direction:column; gap:2px; }
+.nav .wordmark { font-size:22px; padding:8px 12px 14px; color:#1a1a1a; }
+.ni { height:36px; border-radius:4px; display:flex; align-items:center; gap:14px; padding:0 12px; font-size:14px; position:relative; }
+.ni .fi { font-size:16px; width:16px; }
+.ni.on { background:rgba(0,0,0,.055); } .ni.on::before { content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px; border-radius:2px; background:#8F4C2C; }
+.ni.foot { margin-top:auto; }
+.pg { flex:1; background:#FBFAF8; border-top-left-radius:8px; border-top:1px solid rgba(0,0,0,.06); border-left:1px solid rgba(0,0,0,.06); padding:28px 40px 30px; }
+.pt { font:600 28px/36px "Segoe UI Variable Display","Segoe UI"; } .pt-sub { font-size:14px; color:#5f5f5f; margin-top:2px; }
+.ib { display:flex; align-items:flex-start; gap:12px; padding:12px 8px 12px 14px; border-radius:4px; border:1px solid rgba(0,0,0,.06); margin-top:8px; }
+.ib .gl { width:16px; height:16px; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:9px; margin-top:2px; flex:none; font-family:"Segoe Fluent Icons"; }
+.ib.warn { background:#FFF4CE; } .ib.warn .gl { background:#9D5D00; }
+.ib.err { background:#FDE7E9; } .ib.err .gl { background:#C42B1C; }
+.ib .tx { flex:1; font-size:14px; line-height:20px; } .ib .tx b { font-weight:600; margin-right:8px; }
+.ib .close { width:28px; height:28px; display:grid; place-items:center; font-family:"Segoe Fluent Icons"; font-size:10px; color:#5f5f5f; }
+.ready { display:flex; align-items:center; gap:10px; margin-top:14px; font-size:14px; color:#3d3d3d; }
+.kc { display:inline-flex; gap:4px; } .kc span { height:24px; min-width:24px; padding:0 7px; border-radius:4px; background:#fff; border:1px solid rgba(0,0,0,.12); border-bottom-width:2px; display:inline-grid; place-items:center; font-size:12px; }
+.sec { font:600 14px/20px "Segoe UI Variable Text","Segoe UI"; margin:24px 0 8px; display:flex; align-items:center; justify-content:space-between; }
+.srch { height:32px; width:280px; border-radius:4px; border:1px solid rgba(0,0,0,.08); border-bottom-color:rgba(0,0,0,.25); background:#fff; display:flex; align-items:center; gap:8px; padding:0 10px; font:400 14px "Segoe UI"; color:#5f5f5f; }
+.hr { display:grid; grid-template-columns:28px 120px 1fr auto; gap:14px; align-items:start; padding:12px 14px; background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:4px; }
+.hr + .hr { margin-top:3px; }
+.hr .when { font-size:12px; color:#5f5f5f; line-height:18px; } .hr .when b { display:block; color:#1a1a1a; font-weight:600; font-size:13px; }
+.hr .txt { font-size:14px; line-height:21px; }
+.hr .wbtn { height:28px; font-size:13px; }
+.sc { display:flex; align-items:center; gap:16px; padding:14px 16px; min-height:68px; background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:4px; }
+.sc + .sc { margin-top:3px; }
+.sc > .fi { font-size:18px; width:20px; }
+.sc .tx { flex:1; } .sc .h { font-size:14px; line-height:20px; } .sc .s { font-size:12px; line-height:16px; color:#5f5f5f; margin-top:1px; }
+.tg { display:flex; align-items:center; gap:12px; font-size:14px; } .tg i { width:40px; height:20px; border-radius:10px; background:#8F4C2C; position:relative; display:block; } .tg i::after { content:""; position:absolute; right:4px; top:4px; width:12px; height:12px; border-radius:50%; background:#fff; }
+.combo { height:32px; min-width:230px; border-radius:4px; border:1px solid rgba(0,0,0,.08); border-bottom-color:rgba(0,0,0,.25); background:#fff; display:flex; align-items:center; justify-content:space-between; padding:0 10px 0 12px; font-size:14px; }
+.combo .fi { font-size:10px; color:#5f5f5f; }
+.statgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; }
+.stat { background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:4px; padding:16px 18px; }
+.stat .n { font:600 34px/40px "Segoe UI Variable Display","Segoe UI"; } .stat .l { font-size:13px; color:#5f5f5f; }
+.chartbox { background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:4px; padding:18px 20px; margin-top:3px; }
+.wbars { display:flex; align-items:flex-end; gap:18px; height:150px; } .wbars div { flex:1; background:#E7E1DA; border-radius:3px 3px 0 0; } .wbars div.on { background:#8F4C2C; }
+.wbars-l { display:flex; gap:18px; margin-top:8px; } .wbars-l span { flex:1; text-align:center; font-size:12px; color:#5f5f5f; }
+.applist .sc { min-height:52px; padding:10px 16px; }
+.dlg { width:640px; border-radius:8px; overflow:hidden; background:#FBFAF8; color:#1a1a1a; box-shadow:0 26px 60px rgba(0,0,0,.45),0 0 0 1px rgba(0,0,0,.18); }
+.dlg .in { padding:28px 32px 24px; }
+.dlg .stp { font-size:12px; color:#5f5f5f; }
+.dlg h2 { font:600 24px/32px "Segoe UI Variable Display","Segoe UI"; margin-top:10px; }
+.dlg p { font-size:14px; line-height:21px; color:#3d3d3d; margin-top:10px; }
+.dlg .pts { margin-top:16px; display:flex; flex-direction:column; gap:10px; } .dlg .pts div { display:flex; gap:12px; font-size:14px; line-height:20px; } .dlg .pts .fi { color:#8F4C2C; font-size:16px; margin-top:2px; }
+.dlg .bar { background:#F1EEEA; border-top:1px solid rgba(0,0,0,.06); padding:16px 24px; display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+.dlg .bar .prog { margin-right:auto; display:flex; gap:6px; } .dlg .bar .prog i { width:24px; height:4px; border-radius:2px; background:#D6CFC6; display:block; } .dlg .bar .prog i.on { background:#8F4C2C; }
+.meter { margin-top:18px; height:80px; border-radius:4px; border:1px solid rgba(0,0,0,.08); background:#fff; display:flex; align-items:center; padding:0 16px; gap:14px; }
+.meter svg { flex:1; height:44px; } .meter path { fill:none; stroke:#8F4C2C; stroke-width:2; stroke-linecap:round; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="feather" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4C12 4 6 9 5 19"/><path d="M20 4c0 7-5 11-11 11M8 12h7"/></g></symbol>
+</defs></svg>
+
+<div class="page">
+  <header class="rv">
+    <h1>Voxa v7.1: native screens, fixed and complete</h1>
+    <p>v7 with every fix from <code>docs/rebuild/03-ui-critique-v7.md</code>, plus Insights and guided setup. One story runs through every screen: it is 10:45, the ChatGPT session ended at 10:40, a Gmail dictation from 10:42 is waiting, so every surface shows the same signed-out state. Android: one app screen with a gear for Settings, no tab bar; the Voxa bar lives in the keyboard's own toolbar. Windows: History is the home page, Settings and Insights beside it, the strip is a Fluent overlay with the Voxa mark and the target app. The ink line follows real speech: bursts and pauses.</p>
+  </header>
+
+  <!-- ══════════ ANDROID ══════════ -->
+  <div class="lbl">Android · the keyboard</div>
+  <div class="lbl-sub">The Voxa mic lives in the keyboard's toolbar next to the suggestions, with a small dot for readiness (green ready, amber needs you). While you talk, the toolbar becomes the Voxa bar. Text goes in after you stop; nothing appears in the field while you talk.</div>
+  <div class="row">
+    <div><div class="device"><div class="screen" data-phone="idle"></div></div><p class="cap"><b>Ready.</b> Suggestions on the left, the Voxa mic on the right with a green dot.</p></div>
+    <div><div class="device"><div class="screen" data-phone="rec"></div></div><p class="cap"><b>Talking.</b> Voxa mark, the live ink line, timer, Cancel and Stop, all in the toolbar row. The keys stay put.</p></div>
+    <div><div class="device"><div class="screen" data-phone="signedout"></div></div><p class="cap"><b>Signed out, caught before you talk.</b> The dot is amber; tapping the mic shows this instead of recording.</p></div>
+  </div>
+
+  <div class="lbl">Android · every other keyboard state</div>
+  <div class="lbl-sub">Same toolbar row, same words as desktop (they come from the shared core). Each needs-you state has one action and a close.</div>
+  <div class="crops" id="kbcrops"></div>
+
+  <div class="lbl">Android · the app</div>
+  <div class="lbl-sub">One screen. History is home, anything waiting is pinned on top, Settings and Insights behind the top-bar icons. No bottom tab bar: Voxa has two destinations, not three.</div>
+  <div class="row">
+    <div><div class="device"><div class="screen" data-phone="home"></div></div><p class="cap"><b>Home is History.</b> The waiting dictation offers Sign in, then Copy, because the Gmail draft is no longer in front.</p></div>
+    <div><div class="device"><div class="screen" data-phone="settings"></div></div><p class="cap"><b>Settings.</b> The account says signed out here too, with a line on why Voxa uses ChatGPT.</p></div>
+    <div><div class="device"><div class="screen" data-phone="insights"></div></div><p class="cap"><b>Insights.</b> Its own page: this week's words, time saved, streak, where you dictate.</p></div>
+  </div>
+
+  <div class="lbl">Android · guided setup</div>
+  <div class="lbl-sub">Four steps, one thing each. It explains the ChatGPT sign-in before asking, tests the mic with the same ink line, turns on the keyboard, and ends with a real first try.</div>
+  <div class="row">
+    <div><div class="device"><div class="screen" data-phone="ob1"></div></div></div>
+    <div><div class="device"><div class="screen" data-phone="ob2"></div></div></div>
+    <div><div class="device"><div class="screen" data-phone="ob3"></div></div></div>
+  </div>
+
+  <!-- ══════════ WINDOWS ══════════ -->
+  <div class="lbl">Windows · dictating</div>
+  <div class="lbl-sub">The strip is a Fluent overlay: acrylic, 8px corners, the Voxa mark, the app it will paste into, the live ink line, timer, a hint for the shortcut, standard Windows buttons. It sits in the gap above the taskbar and never takes focus.</div>
+  <div class="desk" style="height:640px" id="desk-main"></div>
+
+  <div class="lbl">Windows · every strip state</div>
+  <div class="crops stripcrops" id="stripcrops"></div>
+
+  <div class="lbl">Windows · the window</div>
+  <div class="lbl-sub">History is the home page. What needs you is on top as InfoBars (one per problem, each with one action and a close), then a one-line ready status, then today. Settings and Insights are their own pages; nothing is repeated between them.</div>
+  <div class="desk" style="height:820px;display:grid;place-items:center" data-win="history"></div>
+  <div style="height:30px"></div>
+  <div class="desk" style="height:820px;display:grid;place-items:center;background:radial-gradient(120% 90% at 30% 10%, #d9c2a8 0%, #a8754d 40%, #5b3a26 75%, #2f1e14 100%)" data-win="settings"></div>
+  <div style="height:30px"></div>
+  <div class="desk" style="height:760px;display:grid;place-items:center" data-win="insights"></div>
+
+  <div class="lbl">Windows · guided setup</div>
+  <div class="row">
+    <div class="desk" style="width:610px;height:520px;display:grid;place-items:center" data-dlg="1"></div>
+    <div class="desk" style="width:610px;height:520px;display:grid;place-items:center" data-dlg="2"></div>
+  </div>
+</div>
+
+<script>
+/* ── speech-like ink line: bursts and flat pauses, ending in a round ink dot ── */
+function inkPath(w, h, env) {
+  const mid = h / 2, n = env.length, step = (w - 8) / (n - 1); let d = `M2 ${mid}`;
+  for (let i = 1; i < n; i++) { const x = 2 + i * step, a = env[i] * (h / 2 - 2) * (i % 2 ? -1 : 1); const cx = x - step / 2; d += ` Q ${cx.toFixed(1)} ${(mid + a).toFixed(1)} ${x.toFixed(1)} ${mid}`; }
+  return `<svg class="ink" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}"/><circle cx="${w - 4}" cy="${mid}" r="2.6"/></svg>`;
+}
+const ENV = [0,.15,.7,.95,.5,.85,.3,.05,0,0,.1,.6,1,.75,.9,.4,.6,.2,0,0,0,.25,.8,.55,.95,.35,.1,0];
+const FEATHER = '<svg viewBox="0 0 24 24"><use href="#feather"/></svg>';
+const sbar = (t, bg) => `<div class="sbar" style="background:${bg||'transparent'}"><span>${t}</span><span class="cam"></span><span class="ic"><span class="ms f">signal_cellular_alt</span><span class="ms f">wifi</span><span class="ms f">battery_5_bar</span></span></div>`;
+const gbar = bg => `<div class="gbar" style="background:${bg}"><i></i></div>`;
+const keys = () => `<div class="keys">
+  <div class="kr">${'qwertyuiop'.split('').map(c=>`<span class="k">${c}</span>`).join('')}</div>
+  <div class="kr mid">${'asdfghjkl'.split('').map(c=>`<span class="k">${c}</span>`).join('')}</div>
+  <div class="kr"><span class="k w"><span class="ms">shift</span></span>${'zxcvbnm'.split('').map(c=>`<span class="k">${c}</span>`).join('')}<span class="k w"><span class="ms">backspace</span></span></div>
+  <div class="kr"><span class="k m" style="max-width:none;flex:1.4 1 0">?123</span><span class="k m">,</span><span class="k m"><span class="ms" style="font-size:20px">sentiment_satisfied</span></span><span class="k sp">English</span><span class="k m">.</span><span class="k en"><span class="ms">keyboard_return</span></span></div></div>`;
+const chat = (field) => `<div class="chat">${sbar('10:45','#F7F5F2')}
+  <div class="ab"><span class="icb"><span class="ms">arrow_back</span></span><span class="av">P</span><span class="nm">Priya Raman<small>online</small></span><span class="icb"><span class="ms">call</span></span></div>
+  <div class="th"><div class="bb">Are you still coming to the 11 o'clock?<small>10:28</small></div><div class="bb">We can push it if you need<small>10:28</small></div></div>
+  <div class="cp"><div class="fld"><span class="ms">mood</span>${field}</div><span class="snd"><span class="ms f">send</span></span></div></div>`;
+const tool = {
+  idle: `<div class="kb-tool"><span class="tool"><span class="ms">apps</span></span><div class="sug"><span>I'm</span><span>Running</span><span>Yes</span></div><span class="vmic" aria-label="Dictate with Voxa, ready"><span class="ms f">mic</span></span></div>`,
+  rec: `<div class="vb" role="status" aria-label="Voxa recording, 9 seconds"><span class="mark">${FEATHER}</span>${inkPath(180,28,ENV)}<span class="time">0:09</span><span class="x" aria-label="Cancel"><span class="ms">close</span></span><span class="stop" aria-label="Stop and insert"><span class="ms f" style="font-size:20px">stop</span></span></div>`,
+  signedout: `<div class="vb" role="alert"><span class="mark">${FEATHER}</span><span class="tx">Sign in to ChatGPT to dictate<small>Voxa turns speech into text through your ChatGPT account</small></span><button class="btn-f">Sign in</button></div>`,
+  writing: `<div class="vb" role="status"><span class="mark">${FEATHER}</span><span class="spin"></span><span class="tx">Writing it out<small>9 seconds of speech</small></span><span class="x" aria-label="Cancel"><span class="ms">close</span></span></div>`,
+  done: `<div class="vb" role="status"><span class="mark">${FEATHER}</span><span class="okdot"><span class="ms">check</span></span><span class="tx">Inserted<small>Running ten minutes late, start without me</small></span></div>`,
+  offline: `<div class="vb" role="status"><span class="mark">${FEATHER}</span>${inkPath(110,28,ENV.slice(0,16))}<span class="time">0:06</span><span class="tx" style="flex:none;padding-left:0"><small style="color:#7A5100">Offline</small></span><span class="stop"><span class="ms f" style="font-size:20px">stop</span></span></div>`,
+  queued: `<div class="vb" role="status"><span class="mark">${FEATHER}</span><span class="tx">No connection. Sends when you're back<small>9 seconds kept for this chat</small></span><button class="btn-t">Discard</button><span class="x"><span class="ms">close</span></span></div>`,
+  unreach: `<div class="vb" role="alert"><span class="mark">${FEATHER}</span><span class="tx">Couldn't reach ChatGPT<small>9 seconds kept. Your sign-in is fine</small></span><button class="btn-f">Retry</button><span class="x"><span class="ms">close</span></span></div>`,
+  midexp: `<div class="vb" role="alert"><span class="mark">${FEATHER}</span><span class="tx">Sign in to send this<small>9 seconds kept for this chat</small></span><button class="btn-f">Sign in</button><span class="x"><span class="ms">close</span></span></div>`,
+  silent: `<div class="vb" role="status"><span class="mark">${FEATHER}</span><span class="tx">Didn't hear any speech<small>Check the mic and try again</small></span><span class="vmic" style="width:40px"><span class="ms f">mic</span></span></div>`,
+  micblock: `<div class="vb" role="alert"><span class="mark">${FEATHER}</span><span class="tx">Voxa can't use the microphone<small>Allow it in Android settings</small></span><button class="btn-f">Allow</button><span class="x"><span class="ms">close</span></span></div>`,
+};
+const kb = t => `<div class="kb">${tool[t]}${keys()}</div>${gbar('#EEE9E2')}`;
+const phones = {
+  idle: chat('<span class="t">Message</span><span class="cur"></span>').replace('10:45','10:30') + kb('idle'),
+  rec: chat('<span class="t">Message</span><span class="cur"></span>').replace('10:45','10:31') + kb('rec'),
+  signedout: chat('<span class="t">Message</span><span class="cur"></span>') + kb('signedout').replace('class="vmic"','class="vmic warn"'),
+  home: `${sbar('10:45')}<div class="lab"><span class="wordmark" style="font-size:28px">voxa</span><span class="grow"></span><span class="icb"><span class="ms">bar_chart</span></span><span class="icb"><span class="ms">settings</span></span></div>
+    <div class="content"><div style="height:12px"></div>
+    <div class="err-card"><span class="ms f" style="color:var(--error)">error</span><div><div class="h">You're signed out of ChatGPT</div><div class="s">A 22 second dictation for Gmail from 10:42 is waiting. Sign in and Voxa will write it out for you to copy.</div><div class="acts"><button class="btn-f">Sign in</button></div></div></div>
+    <div class="sh">Today</div>
+    ${[['#25D366','Running ten minutes late, start without me and I\'ll catch up on the notes','WhatsApp · 10:31','W'],['#4A154B','Can you push the review to Thursday? The build is ready but I want one more pass','Slack · 09:58','S'],['#EA4335','Thanks for sending the contract. I\'ll read it tonight and come back with questions','Gmail · 09:12','G']].map(([c,t,s,l])=>`<div class="li"><span class="lead" style="background:${c}">${l}</span><div class="tx"><div class="h">${t}</div><div class="s">${s}</div></div><span class="ms tr">content_copy</span></div>`).join('')}
+    <div class="note-sm">Audio goes to ChatGPT to become text. History stays on this phone.</div></div>${gbar('var(--surface)')}`,
+  settings: `${sbar('10:45')}<div class="lab"><span class="icb"><span class="ms">arrow_back</span></span><span style="font:400 22px Roboto;flex:1;padding-left:4px">Settings</span></div>
+    <div class="content set">
+    <div class="sh">Account</div>
+    <div class="li"><span class="ms ic">account_circle</span><div class="tx"><div class="h">ChatGPT</div><div class="s">Signed out at 10:40</div></div><button class="btn-f">Sign in</button></div>
+    <div class="note-sm" style="padding-top:0">Voxa sends what you say while the mic is on to ChatGPT to turn it into text. Nothing else leaves your phone.</div>
+    <div class="sh">Dictation</div>
+    <div class="li"><span class="ms ic">keyboard</span><div class="tx"><div class="h">Voxa keyboard</div><div class="s">On and selected</div></div></div>
+    <div class="li"><span class="ms ic">mic</span><div class="tx"><div class="h">Microphone</div><div class="s">Phone mic, or a connected headset</div></div></div>
+    <div class="li"><span class="ms ic">vibration</span><div class="tx"><div class="h">Vibrate on start and stop</div></div><span class="sw"></span></div>
+    <div class="sh">Privacy</div>
+    <div class="li"><span class="ms ic">history</span><div class="tx"><div class="h">Keep history</div><div class="s">30 days</div></div></div>
+    <div class="li"><span class="ms ic">delete</span><div class="tx"><div class="h">Delete history</div><div class="s">96 dictations</div></div></div>
+    </div>${gbar('var(--surface)')}`,
+  insights: `${sbar('10:45')}<div class="lab"><span class="icb"><span class="ms">arrow_back</span></span><span style="font:400 22px Roboto;flex:1;padding-left:4px">Insights</span></div>
+    <div class="content" style="padding-top:8px">
+    <div class="mcard"><div style="font:500 14px Roboto;color:var(--on-s-var)">This week</div><div class="big" style="margin-top:8px">2,418<small>words</small></div><div style="font:14px Roboto;color:var(--on-s-var);margin-top:6px">About 52 minutes faster than typing</div>
+      <div class="bars">${[46,70,30,92,40,18,60].map((h,i)=>`<div class="${i==6?'on':''}" style="height:${h}%"></div>`).join('')}</div>
+      <div class="bars-l">${['M','T','W','T','F','S','S'].map(d=>`<span>${d}</span>`).join('')}</div></div>
+    <div class="mcard" style="display:flex;align-items:center;gap:14px"><span class="ms f" style="color:var(--primary);font-size:30px">local_fire_department</span><div><div style="font:500 18px Roboto">12 day streak</div><div style="font:14px Roboto;color:var(--on-s-var)">You've dictated every day since 11 November</div></div></div>
+    <div class="sh">Where you dictate</div>
+    ${[['#25D366','WhatsApp','1,104 words','W'],['#EA4335','Gmail','806 words','G'],['#4A154B','Slack','508 words','S']].map(([c,a,w,l])=>`<div class="li" style="align-items:center"><span class="lead" style="background:${c}">${l}</span><div class="tx"><div class="h">${a}</div></div><span style="font:14px Roboto;color:var(--on-s-var)">${w}</span></div>`).join('')}
+    </div>${gbar('var(--surface)')}`,
+  ob1: `${sbar('10:20')}<div class="ob"><div class="step">STEP 1 OF 4</div><div class="hero"><span class="ms">key</span></div>
+    <h2>Voxa writes through your ChatGPT account</h2><p>Sign in once. You can sign out any time in Settings.</p>
+    <div class="pts"><div><span class="ms">mic</span>Only what you say while the mic is on is sent, to turn it into text.</div><div><span class="ms">lock</span>Your history stays on this phone.</div><div><span class="ms">payments</span>Uses your ChatGPT account, no extra cost.</div></div>
+    <div class="foot"><div class="dots"><i class="on"></i><i></i><i></i><i></i></div><button class="btn-big">Sign in to ChatGPT</button></div></div>${gbar('var(--surface)')}`,
+  ob2: `${sbar('10:21')}<div class="ob"><div class="step">STEP 2 OF 4</div><div class="hero"><span class="ms">graphic_eq</span></div>
+    <h2>Say something</h2><p>If the line moves, Voxa can hear you.</p>
+    <div class="levelbox"><span class="ms f" style="color:var(--primary)">mic</span>${inkPath(240,48,ENV).replace('class="ink"','')}</div>
+    <p style="font-size:14px">Using the phone microphone. <span style="color:var(--primary);font-weight:500">Change</span></p>
+    <div class="foot"><div class="dots"><i></i><i class="on"></i><i></i><i></i></div><button class="btn-t">It's not moving</button><button class="btn-big">Sounds right</button></div></div>${gbar('var(--surface)')}`,
+  ob3: `${sbar('10:22')}<div class="ob"><div class="step">STEP 3 OF 4</div><div class="hero"><span class="ms">keyboard</span></div>
+    <h2>Turn on the Voxa keyboard</h2><p>Android asks you to switch it on once. Then pick Voxa whenever you type, or make it your default.</p>
+    <div class="pts"><div><span class="ms f" style="color:#3F7A4C">check_circle</span>Voxa keyboard is on</div><div><span class="ms">radio_button_unchecked</span>Choose Voxa as your keyboard</div></div>
+    <div class="foot"><div class="dots"><i></i><i></i><i class="on"></i><i></i></div><button class="btn-big">Choose keyboard</button></div></div>${gbar('var(--surface)')}`,
+};
+document.querySelectorAll('[data-phone]').forEach(el => el.innerHTML = phones[el.dataset.phone]);
+const crops = [['writing','Writing it out'],['done','Inserted'],['offline','Talking while offline'],['queued','Offline, waiting to send'],['unreach','ChatGPT unreachable'],['midexp','Session ended mid-dictation'],['silent','No speech'],['micblock','Mic blocked']];
+document.getElementById('kbcrops').innerHTML = crops.map(([t,n]) => `<div><div class="crop"><div class="screen" style="--primary:#8F4C2C;--tert-c:#DCE6CF;--on-tert-c:#18210F">${tool[t]}<div class="peek"><div class="kr">${'qwertyuiop'.split('').map(c=>`<span class="k">${c}</span>`).join('')}</div></div></div></div><p class="cap"><b>${n}</b></p></div>`).join('');
+
+/* ── Windows ── */
+const tbar = () => `<div class="taskbar"><span class="a"><svg width="20" height="20"><rect x="1" y="1" width="8" height="8" fill="#0078D4"/><rect x="11" y="1" width="8" height="8" fill="#0078D4"/><rect x="1" y="11" width="8" height="8" fill="#0078D4"/><rect x="11" y="11" width="8" height="8" fill="#0078D4"/></svg></span><span class="a"><span class="fi" style="font-size:16px">&#xE721;</span></span><span class="a"><span class="fi" style="font-size:18px;color:#C99A1B">&#xE8B7;</span></span><span class="a on"><span class="appicon" style="background:#25D366"><span class="ms f">call</span></span></span><span class="a"><span class="appicon" style="background:#EA4335"><span class="ms f">mail</span></span></span><span class="a"><span class="appicon" style="background:#4A154B;border-radius:6px"><span class="ms f">tag</span></span></span>
+  <div class="tray"><span class="fi" style="font-size:12px">&#xE70E;</span><span class="vx" title="Voxa: signed out">${FEATHER}<i></i></span><span class="fi" style="font-size:15px">&#xE701;</span><span class="fi" style="font-size:15px">&#xE767;</span><span class="clock">10:45<br>22-11-2026</span></div></div>`;
+const vmark = `<span class="vmark">${FEATHER}</span>`;
+const tgt = (a='WhatsApp', c='#25D366', g='call') => `<span class="tgt"><span class="appicon" style="background:${c};width:18px;height:18px"><span class="ms f" style="font-size:11px">${g}</span></span>${a}</span>`;
+const X = `<button class="wbtn icon" aria-label="Close"><span class="fi">&#xE711;</span></button>`;
+const strips = {
+  rec: `<div class="strip" role="status" aria-label="Voxa recording for WhatsApp">${vmark}${tgt()}${inkPath(190,28,ENV)}<span class="time">0:14</span><span class="hint"><span class="kc"><span>Ctrl</span><span>Space</span></span> to stop</span><button class="wbtn">Cancel</button><button class="wbtn acc">Stop</button></div>`,
+  writing: `<div class="strip">${vmark}${tgt()}<span class="spin" style="border-color:#8F4C2C;border-right-color:transparent;width:16px;height:16px;border-width:2px"></span><span class="msg">Writing it out<small>14 seconds of speech</small></span><button class="wbtn">Cancel</button></div>`,
+  done: `<div class="strip">${vmark}<span class="sev fi" style="color:#0F7B0F">&#xE73E;</span><span class="msg">Pasted in WhatsApp<small>Your clipboard is back as it was</small></span></div>`,
+  signedout: `<div class="strip" role="alert">${vmark}<span class="sev fi" style="color:#9D5D00">&#xE7BA;</span><span class="msg">Sign in to ChatGPT to dictate<small>Nothing was recorded</small></span><button class="wbtn acc">Sign in</button>${X}</div>`,
+  midexp: `<div class="strip" role="alert">${vmark}${tgt()}<span class="msg">Sign in to send this<small>14 seconds kept. It pastes here after</small></span><button class="wbtn acc">Sign in</button>${X}</div>`,
+  offline: `<div class="strip">${vmark}${tgt()}${inkPath(100,28,ENV.slice(0,14))}<span class="time">0:08</span><span class="hint" style="color:#7A5100">Offline, keeping it</span><button class="wbtn">Cancel</button><button class="wbtn acc">Stop</button></div>`,
+  unreach: `<div class="strip" role="alert">${vmark}<span class="sev fi" style="color:#C42B1C">&#xEA39;</span><span class="msg">Couldn't reach ChatGPT<small>14 seconds kept. Your sign-in is fine</small></span><button class="wbtn acc">Retry</button>${X}</div>`,
+  moved: `<div class="strip" role="alert">${vmark}${tgt('Slack','#4A154B','tag')}<span class="msg">You moved to Slack<small>This was meant for WhatsApp</small></span><button class="wbtn acc">Paste in Slack</button>${X}</div>`,
+  silent: `<div class="strip">${vmark}<span class="sev fi" style="color:#5f5f5f">&#xE946;</span><span class="msg">Didn't hear any speech<small>Listening on Headset Microphone</small></span>${X}</div>`,
+  micblock: `<div class="strip" role="alert">${vmark}<span class="sev fi" style="color:#C42B1C">&#xEA39;</span><span class="msg">Windows is blocking the microphone<small>Voxa can't record until it's allowed</small></span><button class="wbtn acc">Open settings</button>${X}</div>`,
+};
+document.getElementById('desk-main').innerHTML = `<div class="wa"><div class="tb"><span class="appicon" style="background:#25D366;width:16px;height:16px"><span class="ms f" style="font-size:10px">call</span></span>WhatsApp<span class="caps"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></span></div><div class="body"><div class="rail"></div><div class="list"><div style="height:34px;border-radius:8px;background:#F0F2F5;margin-bottom:10px;display:flex;align-items:center;padding:0 12px;font-size:13px;color:#667781"><span class="fi" style="font-size:12px;margin-right:10px">&#xE721;</span>Search</div><div class="rowc on"><span class="av" style="background:#7D5260">P</span><div><b>Priya Raman</b><small>We can push it if you need</small></div></div><div class="rowc"><span class="av" style="background:#3A6EA5">D</span><div><b>Design team</b><small>Arjun: new build is up</small></div></div><div class="rowc"><span class="av" style="background:#5F8D4E">M</span><div><b>Mom</b><small>Call me when free</small></div></div></div><div class="conv"><div class="ch"><span class="av" style="background:#7D5260;width:36px;height:36px">P</span>Priya Raman</div><div class="msgs"><div class="b">Are you still coming to the 11 o'clock?<span>10:28</span></div><div class="b">We can push it if you need<span>10:28</span></div></div><div class="inp"><div>Type a message</div></div></div></div></div><div class="anchor">${strips.rec.replace('<span class="vmark">','<span class="vmark">')}</div>${tbar()}`;
+const dm=document.getElementById('desk-main'); dm.querySelector('.tray .vx i').style.display='none'; dm.querySelector('.tray .clock').innerHTML='10:31<br>22-11-2026';
+const sc = [['writing','Writing it out'],['done','Pasted'],['offline','Talking while offline'],['signedout','Signed out, before you talk'],['midexp','Session ended mid-dictation'],['unreach','ChatGPT unreachable'],['moved','You moved to another app'],['silent','No speech'],['micblock','Mic blocked']];
+document.getElementById('stripcrops').innerHTML = sc.map(([k,n]) => `<div class="scrop"><span class="lbl2">${n}</span><div class="anchor">${strips[k]}</div>${tbar()}</div>`).join('');
+
+const win = (on, body) => `<div class="fwin" style="height:${on==='insights'?690:760}px"><div class="ftb"><span class="vmark">${FEATHER}</span>Voxa<span class="caps"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></span></div><div class="fbody"><nav class="nav"><span class="wordmark">voxa</span>
+  <div class="ni ${on==='history'?'on':''}"><span class="fi">&#xE81C;</span>History</div><div class="ni ${on==='insights'?'on':''}"><span class="fi">&#xE9D2;</span>Insights</div><div class="ni foot ${on==='settings'?'on':''}"><span class="fi">&#xE713;</span>Settings</div></nav><main class="pg">${body}</main></div></div>`;
+const hrow = (ic, c, g, t, a, w) => `<div class="hr"><span class="appicon" style="background:${c};margin-top:2px"><span class="ms f">${g}</span></span><div class="when"><b>${t}</b>${a}</div><div class="txt">${w}</div><button class="wbtn"><span class="fi" style="font-size:12px">&#xE8C8;</span>Copy</button></div>`;
+const pages = {
+  history: `<div class="pt">History</div>
+    <div class="ib err"><span class="gl">&#xE711;</span><div class="tx"><b>You're signed out of ChatGPT.</b>Voxa can't write anything until you sign in. A 22 second dictation for Gmail from 10:42 is waiting; it will be ready to copy.</div><button class="wbtn acc">Sign in</button><span class="close">&#xE711;</span></div>
+    <div class="sec">Today<span class="srch"><span class="fi" style="font-size:12px">&#xE721;</span>Search history</span></div>
+    ${hrow('', '#25D366','call','10:31','WhatsApp','Running ten minutes late, start without me and I\'ll catch up on the notes.')}
+    ${hrow('', '#4A154B','tag','09:58','Slack','Can you push the review to Thursday? The build is ready but I want one more pass on the onboarding flow.')}
+    ${hrow('', '#EA4335','mail','09:12','Gmail','Thanks for sending the contract. I\'ll read it tonight and come back to you with questions tomorrow.')}
+    <div class="sec">Yesterday</div>
+    ${hrow('', '#25D366','call','18:40','WhatsApp','Leaving now, see you at the station in twenty minutes.')}`,
+  settings: `<div class="pt">Settings</div>
+    <div class="sec" style="margin-top:16px">Account</div>
+    <div class="sc"><span class="fi">&#xE77B;</span><div class="tx"><div class="h">ChatGPT</div><div class="s">Signed out at 10:40. Voxa sends what you say while dictating to ChatGPT to turn it into text.</div></div><button class="wbtn acc">Sign in</button></div>
+    <div class="sec">Dictation</div>
+    <div class="sc"><span class="fi">&#xE765;</span><div class="tx"><div class="h">Shortcut</div><div class="s">Press to start, press again to stop</div></div><span class="kc"><span>Ctrl</span><span>Space</span></span><button class="wbtn">Change</button></div>
+    <div class="sc"><span class="fi">&#xE720;</span><div class="tx"><div class="h">Microphone</div><div class="s">If it's unplugged, Voxa uses the Windows default</div></div><div class="combo">Headset Microphone (Jabra)<span class="fi">&#xE70D;</span></div></div>
+    <div class="sec">Privacy</div>
+    <div class="sc"><span class="fi">&#xE72E;</span><div class="tx"><div class="h">Keep history</div><div class="s">Text and audio stay on this PC</div></div><div class="combo" style="min-width:150px">30 days<span class="fi">&#xE70D;</span></div></div>
+    <div class="sc"><span class="fi">&#xE74D;</span><div class="tx"><div class="h">Delete history</div><div class="s">142 dictations, 61 MB</div></div><button class="wbtn">Delete all</button></div>
+    <div class="sec">System</div>
+    <div class="sc"><span class="fi">&#xE7E8;</span><div class="tx"><div class="h">Start with Windows</div><div class="s">Starts quietly in the tray</div></div><span class="tg">On <i></i></span></div>`,
+  insights: `<div class="pt">Insights</div><div class="pt-sub">16 to 22 November</div>
+    <div class="statgrid" style="margin-top:18px"><div class="stat"><div class="n">2,418</div><div class="l">words this week</div></div><div class="stat"><div class="n">52 min</div><div class="l">faster than typing</div></div><div class="stat"><div class="n">12 days</div><div class="l">in a row</div></div></div>
+    <div class="chartbox"><div style="font-size:14px;font-weight:600;margin-bottom:14px">Words per day</div><div class="wbars">${[46,70,30,92,40,18,60].map((h,i)=>`<div class="${i==6?'on':''}" style="height:${h}%"></div>`).join('')}</div><div class="wbars-l">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<span>${d}</span>`).join('')}</div></div>
+    <div class="sec">Where you dictate</div><div class="applist">
+    <div class="sc"><span class="appicon" style="background:#25D366"><span class="ms f">call</span></span><div class="tx"><div class="h">WhatsApp</div></div><span style="font-size:14px;color:#5f5f5f">1,104 words</span></div>
+    <div class="sc"><span class="appicon" style="background:#EA4335"><span class="ms f">mail</span></span><div class="tx"><div class="h">Gmail</div></div><span style="font-size:14px;color:#5f5f5f">806 words</span></div></div>`,
+};
+document.querySelectorAll('[data-win]').forEach(el => el.innerHTML = win(el.dataset.win, pages[el.dataset.win]));
+const dlgs = {
+  1: `<div class="dlg"><div class="in"><div class="stp">Step 1 of 4</div><h2>Voxa writes through your ChatGPT account</h2><p>Press a shortcut in any app, talk, and Voxa pastes the text where your cursor is.</p>
+     <div class="pts"><div><span class="fi">&#xE720;</span>Only what you say while dictating is sent to ChatGPT, to turn it into text.</div><div><span class="fi">&#xE72E;</span>Your history and recordings stay on this PC.</div><div><span class="fi">&#xE8C9;</span>Uses your ChatGPT account, no extra cost.</div></div></div>
+     <div class="bar"><div class="prog"><i class="on"></i><i></i><i></i><i></i></div><button class="wbtn">Not now</button><button class="wbtn acc">Sign in to ChatGPT</button></div></div>`,
+  2: `<div class="dlg"><div class="in"><div class="stp">Step 3 of 4</div><h2>Try it</h2><p>Click the box, press <span class="kc"><span>Ctrl</span><span>Space</span></span>, say a sentence, then press it again.</p>
+     <div class="meter"><span class="fi" style="color:#8F4C2C;font-size:18px">&#xE720;</span>${inkPath(420,44,ENV).replace('class="ink"','')}</div>
+     <div style="margin-top:14px;border:1px solid rgba(0,0,0,.1);border-bottom:2px solid #8F4C2C;border-radius:4px;background:#fff;padding:10px 12px;font-size:14px;min-height:44px">Hello, this is my first note with Voxa.</div></div>
+     <div class="bar"><div class="prog"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div><button class="wbtn">Change shortcut</button><button class="wbtn acc">It worked</button></div></div>`,
+};
+document.querySelectorAll('[data-dlg]').forEach(el => el.innerHTML = dlgs[el.dataset.dlg]);
+</script>
+</body>
+</html>
