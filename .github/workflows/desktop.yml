@@ -29,11 +29,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Test
-        run: cargo test --workspace --release
-      - name: ONNX runtime (silence trimming)
+      - name: ONNX runtime (silence trimming), before anything builds so it is copied next to the exe
         shell: pwsh
         run: desktop/windows/fetch-onnxruntime.ps1
+      - name: Test
+        run: cargo test --workspace --release
       - name: Build
         run: cargo build --release -p voxa-desktop -p voxa-signin
       - name: Installer
