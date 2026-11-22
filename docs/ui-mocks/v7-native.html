@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voxa v7, native screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block" rel="stylesheet" />
+<style>
+/* Voxa v7: screens drawn to each platform's own design system.
+   Android: Material 3 (Roboto, Material Symbols, M3 components, Pixel 8 frame at 412x915 dp scaled).
+   Windows: Windows 11 Fluent (Segoe UI Variable, Segoe Fluent Icons, title bar, NavigationView, SettingsCard, InfoBar).
+   Brand carried by: sepia/ink colour scheme, Fraunces wordmark, the ink line while recording. */
+
+* { box-sizing:border-box; margin:0; padding:0; }
+html { background:#2b2b2b; }
+body { color:#eee; font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif; }
+.page { max-width:1320px; margin:0 auto; padding:40px 24px 80px; }
+.rv h1 { font:600 26px/1.2 "Segoe UI Variable Display","Segoe UI",system-ui; color:#fff; }
+.rv p { margin-top:8px; font-size:14px; line-height:1.55; color:#c9c9c9; max-width:880px; }
+.lbl { font:600 12px/1 ui-monospace,Consolas,monospace; letter-spacing:.08em; text-transform:uppercase; color:#9a9a9a; margin:48px 0 18px; }
+.cap { font-size:13px; color:#bdbdbd; margin-top:12px; line-height:1.45; max-width:390px; }
+.cap b { color:#fff; font-weight:600; }
+.ms { font-family:"Material Symbols Rounded"; font-weight:normal; font-style:normal; font-size:24px; line-height:1; display:inline-block; -webkit-font-smoothing:antialiased; font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24; }
+.ms.fill { font-variation-settings:"FILL" 1,"wght" 400,"GRAD" 0,"opsz" 24; }
+.fi { font-family:"Segoe Fluent Icons","Segoe MDL2 Assets"; font-style:normal; font-weight:normal; line-height:1; display:inline-block; }
+
+/* ════════════════ ANDROID / MATERIAL 3 ════════════════ */
+.android-row { display:flex; gap:34px; flex-wrap:wrap; align-items:flex-start; }
+.device { width:390px; background:#111; border-radius:46px; padding:9px; box-shadow:0 30px 60px rgba(0,0,0,.5), 0 0 0 1.5px #3a3a3a inset; }
+.screen {
+  /* M3 light scheme generated around a sepia seed (#8C3A12) */
+  --primary:#8F4C2C; --on-primary:#FFFFFF; --primary-container:#FFDBCC; --on-primary-container:#351000;
+  --secondary-container:#F6DED3; --on-secondary-container:#2C160C;
+  --surface:#FFF8F6; --surface-cont-low:#FEF1EC; --surface-cont:#F8EBE5; --surface-cont-high:#F2E5DF; --surface-cont-highest:#ECE0DA;
+  --on-surface:#231915; --on-surface-var:#53443D; --outline:#85736C; --outline-var:#D8C2BA;
+  --error:#BA1A1A; --error-container:#FFDAD6; --on-error-container:#410002; --tertiary-container:#E8E2B4;
+  width:372px; height:808px; border-radius:38px; overflow:hidden; background:var(--surface); color:var(--on-surface);
+  font-family:Roboto,system-ui,sans-serif; position:relative; display:flex; flex-direction:column;
+}
+.sbar { height:36px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 22px 0 26px; font:500 14px Roboto; color:var(--on-surface); position:relative; }
+.sbar .cam { position:absolute; left:50%; top:11px; width:13px; height:13px; margin-left:-6.5px; border-radius:50%; background:#0b0b0b; }
+.sbar .ic { display:flex; gap:4px; align-items:center; }
+.sbar .ic .ms { font-size:17px; }
+.gbar { height:22px; flex:none; display:grid; place-items:center; }
+.gbar i { width:108px; height:4px; border-radius:2px; background:#1d1b20; opacity:.85; display:block; }
+
+/* M3 top app bar */
+.tab-small { height:64px; flex:none; display:flex; align-items:center; gap:4px; padding:0 4px 0 4px; }
+.icbtn { width:48px; height:48px; border-radius:50%; display:grid; place-items:center; color:var(--on-surface-var); flex:none; }
+.tab-small .title { flex:1; font:400 22px/28px Roboto; color:var(--on-surface); padding-left:4px; }
+.tab-large { padding:10px 16px 20px; flex:none; }
+.wordmark { font-family:Fraunces,Georgia,serif; font-weight:600; letter-spacing:-.02em; }
+.tab-large .wordmark { font-size:30px; color:var(--on-surface); }
+
+/* chat app (generic messaging app underneath the keyboard) */
+.chat { background:#F3EDF7; --on:#1D1B20; flex:1; display:flex; flex-direction:column; min-height:0; }
+.chat .appbar { height:64px; display:flex; align-items:center; gap:6px; padding:0 4px; background:#F3EDF7; }
+.chat .av { width:40px; height:40px; border-radius:50%; background:#7D5260; color:#fff; display:grid; place-items:center; font:500 16px Roboto; flex:none; }
+.chat .nm { flex:1; font:500 16px/1.2 Roboto; color:#1D1B20; } .chat .nm small { display:block; font:400 12px Roboto; color:#49454F; }
+.thread { flex:1; padding:8px 12px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; overflow:hidden; }
+.bub { max-width:78%; padding:9px 14px; border-radius:20px; font:400 15px/1.35 Roboto; color:#1D1B20; }
+.bub.in { background:#fff; align-self:flex-start; border-bottom-left-radius:6px; }
+.bub.out { background:#D3E3FD; align-self:flex-end; border-bottom-right-radius:6px; }
+.bub small { display:block; font-size:11px; color:#49454F; margin-top:3px; text-align:right; }
+.compose { display:flex; align-items:flex-end; gap:6px; padding:6px 8px 8px; }
+.field { flex:1; min-height:48px; background:#fff; border-radius:24px; display:flex; align-items:center; gap:4px; padding:0 6px 0 6px; }
+.field .ph { flex:1; font:400 16px Roboto; color:#49454F; padding:12px 2px; }
+.field .ph.typed { color:#1D1B20; }
+.caret { display:inline-block; width:2px; height:20px; background:#0B57D0; vertical-align:-4px; margin-left:1px; }
+.send { width:48px; height:48px; border-radius:50%; background:#0B57D0; color:#fff; display:grid; place-items:center; flex:none; }
+
+/* keyboard (HeliBoard base, Voxa toolbar) */
+.kb { background:#EFE7E3; flex:none; padding:4px 4px 0; }
+.kb-tool { height:48px; display:flex; align-items:center; gap:2px; padding:0 2px; }
+.kb-tool .icbtn { width:44px; height:44px; color:#53443D; }
+.kb-tool .grow { flex:1; }
+.vmic { width:44px; height:44px; border-radius:22px; display:grid; place-items:center; background:var(--primary); color:#fff; flex:none; }
+.rows { padding:4px 0 6px; }
+.row { display:flex; gap:6px; justify-content:center; margin:0 0 10px; }
+.k { flex:1 1 0; max-width:32px; height:46px; background:#FFFBFF; border-radius:7px; box-shadow:0 1px 0 rgba(0,0,0,.18); display:grid; place-items:center; font:400 21px Roboto; color:#231915; }
+.row.mid { padding:0 16px; }
+.k.wide { max-width:none; flex:1.5 1 0; background:#DCCFC9; font-size:15px; }
+.k.wide .ms { font-size:22px; }
+.k.space { max-width:none; flex:5 1 0; font-size:14px; color:#53443D; }
+.k.mod { background:#DCCFC9; font:500 14px Roboto; }
+.k.enter { background:var(--primary); color:#fff; }
+
+/* Voxa recording bar (replaces the toolbar while dictating) */
+.vbar { height:56px; margin:2px 2px 4px; border-radius:28px; background:#2A1D16; color:#FBEEE8; display:flex; align-items:center; gap:4px; padding:0 4px; }
+.vbar .icbtn { color:#E7D6CE; }
+.vbar .ink { flex:1; min-width:0; height:26px; }
+.vbar .ink path { fill:none; stroke:#FBEEE8; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.vbar .time { font:500 14px "Roboto Mono"; color:#FBEEE8; padding:0 6px; }
+.vbar .stop { width:48px; height:48px; border-radius:24px; background:#E25B4E; display:grid; place-items:center; color:#fff; flex:none; }
+.rec { width:10px; height:10px; border-radius:50%; background:#FF6B5E; margin-left:10px; flex:none; }
+.vnotice { margin:2px 2px 4px; min-height:56px; border-radius:28px; background:var(--secondary-container); color:var(--on-secondary-container); display:flex; align-items:center; gap:8px; padding:4px 4px 4px 16px; }
+.vnotice .t { flex:1; font:500 14px/1.25 Roboto; } .vnotice .t small { display:block; font:400 12.5px Roboto; color:#53443D; margin-top:1px; }
+.vnotice .ms { color:var(--primary); }
+.fbtn { height:40px; padding:0 20px; border-radius:20px; background:var(--primary); color:var(--on-primary); font:500 14px Roboto; display:inline-flex; align-items:center; gap:8px; border:none; flex:none; }
+.tbtn { height:40px; padding:0 12px; border-radius:20px; color:var(--primary); font:500 14px Roboto; display:inline-flex; align-items:center; background:none; border:none; }
+.obtn { height:40px; padding:0 20px; border-radius:20px; border:1px solid var(--outline); color:var(--primary); font:500 14px Roboto; display:inline-flex; align-items:center; background:none; }
+
+/* Voxa app content */
+.content { flex:1; overflow:hidden; display:flex; flex-direction:column; }
+.card-filled { margin:0 16px; background:var(--surface-cont-high); border-radius:16px; padding:16px; }
+.card-filled h3 { font:400 22px/28px Roboto; } .card-filled p { font:400 14px/20px Roboto; color:var(--on-surface-var); margin-top:4px; }
+.progress { height:4px; border-radius:2px; background:var(--secondary-container); margin:14px 0 6px; overflow:hidden; } .progress i { display:block; height:100%; width:66%; background:var(--primary); border-radius:2px; }
+.li { display:flex; align-items:center; gap:16px; min-height:56px; padding:8px 16px; }
+.li .lead { width:40px; height:40px; border-radius:50%; display:grid; place-items:center; flex:none; background:var(--primary-container); color:var(--on-primary-container); }
+.li .lead.ok { background:#C8EBCF; color:#0B3D1E; }
+.li .lead.todo { background:var(--surface-cont-highest); color:var(--on-surface-var); }
+.li .lead .ms { font-size:22px; }
+.li .tx { flex:1; min-width:0; } .li .h { font:400 16px/24px Roboto; color:var(--on-surface); } .li .s { font:400 14px/20px Roboto; color:var(--on-surface-var); }
+.li .trail { font:500 12px Roboto; color:var(--on-surface-var); }
+.sub { font:500 14px/20px Roboto; color:var(--primary); padding:18px 16px 6px; }
+.hist .li { align-items:flex-start; padding:12px 16px; }
+.hist .h { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.divider { height:1px; background:var(--outline-var); margin:0 16px; }
+.err-card { margin:4px 16px 0; background:var(--error-container); color:var(--on-error-container); border-radius:16px; padding:14px 16px; display:flex; gap:14px; align-items:flex-start; }
+.err-card .tx { flex:1; } .err-card .h { font:500 15px/20px Roboto; } .err-card .s { font:400 13.5px/19px Roboto; margin-top:2px; color:#5C1511; }
+.err-card .fbtn { background:var(--error); margin-top:10px; height:36px; }
+.navbar { height:80px; flex:none; background:var(--surface-cont); display:flex; justify-content:space-around; align-items:flex-start; padding-top:12px; }
+.nav-it { display:flex; flex-direction:column; align-items:center; gap:4px; width:80px; font:500 12px Roboto; color:var(--on-surface-var); }
+.nav-it .pill { width:64px; height:32px; border-radius:16px; display:grid; place-items:center; }
+.nav-it.on { color:var(--on-surface); } .nav-it.on .pill { background:var(--secondary-container); color:var(--on-secondary-container); }
+.sw { width:52px; height:32px; border-radius:16px; background:var(--primary); position:relative; flex:none; }
+.sw::after { content:""; position:absolute; right:4px; top:4px; width:24px; height:24px; border-radius:50%; background:#fff; }
+.sw.off { background:var(--surface-cont-highest); border:2px solid var(--outline); } .sw.off::after { left:6px; right:auto; top:6px; width:16px; height:16px; background:var(--outline); }
+.note-sm { font:400 12.5px/18px Roboto; color:var(--on-surface-var); padding:10px 16px; }
+
+/* ════════════════ WINDOWS 11 / FLUENT ════════════════ */
+.desk { width:1240px; height:760px; border-radius:10px; overflow:hidden; position:relative;
+  background:radial-gradient(120% 90% at 70% 10%, #8fb6e6 0%, #3f6fb4 38%, #1f3f7a 70%, #142a55 100%); box-shadow:0 20px 50px rgba(0,0,0,.5); }
+.taskbar { position:absolute; left:0; right:0; bottom:0; height:48px; background:rgba(238,240,244,.96); border-top:1px solid rgba(0,0,0,.08); display:flex; align-items:center; justify-content:center; }
+.tb-apps { display:flex; gap:4px; }
+.tb-apps span { width:40px; height:40px; border-radius:5px; display:grid; place-items:center; }
+.tb-apps span.on { background:rgba(0,0,0,.05); position:relative; } .tb-apps span.on::after { content:""; position:absolute; bottom:2px; width:16px; height:3px; border-radius:2px; background:#005FB8; }
+.tb-tray { position:absolute; right:10px; top:0; height:48px; display:flex; align-items:center; gap:10px; font-size:12px; color:#1a1a1a; }
+.tb-tray .clock { text-align:right; line-height:1.3; }
+.tray-voxa { position:relative; width:24px; height:24px; display:grid; place-items:center; }
+.tray-voxa i { position:absolute; right:-1px; bottom:0; width:8px; height:8px; border-radius:50%; background:#C98A16; border:1.5px solid #eef0f4; }
+
+/* app window under the strip */
+.win { position:absolute; background:#fff; color:#111B21; border-radius:8px; box-shadow:0 26px 60px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.12); overflow:hidden; display:flex; flex-direction:column; }
+.titlebar { height:40px; flex:none; display:flex; align-items:center; padding-left:14px; gap:10px; font-size:12px; color:#1a1a1a; }
+.titlebar .grow { flex:1; }
+.caps { display:flex; } .caps span { width:46px; height:40px; display:grid; place-items:center; font-size:10px; color:#1a1a1a; }
+
+/* Voxa strip over the desktop */
+.strip { position:absolute; left:50%; transform:translateX(-50%); bottom:68px; height:52px; border-radius:26px; background:#221812; color:#FBEEE8;
+  box-shadow:0 12px 32px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.07) inset; display:flex; align-items:center; gap:6px; padding:0 6px 0 18px; font-family:"Segoe UI Variable Text","Segoe UI"; }
+.strip .ink { width:190px; height:24px; } .strip .ink path { fill:none; stroke:#FBEEE8; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.strip .time { font:500 13px "Cascadia Mono",Consolas,monospace; padding:0 6px; }
+.strip .sbtn { height:36px; padding:0 14px; border-radius:18px; border:1px solid rgba(255,255,255,.16); background:transparent; color:#FBEEE8; font:500 13px "Segoe UI Variable Text","Segoe UI"; }
+.strip .sbtn.primary { background:#FBEEE8; color:#221812; border-color:transparent; }
+.strip .msg { font-size:14px; padding-right:8px; } .strip .msg small { display:block; font-size:12px; color:#D8C6BC; }
+.strip .lead { width:24px; display:grid; place-items:center; color:#F3C98B; font-size:16px; }
+.strip .xbtn { width:36px; height:36px; border-radius:18px; display:grid; place-items:center; color:#D8C6BC; font-size:11px; }
+
+/* Voxa main window (Fluent) */
+.fwin { width:1100px; height:760px; border-radius:8px; overflow:hidden; display:flex; flex-direction:column; background:#F3EFEC; color:#1a1a1a;
+  box-shadow:0 26px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(0,0,0,.18); font-family:"Segoe UI Variable Text","Segoe UI",system-ui; }
+.fwin .titlebar { background:transparent; }
+.fbody { flex:1; display:flex; min-height:0; }
+.navview { width:248px; flex:none; padding:4px 6px; display:flex; flex-direction:column; gap:2px; }
+.navitem { height:36px; border-radius:5px; display:flex; align-items:center; gap:14px; padding:0 12px; font-size:14px; position:relative; color:#1a1a1a; }
+.navitem .fi { font-size:16px; width:16px; }
+.navitem.on { background:rgba(0,0,0,.055); } .navitem.on::before { content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px; border-radius:2px; background:#8F4C2C; }
+.navitem .badge { margin-left:auto; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:#C42B1C; color:#fff; font-size:11px; font-weight:600; display:grid; place-items:center; }
+.navitem.foot { margin-top:auto; }
+.pagearea { flex:1; background:#FBF9F8; border-top-left-radius:8px; border-top:1px solid rgba(0,0,0,.06); border-left:1px solid rgba(0,0,0,.06); padding:28px 40px; overflow:hidden; }
+.ptitle { font:600 28px/36px "Segoe UI Variable Display","Segoe UI"; margin-bottom:18px; }
+.infobar { display:flex; align-items:flex-start; gap:12px; padding:13px 14px; border-radius:6px; background:#FFF4CE; border:1px solid rgba(0,0,0,.06); }
+.infobar .fi { font-size:16px; color:#9D5D00; margin-top:2px; }
+.infobar .tx { flex:1; font-size:14px; line-height:20px; } .infobar .tx b { font-weight:600; margin-right:8px; }
+.infobar.err { background:#FDE7E9; } .infobar.err .fi { color:#C42B1C; }
+.fbtnw { height:32px; padding:0 14px; border-radius:4px; border:1px solid rgba(0,0,0,.08); border-bottom-color:rgba(0,0,0,.18); background:#fff; font:400 14px "Segoe UI Variable Text","Segoe UI"; color:#1a1a1a; white-space:nowrap; }
+.fbtnw.accent { background:#8F4C2C; color:#fff; border-color:rgba(0,0,0,.12); }
+.scard { background:#fff; border:1px solid rgba(0,0,0,.07); border-radius:6px; display:flex; align-items:center; gap:16px; padding:14px 16px; min-height:66px; }
+.scard + .scard { margin-top:4px; }
+.scard .fi { font-size:18px; width:20px; color:#1a1a1a; }
+.scard .tx { flex:1; } .scard .h { font-size:14px; line-height:20px; } .scard .s { font-size:12px; line-height:16px; color:#5f5f5f; margin-top:1px; }
+.sect { font:600 14px/20px "Segoe UI Variable Text","Segoe UI"; margin:24px 0 8px; }
+.toggle { width:40px; height:20px; border-radius:10px; background:#8F4C2C; position:relative; } .toggle::after { content:""; position:absolute; right:4px; top:4px; width:12px; height:12px; border-radius:50%; background:#fff; }
+.toggle.off { background:transparent; border:1px solid #616161; } .toggle.off::after { left:3px; right:auto; top:3px; background:#616161; }
+.combo { height:32px; min-width:220px; border-radius:4px; border:1px solid rgba(0,0,0,.08); border-bottom-color:rgba(0,0,0,.25); background:#fff; display:flex; align-items:center; justify-content:space-between; padding:0 10px 0 12px; font-size:14px; }
+.combo .fi { font-size:10px; width:auto; color:#5f5f5f; }
+.keyc { display:flex; gap:4px; } .keyc span { height:28px; min-width:28px; padding:0 8px; border-radius:4px; background:#fff; border:1px solid rgba(0,0,0,.12); border-bottom-width:2px; display:grid; place-items:center; font-size:13px; }
+.hrow { display:grid; grid-template-columns:90px 1fr auto; gap:16px; align-items:start; padding:12px 16px; background:#fff; border:1px solid rgba(0,0,0,.07); border-radius:6px; }
+.hrow + .hrow { margin-top:4px; }
+.hrow .when { font-size:12px; color:#5f5f5f; line-height:18px; } .hrow .when b { display:block; color:#1a1a1a; font-weight:600; }
+.hrow .txt { font-size:14px; line-height:21px; }
+.hrow .fbtnw { height:28px; padding:0 10px; font-size:13px; }
+.search { height:32px; width:320px; border-radius:4px; border:1px solid rgba(0,0,0,.08); border-bottom-color:rgba(0,0,0,.25); background:#fff; display:flex; align-items:center; gap:8px; padding:0 10px; font-size:14px; color:#5f5f5f; }
+.prow { display:flex; align-items:center; justify-content:space-between; }
+.privacy { font-size:12px; color:#5f5f5f; margin-top:18px; line-height:18px; }
+.frames { display:flex; flex-direction:column; gap:40px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="nib" viewBox="0 0 16 16"><path d="M1 15 L5.2 6.8 Q9.5 1.2 15 1 Q14.8 6.5 9.2 10.8 Z" fill="currentColor"/><path d="M1 15 L8.6 7.4" stroke="#221812" stroke-width="1" stroke-linecap="round"/><circle cx="9.4" cy="6.6" r="1.15" fill="#221812"/></symbol>
+  <symbol id="feather" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4C12 4 6 9 5 19"/><path d="M20 4c0 7-5 11-11 11M8 12h7"/></g></symbol>
+</defs></svg>
+
+<div class="page">
+  <header class="rv">
+    <h1>Voxa v7: native screens</h1>
+    <p>Each platform drawn with its own design system so it reads like a shipping app, not a prototype. Android uses Material 3 components, Roboto and Material Symbols on a Pixel-sized screen with a real keyboard. Windows uses Windows 11 Fluent: Segoe UI Variable, Segoe Fluent Icons, a native title bar, NavigationView, settings cards and an InfoBar. Voxa's identity rides on top: the sepia ink colour scheme, the Fraunces wordmark, and the ink line while you talk. Flow and states are unchanged from v6.</p>
+  </header>
+
+  <!-- ═════════════ ANDROID ═════════════ -->
+  <div class="lbl">Android</div>
+  <div class="android-row">
+
+    <!-- 1. Dictating in a chat app -->
+    <div>
+      <div class="device"><div class="screen">
+        <div class="chat">
+          <div class="sbar" style="background:#F3EDF7"><span>9:41</span><span class="cam"></span><span class="ic"><span class="ms fill">signal_cellular_alt</span><span class="ms fill">wifi</span><span class="ms fill">battery_5_bar</span></span></div>
+          <div class="appbar"><span class="icbtn"><span class="ms">arrow_back</span></span><span class="av">P</span><span class="nm">Priya Raman<small>online</small></span><span class="icbtn"><span class="ms">videocam</span></span><span class="icbtn"><span class="ms">call</span></span></div>
+          <div class="thread">
+            <div class="bub in">Are you still coming to the 11 o'clock?<small>10:28</small></div>
+            <div class="bub in">We can push it if you need<small>10:28</small></div>
+          </div>
+          <div class="compose"><div class="field"><span class="icbtn" style="width:40px;height:40px"><span class="ms">mood</span></span><span class="ph typed">Running ten minutes late, start with<span class="caret"></span></span></div><span class="send"><span class="ms fill">send</span></span></div>
+        </div>
+        <div class="kb">
+          <div class="vbar" role="status" aria-label="Recording, 9 seconds">
+            <span class="icbtn" aria-label="Cancel"><span class="ms">close</span></span>
+            <span class="rec"></span>
+            <svg class="ink" viewBox="0 0 170 26" preserveAspectRatio="none" aria-hidden="true"><path d="M2 13 C 8 13, 10 5, 16 5 S 22 22, 28 22 S 34 2, 41 2 S 47 24, 54 24 S 60 8, 66 8 S 71 18, 77 18 S 83 1, 91 1 S 97 25, 105 25 S 111 7, 118 7 S 124 19, 131 19 S 137 6, 144 6 S 150 17, 154 13 L 158 13"/><use href="#nib" x="157" y="-2" width="16" height="16" style="color:#FBEEE8"/></svg>
+            <span class="time">0:09</span>
+            <span class="stop" aria-label="Stop and insert"><span class="ms fill" style="font-size:22px">stop</span></span>
+          </div>
+          <div class="rows">
+            <div class="row"><span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span></div>
+            <div class="row mid"><span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span></div>
+            <div class="row"><span class="k wide"><span class="ms">shift</span></span><span class="k">z</span><span class="k">x</span><span class="k">c</span><span class="k">v</span><span class="k">b</span><span class="k">n</span><span class="k">m</span><span class="k wide"><span class="ms">backspace</span></span></div>
+            <div class="row"><span class="k mod" style="max-width:none;flex:1.4 1 0">?123</span><span class="k mod">,</span><span class="k mod" style="max-width:none;flex:1 1 0"><span class="ms" style="font-size:20px">language</span></span><span class="k space">English</span><span class="k mod">.</span><span class="k enter" style="max-width:none;flex:1.4 1 0"><span class="ms">keyboard_return</span></span></div>
+          </div>
+        </div>
+        <div class="gbar" style="background:#EFE7E3"><i></i></div>
+      </div></div>
+      <p class="cap"><b>Dictating in a chat.</b> The Voxa bar replaces the keyboard's toolbar while you talk: Cancel, the live ink line, timer, Stop. The keys stay where they are.</p>
+    </div>
+
+    <!-- 2. Needs you, inside the keyboard -->
+    <div>
+      <div class="device"><div class="screen">
+        <div class="chat">
+          <div class="sbar" style="background:#F3EDF7"><span>9:41</span><span class="cam"></span><span class="ic"><span class="ms fill">signal_cellular_alt</span><span class="ms fill">wifi</span><span class="ms fill">battery_5_bar</span></span></div>
+          <div class="appbar"><span class="icbtn"><span class="ms">arrow_back</span></span><span class="av">P</span><span class="nm">Priya Raman<small>online</small></span><span class="icbtn"><span class="ms">videocam</span></span><span class="icbtn"><span class="ms">call</span></span></div>
+          <div class="thread">
+            <div class="bub in">Are you still coming to the 11 o'clock?<small>10:28</small></div>
+            <div class="bub in">We can push it if you need<small>10:28</small></div>
+          </div>
+          <div class="compose"><div class="field"><span class="icbtn" style="width:40px;height:40px"><span class="ms">mood</span></span><span class="ph">Message<span class="caret"></span></span></div><span class="send" style="background:#E2E2E9;color:#44474F"><span class="ms fill">mic</span></span></div>
+        </div>
+        <div class="kb">
+          <div class="vnotice" role="alert">
+            <span class="ms">key</span>
+            <span class="t">Sign in to ChatGPT to dictate<small>Your ChatGPT session ended</small></span>
+            <button class="fbtn">Sign in</button>
+          </div>
+          <div class="rows">
+            <div class="row"><span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span></div>
+            <div class="row mid"><span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span></div>
+            <div class="row"><span class="k wide"><span class="ms">shift</span></span><span class="k">z</span><span class="k">x</span><span class="k">c</span><span class="k">v</span><span class="k">b</span><span class="k">n</span><span class="k">m</span><span class="k wide"><span class="ms">backspace</span></span></div>
+            <div class="row"><span class="k mod" style="max-width:none;flex:1.4 1 0">?123</span><span class="k mod">,</span><span class="k mod" style="max-width:none;flex:1 1 0"><span class="ms" style="font-size:20px">language</span></span><span class="k space">English</span><span class="k mod">.</span><span class="k enter" style="max-width:none;flex:1.4 1 0"><span class="ms">keyboard_return</span></span></div>
+          </div>
+        </div>
+        <div class="gbar" style="background:#EFE7E3"><i></i></div>
+      </div></div>
+      <p class="cap"><b>Checked before you talk.</b> Tapping the mic when the session has ended shows this instead of recording. Sign in opens a sheet over the keyboard and returns you to this chat. Offline and "couldn't reach ChatGPT" use the same bar with Retry or Discard.</p>
+    </div>
+
+    <!-- 3. Voxa app, Home -->
+    <div>
+      <div class="device"><div class="screen">
+        <div class="sbar"><span>9:41</span><span class="cam"></span><span class="ic"><span class="ms fill">signal_cellular_alt</span><span class="ms fill">wifi</span><span class="ms fill">battery_5_bar</span></span></div>
+        <div class="tab-small"><span class="title wordmark" style="font-size:26px;padding-left:12px">voxa</span><span class="icbtn"><span class="ms">account_circle</span></span></div>
+        <div class="content">
+          <div class="card-filled">
+            <h3>Almost ready</h3>
+            <p>One step left before you can dictate in any app.</p>
+            <div class="progress"><i></i></div>
+          </div>
+          <div style="margin-top:6px">
+            <div class="li"><span class="lead ok"><span class="ms">check</span></span><span class="tx"><span class="h">Signed in to ChatGPT</span><div class="s">sam@example.com</div></span></div>
+            <div class="li"><span class="lead ok"><span class="ms">check</span></span><span class="tx"><span class="h">Microphone allowed</span></span></div>
+            <div class="li"><span class="lead todo"><span class="ms">keyboard</span></span><span class="tx"><span class="h">Turn on Voxa keyboard</span><div class="s">In Android settings, then pick it when you type</div></span></div>
+            <div style="padding:4px 16px 0 72px"><button class="fbtn">Turn on</button></div>
+          </div>
+          <div class="sub">Recent</div>
+          <div class="hist">
+            <div class="li"><span class="lead"><span class="ms">chat</span></span><span class="tx"><span class="h">Running ten minutes late, start without me</span><div class="s">Messages · 10:31</div></span></div>
+            <div class="li"><span class="lead"><span class="ms">mail</span></span><span class="tx"><span class="h">Thanks for sending the contract, I'll read it tonight</span><div class="s">Gmail · 09:12</div></span></div>
+          </div>
+        </div>
+        <div class="navbar">
+          <div class="nav-it on"><span class="pill"><span class="ms fill">home</span></span>Home</div>
+          <div class="nav-it"><span class="pill"><span class="ms">history</span></span>History</div>
+          <div class="nav-it"><span class="pill"><span class="ms">settings</span></span>Settings</div>
+        </div>
+        <div class="gbar" style="background:var(--surface-cont)"><i></i></div>
+      </div></div>
+      <p class="cap"><b>Voxa app, Home.</b> Standard Material 3: top app bar, setup card with progress, list items, navigation bar. Once setup is done the card disappears and Recent fills the screen.</p>
+    </div>
+
+    <!-- 4. Voxa app, History with a failed item -->
+    <div>
+      <div class="device"><div class="screen">
+        <div class="sbar"><span>9:41</span><span class="cam"></span><span class="ic"><span class="ms fill">signal_cellular_alt</span><span class="ms fill">wifi</span><span class="ms fill">battery_5_bar</span></span></div>
+        <div class="tab-small"><span class="icbtn"><span class="ms">search</span></span><span class="title">History</span><span class="icbtn"><span class="ms">more_vert</span></span></div>
+        <div class="content">
+          <div class="err-card">
+            <span class="ms" style="color:var(--error)">error</span>
+            <div class="tx"><div class="h">1 dictation not sent</div><div class="s">22 seconds for Gmail. Your ChatGPT session ended before it was written out.</div><button class="fbtn">Sign in and send</button></div>
+          </div>
+          <div class="sub">Today</div>
+          <div class="hist">
+            <div class="li"><span class="lead"><span class="ms">chat</span></span><span class="tx"><span class="h">Running ten minutes late, start without me and I'll catch up on the notes</span><div class="s">Messages · 10:31 · 15 words</div></span><span class="icbtn" style="width:40px;height:40px"><span class="ms">content_copy</span></span></div>
+            <div class="divider"></div>
+            <div class="li"><span class="lead"><span class="ms">mail</span></span><span class="tx"><span class="h">Thanks for sending the contract. I'll read it tonight and come back with questions</span><div class="s">Gmail · 09:12 · 17 words</div></span><span class="icbtn" style="width:40px;height:40px"><span class="ms">content_copy</span></span></div>
+          </div>
+          <div class="sub">Yesterday</div>
+          <div class="hist">
+            <div class="li"><span class="lead"><span class="ms">forum</span></span><span class="tx"><span class="h">Can you push the review to Thursday? The build is ready but I want one more pass</span><div class="s">Slack · 18:40 · 19 words</div></span><span class="icbtn" style="width:40px;height:40px"><span class="ms">content_copy</span></span></div>
+          </div>
+          <p class="note-sm">Audio goes to ChatGPT to become text. History stays on this phone.</p>
+        </div>
+        <div class="navbar">
+          <div class="nav-it"><span class="pill"><span class="ms">home</span></span>Home</div>
+          <div class="nav-it on"><span class="pill"><span class="ms fill">history</span></span>History</div>
+          <div class="nav-it"><span class="pill"><span class="ms">settings</span></span>Settings</div>
+        </div>
+        <div class="gbar" style="background:var(--surface-cont)"><i></i></div>
+      </div></div>
+      <p class="cap"><b>History.</b> A not-sent dictation is pinned on top as a Material error card with its one action. Copy on every item. Searchable from the top bar.</p>
+    </div>
+
+  </div>
+
+  <!-- ═════════════ WINDOWS ═════════════ -->
+  <div class="lbl">Windows 11</div>
+  <div class="frames">
+
+    <!-- 1. Strip over a real desktop -->
+    <div>
+      <div class="desk">
+        <div class="win" style="left:150px; top:46px; width:940px; height:600px;">
+          <div class="titlebar" style="background:#F3F3F3"><span style="width:16px;height:16px;border-radius:4px;background:#25D366;display:inline-block"></span><span>WhatsApp</span><span class="grow"></span><span class="caps"><span class="fi">&#xE921;</span><span class="fi">&#xE922;</span><span class="fi">&#xE8BB;</span></span></div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="width:300px;border-right:1px solid #e9e9e9;background:#fff;padding:12px">
+              <div style="height:34px;border-radius:8px;background:#F0F2F5;margin-bottom:10px;display:flex;align-items:center;padding:0 12px;font-size:13px;color:#667781"><span class="fi" style="font-size:12px;margin-right:10px">&#xE721;</span>Search</div>
+              <div style="display:flex;gap:12px;padding:10px 6px;border-radius:8px;background:#F0F2F5"><span style="width:44px;height:44px;border-radius:50%;background:#7D5260;color:#fff;display:grid;place-items:center;font-weight:600">P</span><div style="font-size:14px"><b style="font-weight:600">Priya Raman</b><div style="color:#667781;font-size:13px;margin-top:2px">We can push it if you need</div></div></div>
+              <div style="display:flex;gap:12px;padding:10px 6px"><span style="width:44px;height:44px;border-radius:50%;background:#3A6EA5;color:#fff;display:grid;place-items:center;font-weight:600">D</span><div style="font-size:14px"><b style="font-weight:600">Design team</b><div style="color:#667781;font-size:13px;margin-top:2px">Arjun: new build is up</div></div></div>
+              <div style="display:flex;gap:12px;padding:10px 6px"><span style="width:44px;height:44px;border-radius:50%;background:#5F8D4E;color:#fff;display:grid;place-items:center;font-weight:600">M</span><div style="font-size:14px"><b style="font-weight:600">Mom</b><div style="color:#667781;font-size:13px;margin-top:2px">Call me when free</div></div></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;background:#EFEAE2">
+              <div style="height:56px;background:#F0F2F5;display:flex;align-items:center;gap:12px;padding:0 16px;font-size:15px"><span style="width:38px;height:38px;border-radius:50%;background:#7D5260;color:#fff;display:grid;place-items:center;font-weight:600">P</span><b style="font-weight:600">Priya Raman</b></div>
+              <div style="flex:1;padding:16px 40px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;font-size:14px">
+                <div style="align-self:flex-start;background:#fff;padding:7px 10px;border-radius:8px;box-shadow:0 1px 0 rgba(0,0,0,.08)">Are you still coming to the 11 o'clock? <span style="font-size:11px;color:#667781;margin-left:8px">10:28</span></div>
+                <div style="align-self:flex-start;background:#fff;padding:7px 10px;border-radius:8px;box-shadow:0 1px 0 rgba(0,0,0,.08)">We can push it if you need <span style="font-size:11px;color:#667781;margin-left:8px">10:28</span></div>
+              </div>
+              <div style="height:62px;background:#F0F2F5;display:flex;align-items:center;gap:12px;padding:0 16px"><div style="flex:1;height:42px;border-radius:8px;background:#fff;display:flex;align-items:center;padding:0 14px;font-size:14px;color:#3b4a54">Type a message<span style="display:inline-block;width:1.5px;height:18px;background:#111;margin-left:2px;vertical-align:-4px"></span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="strip" role="status" aria-label="Voxa recording for WhatsApp, 14 seconds">
+          <span style="width:10px;height:10px;border-radius:50%;background:#FF6B5E;box-shadow:0 0 0 4px rgba(255,107,94,.22)"></span>
+          <svg class="ink" viewBox="0 0 190 24" preserveAspectRatio="none" aria-hidden="true"><path d="M2 12 C 8 12, 10 4, 16 4 S 22 21, 28 21 S 34 2, 41 2 S 47 22, 54 22 S 60 7, 66 7 S 71 17, 77 17 S 83 1, 91 1 S 97 23, 105 23 S 111 6, 118 6 S 124 18, 131 18 S 137 4, 144 4 S 150 20, 157 20 S 163 9, 170 9 S 174 13, 177 12 L 180 12"/><use href="#nib" x="179" y="-3" width="16" height="16" style="color:#FBEEE8"/></svg>
+          <span class="time">0:14</span>
+          <button class="sbtn">Cancel</button>
+          <button class="sbtn primary">Stop</button>
+        </div>
+
+        <div class="taskbar">
+          <div class="tb-apps">
+            <span><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1" y="1" width="8" height="8" fill="#0078D4"/><rect x="11" y="1" width="8" height="8" fill="#0078D4"/><rect x="1" y="11" width="8" height="8" fill="#0078D4"/><rect x="11" y="11" width="8" height="8" fill="#0078D4"/></svg></span>
+            <span><span class="fi" style="font-size:18px;color:#1a1a1a">&#xE721;</span></span>
+            <span><span style="width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,#F7C343,#E0A21B);display:block"></span></span>
+            <span><span style="width:22px;height:22px;border-radius:50%;background:conic-gradient(#EA4335 0 33%,#FBBC04 0 66%,#34A853 0);display:block"></span></span>
+            <span class="on"><span style="width:22px;height:22px;border-radius:6px;background:#25D366;display:block"></span></span>
+            <span><span style="width:22px;height:22px;border-radius:6px;background:#4A154B;display:block"></span></span>
+          </div>
+          <div class="tb-tray">
+            <span class="fi" style="font-size:12px">&#xE70E;</span>
+            <span class="tray-voxa"><svg width="18" height="18" style="color:#3a2a20"><use href="#feather"/></svg></span>
+            <span class="fi" style="font-size:15px">&#xE701;</span><span class="fi" style="font-size:15px">&#xE767;</span><span class="fi" style="font-size:15px">&#xE83F;</span>
+            <span class="clock">10:31<br>22-11-2026</span>
+          </div>
+        </div>
+      </div>
+      <p class="cap" style="max-width:none"><b>Dictating into WhatsApp on Windows.</b> The strip floats bottom-centre above the taskbar: the live ink line, timer, Cancel, Stop. It never takes focus from WhatsApp. Voxa lives in the tray; its dot turns amber or red when something needs you.</p>
+    </div>
+
+    <!-- 2. Voxa window: Home -->
+    <div>
+      <div class="desk" style="display:grid;place-items:center;height:840px">
+        <div class="fwin">
+          <div class="titlebar"><svg width="16" height="16" style="color:#3a2a20"><use href="#feather"/></svg><span>Voxa</span><span class="grow"></span><span class="caps"><span class="fi">&#xE921;</span><span class="fi">&#xE922;</span><span class="fi">&#xE8BB;</span></span></div>
+          <div class="fbody">
+            <nav class="navview">
+              <div class="navitem on"><span class="fi">&#xE80F;</span>Home</div>
+              <div class="navitem"><span class="fi">&#xE81C;</span>History<span class="badge">1</span></div>
+              <div class="navitem foot"><span class="fi">&#xE713;</span>Settings</div>
+            </nav>
+            <main class="pagearea">
+              <div class="ptitle">Home</div>
+              <div class="infobar"><span class="fi">&#xE7BA;</span><div class="tx"><b>Microphone access is off.</b>Windows is blocking desktop apps from using the microphone, so Voxa can't record.</div><button class="fbtnw">Open Windows settings</button></div>
+              <div class="infobar err" style="margin-top:8px"><span class="fi">&#xEA39;</span><div class="tx"><b>1 dictation not sent.</b>22 seconds for Gmail at 10:42. Your ChatGPT session ended before it was written out.</div><button class="fbtnw accent">Sign in and send</button></div>
+
+              <div class="sect">Dictation</div>
+              <div class="scard"><span class="fi">&#xE765;</span><div class="tx"><div class="h">Shortcut</div><div class="s">Press once to start, again to stop. Works in any app.</div></div><div class="keyc"><span>Ctrl</span><span>Space</span></div></div>
+              <div class="scard"><span class="fi">&#xE720;</span><div class="tx"><div class="h">Microphone</div><div class="s">Not available until access is turned on</div></div><div class="combo">Headset Microphone (Jabra)<span class="fi">&#xE70D;</span></div></div>
+              <div class="scard"><span class="fi">&#xE77B;</span><div class="tx"><div class="h">ChatGPT account</div><div class="s">Signed in as sam@example.com · session ended 10:40</div></div><button class="fbtnw accent">Sign in again</button></div>
+
+              <div class="sect">Today</div>
+              <div class="hrow"><div class="when"><b>10:31</b>WhatsApp</div><div class="txt">Running ten minutes late, start without me and I'll catch up on the notes.</div><button class="fbtnw"><span class="fi" style="font-size:12px;margin-right:6px">&#xE8C8;</span>Copy</button></div>
+              <div class="hrow"><div class="when"><b>09:58</b>Slack</div><div class="txt">Can you push the review to Thursday? The build is ready but I want one more pass on the onboarding flow.</div><button class="fbtnw"><span class="fi" style="font-size:12px;margin-right:6px">&#xE8C8;</span>Copy</button></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="cap" style="max-width:none"><b>Voxa window, Home.</b> Windows 11 NavigationView with a selection pill, InfoBars for what needs fixing (each with its one action), settings cards for the essentials, and today's dictations. When nothing needs fixing the InfoBars disappear.</p>
+    </div>
+
+    <!-- 3. Voxa window: Settings -->
+    <div>
+      <div class="desk" style="display:grid;place-items:center;height:900px;background:radial-gradient(120% 90% at 30% 10%, #d9c2a8 0%, #a8754d 40%, #5b3a26 75%, #2f1e14 100%)">
+        <div class="fwin" style="height:830px">
+          <div class="titlebar"><svg width="16" height="16" style="color:#3a2a20"><use href="#feather"/></svg><span>Voxa</span><span class="grow"></span><span class="caps"><span class="fi">&#xE921;</span><span class="fi">&#xE922;</span><span class="fi">&#xE8BB;</span></span></div>
+          <div class="fbody">
+            <nav class="navview">
+              <div class="navitem"><span class="fi">&#xE80F;</span>Home</div>
+              <div class="navitem"><span class="fi">&#xE81C;</span>History</div>
+              <div class="navitem foot on"><span class="fi">&#xE713;</span>Settings</div>
+            </nav>
+            <main class="pagearea">
+              <div class="ptitle">Settings</div>
+              <div class="sect" style="margin-top:0">Dictation</div>
+              <div class="scard"><span class="fi">&#xE765;</span><div class="tx"><div class="h">Shortcut</div><div class="s">Start and stop dictating from any app</div></div><div class="keyc"><span>Ctrl</span><span>Space</span></div><button class="fbtnw">Change</button></div>
+              <div class="scard"><span class="fi">&#xE720;</span><div class="tx"><div class="h">Microphone</div><div class="s">Voxa falls back to the Windows default if this one is unplugged</div></div><div class="combo">Headset Microphone (Jabra)<span class="fi">&#xE70D;</span></div></div>
+              <div class="scard"><span class="fi">&#xE8A7;</span><div class="tx"><div class="h">Paste into the app I started in</div><div class="s">If you switch apps while Voxa is writing, it asks before pasting</div></div><span class="toggle"></span></div>
+
+              <div class="sect">Account and privacy</div>
+              <div class="scard"><span class="fi">&#xE77B;</span><div class="tx"><div class="h">ChatGPT account</div><div class="s">sam@example.com</div></div><button class="fbtnw">Sign out</button></div>
+              <div class="scard"><span class="fi">&#xE72E;</span><div class="tx"><div class="h">Keep recordings</div><div class="s">Audio stays on this PC so you can replay or resend it</div></div><div class="combo" style="min-width:160px">For 30 days<span class="fi">&#xE70D;</span></div></div>
+              <div class="scard"><span class="fi">&#xE74D;</span><div class="tx"><div class="h">Delete history and recordings</div><div class="s">142 dictations, 61 MB</div></div><button class="fbtnw">Delete all</button></div>
+
+              <div class="sect">System</div>
+              <div class="scard"><span class="fi">&#xE7E8;</span><div class="tx"><div class="h">Start Voxa when I sign in to Windows</div><div class="s">Starts quietly in the tray</div></div><span class="toggle"></span></div>
+              <p class="privacy">Your audio is sent to ChatGPT to turn it into text. Recordings and history stay on this PC. Voxa 1.0.0</p>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="cap" style="max-width:none"><b>Settings.</b> Native Windows 11 settings-card layout: one row per setting with a plain description and the control on the right. Grouped into Dictation, Account and privacy, System.</p>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

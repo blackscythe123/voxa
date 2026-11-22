@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voxa v8, the living desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..700,0..100;1,9..144,300..700,0..100&family=Lora:ital,wght@0,400..600;1,400..600&family=IBM+Plex+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block" rel="stylesheet" />
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   Voxa v8: the living desk.
+   Built from the current desktop strip (src/renderer/overlay.html), which the
+   owner loves: vellum slip, terracotta pin, italic Fraunces, Plex Mono timer,
+   a quill that writes, a 1.4deg tilt. Every surface speaks that language and
+   moves. All of it maps to a GPU renderer: textured bitmap, paths, springs.
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --paper:#faf6f0; --paper-warm:#f3eadb; --vellum:#fffbf4; --rule:#e8dcc7; --rule-2:#efe5d2;
+  --ink:#2d2418; --ink-2:#6b5c40; --ink-3:#8a7a5c;
+  --terra:#c4632a; --terra-deep:#a14c1d; --sage:#5a7d5a; --margin:#e3a98a;
+  --ease:cubic-bezier(.4,0,.2,1);
+  --noise:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.14 0 0 0 0 0.09 0 0 0 0.08 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html { background:#1d1915; }
+body { font-family:"Lora",Georgia,serif; color:var(--ink); }
+.page { max-width:1300px; margin:0 auto; padding:44px 24px 90px; }
+.rv h1 { font:italic 500 34px/1.1 "Fraunces",serif; font-variation-settings:"SOFT" 100; color:#f3eadb; letter-spacing:-.01em; }
+.rv p { margin-top:10px; font:15px/1.6 "Lora",serif; color:#cbbfa8; max-width:860px; }
+.lbl { font:italic 500 20px "Fraunces",serif; font-variation-settings:"SOFT" 100; color:#e8dcc7; margin:56px 0 6px; }
+.lbl-sub { font:14px/1.5 "Lora",serif; color:#a89a80; margin-bottom:18px; max-width:820px; }
+.paper-tex { position:relative; isolation:isolate; }
+.paper-tex::before { content:""; position:absolute; inset:0; background-image:var(--noise); mix-blend-mode:multiply; opacity:.7; pointer-events:none; z-index:0; border-radius:inherit; }
+.paper-tex > * { position:relative; z-index:1; }
+
+/* ═════════════ THE SLIP (the strip, as it is today, grown up) ═════════════ */
+.slip { position:relative; display:inline-flex; align-items:center; gap:12px; min-height:64px; padding:0 18px 0 24px;
+  background:var(--vellum); transform:rotate(-1.4deg); transform-origin:50% 50%;
+  filter:drop-shadow(0 8px 16px rgba(45,36,24,.28)) drop-shadow(0 1px 2px rgba(45,36,24,.2));
+  transition:width .45s var(--ease), min-width .45s var(--ease); min-width:236px; }
+.slip::before { content:""; position:absolute; inset:0; background-image:var(--noise); mix-blend-mode:multiply; opacity:.7; pointer-events:none; }
+.slip > * { position:relative; }
+.pin { position:absolute !important; top:-6px; right:14px; width:13px; height:13px; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, #e2864c 0%, var(--terra) 50%, var(--terra-deep) 100%);
+  box-shadow:0 2px 3px rgba(0,0,0,.3), inset 0 -1px 1px rgba(0,0,0,.25); }
+.pin::after { content:""; position:absolute; left:50%; top:50%; width:3px; height:3px; border-radius:50%; background:rgba(0,0,0,.35); transform:translate(-50%,-50%); }
+.dot { width:9px; height:9px; border-radius:50%; background:var(--terra); box-shadow:0 0 0 1px rgba(196,99,42,.25); flex:none; animation:tap 1.6s var(--ease) infinite; }
+.dot.ink { background:var(--ink-2); box-shadow:0 0 0 1px rgba(107,92,64,.25); animation-duration:.9s; }
+.dot.still { animation:none; opacity:.5; background:var(--ink-3); }
+@keyframes tap { 0%,100% { opacity:.95; transform:scale(1); } 50% { opacity:.5; transform:scale(.82); } }
+.note { font:italic 500 13px/1.25 "Fraunces",serif; font-variation-settings:"opsz" 24,"SOFT" 100; color:var(--ink-2); white-space:nowrap; }
+.note b { font-weight:600; color:var(--ink); font-style:italic; }
+.note small { display:block; font:italic 400 11.5px "Fraunces",serif; font-variation-settings:"opsz" 18,"SOFT" 100; color:var(--ink-3); margin-top:2px; }
+.timer { font:500 17px "IBM Plex Mono",monospace; letter-spacing:.04em; color:var(--ink); font-variant-numeric:tabular-nums; }
+.grow { flex:1; }
+.sbtn { background:transparent; border:1px solid var(--rule); color:var(--terra); border-radius:999px; padding:5px 13px;
+  font:italic 500 13px "Fraunces",serif; font-variation-settings:"opsz" 24,"SOFT" 100; cursor:pointer; white-space:nowrap; transition:all .25s var(--ease); }
+.sbtn:hover { background:var(--terra); border-color:var(--terra-deep); color:var(--vellum); }
+.sbtn.quiet { color:var(--ink-2); }
+.sbtn.quiet:hover { background:var(--ink-2); border-color:var(--ink); color:var(--vellum); }
+.xs { width:22px; height:22px; border:none; background:transparent; color:var(--ink-3); font:16px/1 "Fraunces",serif; cursor:pointer; border-radius:50%; }
+.xs:hover { background:var(--paper-warm); color:var(--ink); }
+
+/* the quill writing along the bottom edge (exact geometry from overlay.html) */
+.writing { position:absolute !important; left:58px; right:86px; bottom:7px; height:18px; pointer-events:none; }
+.writing svg.trail { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.trail path { stroke:#2d2418; stroke-width:1; fill:none; stroke-linecap:round; stroke-dasharray:100; stroke-dashoffset:100; animation:draw 4s cubic-bezier(.42,0,.58,1) infinite; }
+@keyframes draw { 0% { stroke-dashoffset:100; opacity:0; } 6% { stroke-dashoffset:100; opacity:.9; } 92% { stroke-dashoffset:0; opacity:.9; } 100% { stroke-dashoffset:0; opacity:0; } }
+.quill { position:absolute; bottom:0; left:0; width:16px; height:18px; transform-origin:19% 94%; animation:glide 4s cubic-bezier(.42,0,.58,1) infinite; }
+.quill svg { width:100%; height:100%; display:block; }
+@keyframes glide {
+  0% { left:0%; transform:translateY(0) rotate(-12deg); opacity:0; } 4% { left:1%; opacity:1; }
+  12.5% { left:12.5%; transform:translateY(-3px) rotate(-15deg); } 25% { left:25%; transform:translateY(0) rotate(-12deg); }
+  37.5% { left:37.5%; transform:translateY(3px) rotate(-9deg); } 50% { left:50%; transform:translateY(0) rotate(-12deg); }
+  62.5% { left:62.5%; transform:translateY(-3px) rotate(-15deg); } 75% { left:75%; transform:translateY(0) rotate(-12deg); }
+  87.5% { left:87.5%; transform:translateY(3px) rotate(-9deg); } 94% { left:97%; opacity:1; } 100% { left:100%; opacity:0; } }
+/* slow scribble while writing it out */
+.writing.slow .trail path { animation-duration:2.4s; }
+.writing.slow .quill { animation:scrib 2.4s cubic-bezier(.42,0,.58,1) infinite; }
+@keyframes scrib { 0% { left:0%; transform:translateY(1px) rotate(-12deg); opacity:0; } 8% { opacity:1; } 25% { left:22%; transform:translateY(-1px) rotate(-14deg); } 50% { left:45%; transform:translateY(1px) rotate(-10deg); } 75% { left:70%; transform:translateY(-1px) rotate(-14deg); } 92% { left:92%; opacity:1; } 100% { left:96%; opacity:0; } }
+/* the tick drawn when it lands */
+.tick { width:30px; height:24px; flex:none; }
+.tick path { fill:none; stroke:var(--sage); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:60; stroke-dashoffset:60; animation:tickdraw .7s .1s var(--ease) forwards; }
+@keyframes tickdraw { to { stroke-dashoffset:0; } }
+.slip.enter { animation:slipin .38s var(--ease); }
+@keyframes slipin { from { transform:rotate(-1.4deg) translateY(8px) scale(.98); opacity:0; } to { transform:rotate(-1.4deg) translateY(0) scale(1); opacity:1; } }
+
+/* ═════════════ desktop context ═════════════ */
+.desk { position:relative; width:1240px; height:640px; border-radius:12px; overflow:hidden;
+  background:radial-gradient(120% 90% at 70% 10%, #8fb6e6 0%, #3f6fb4 38%, #1f3f7a 70%, #142a55 100%); box-shadow:0 24px 60px rgba(0,0,0,.5); }
+.app { position:absolute; left:170px; top:30px; width:900px; height:450px; background:#fff; color:#111b21; border-radius:8px; box-shadow:0 26px 60px rgba(0,0,0,.35),0 0 0 1px rgba(0,0,0,.12); overflow:hidden; display:flex; flex-direction:column; font-family:"Segoe UI Variable Text","Segoe UI",system-ui; }
+.app .tb { height:38px; background:#F3F3F3; display:flex; align-items:center; gap:10px; padding-left:14px; font-size:12px; }
+.app .tb i { width:14px; height:14px; border-radius:4px; background:#25D366; display:block; }
+.app .tb .caps { margin-left:auto; display:flex; font-family:"Segoe Fluent Icons","Segoe MDL2 Assets"; font-size:10px; } .app .tb .caps span { width:46px; display:grid; place-items:center; height:38px; }
+.app .body { flex:1; display:flex; min-height:0; }
+.app .list { width:280px; border-right:1px solid #eee; padding:12px; font-size:14px; }
+.app .row { display:flex; gap:12px; padding:9px 6px; border-radius:8px; align-items:center; }
+.app .row.on { background:#F0F2F5; }
+.app .av { width:42px; height:42px; border-radius:50%; color:#fff; display:grid; place-items:center; font-weight:600; flex:none; }
+.app .row small { display:block; color:#667781; font-size:13px; margin-top:2px; }
+.app .conv { flex:1; display:flex; flex-direction:column; background:#EFEAE2; }
+.app .ch { height:54px; background:#F0F2F5; display:flex; align-items:center; gap:12px; padding:0 16px; font-weight:600; font-size:15px; }
+.app .msgs { flex:1; padding:16px 36px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; font-size:14px; }
+.app .b { align-self:flex-start; background:#fff; padding:7px 10px; border-radius:8px; box-shadow:0 1px 0 rgba(0,0,0,.08); }
+.app .b span { font-size:11px; color:#667781; margin-left:8px; }
+.app .inp { height:60px; background:#F0F2F5; display:flex; align-items:center; padding:0 16px; }
+.app .inp div { flex:1; height:42px; border-radius:8px; background:#fff; display:flex; align-items:center; padding:0 14px; font-size:14px; color:#3b4a54; }
+.taskbar { position:absolute; left:0; right:0; bottom:0; height:48px; background:rgba(238,240,244,.96); display:flex; align-items:center; justify-content:center; gap:6px; }
+.taskbar span.a { width:40px; height:40px; border-radius:5px; display:grid; place-items:center; }
+.taskbar span.a.on { background:rgba(0,0,0,.05); }
+.taskbar .tray { position:absolute; right:12px; display:flex; align-items:center; gap:12px; font:12px "Segoe UI",system-ui; color:#1a1a1a; text-align:right; }
+.slip-anchor { position:absolute; left:50%; bottom:74px; transform:translateX(-50%); }
+
+.state-chips { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 0; }
+.chip { font:italic 500 13.5px "Fraunces",serif; font-variation-settings:"SOFT" 100; color:#e8dcc7; background:transparent; border:1px solid #4a4134; border-radius:999px; padding:6px 13px; cursor:pointer; }
+.chip.on { background:#e8dcc7; color:#2d2418; border-color:#e8dcc7; }
+.chip:focus-visible { outline:2px solid var(--terra); outline-offset:2px; }
+.playing { font:13px "Lora",serif; color:#a89a80; margin-left:6px; align-self:center; }
+
+/* ═════════════ THE DESK (main window) ═════════════ */
+.window { width:1180px; height:740px; background:var(--paper); border-radius:10px; overflow:hidden; box-shadow:0 26px 60px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.25); display:flex; flex-direction:column; }
+.wbar { height:38px; display:flex; align-items:center; padding-left:16px; gap:10px; font:12px "Segoe UI",system-ui; color:var(--ink-2); flex:none; }
+.wbar .caps { margin-left:auto; display:flex; font-family:"Segoe Fluent Icons","Segoe MDL2 Assets"; font-size:10px; color:var(--ink); } .wbar .caps span { width:46px; height:38px; display:grid; place-items:center; }
+.wmain { flex:1; display:flex; min-height:0; }
+.index { width:220px; flex:none; padding:22px 0 22px 26px; display:flex; flex-direction:column; gap:4px; border-right:1px solid var(--rule); background:var(--paper-warm); }
+.wm { font:600 30px/1 "Fraunces",serif; font-variation-settings:"SOFT" 100; letter-spacing:-.02em; margin-bottom:26px; display:flex; align-items:baseline; gap:6px; }
+.wm i { font-style:italic; font-weight:400; color:var(--terra); font-size:26px; }
+.tabi { position:relative; font:italic 500 18px "Fraunces",serif; font-variation-settings:"SOFT" 100; color:var(--ink-2); padding:9px 0 9px 22px; cursor:pointer; }
+.tabi.on { color:var(--ink); }
+.tabi.on::before { content:""; position:absolute; left:0; top:6px; width:8px; height:30px; background:var(--terra); clip-path:polygon(0 0,100% 0,100% 100%,50% 82%,0 100%); }
+.tabi .n { font:500 11px "IBM Plex Mono",monospace; color:var(--terra); margin-left:6px; font-style:normal; vertical-align:2px; }
+.index .foot { margin-top:auto; font:italic 13px/1.5 "Fraunces",serif; color:var(--ink-3); padding-right:22px; }
+.sheet { flex:1; padding:30px 56px 30px 128px; overflow:hidden; position:relative; background:var(--vellum); }
+.sheet::after { content:""; position:absolute; top:0; bottom:0; left:108px; width:1px; background:var(--margin); opacity:.7; }
+.sheet h2 { font:500 40px/1 "Fraunces",serif; font-variation-settings:"SOFT" 100; letter-spacing:-.02em; }
+.sheet .date { font:italic 16px "Fraunces",serif; color:var(--ink-2); margin-top:8px; }
+.pinned { position:relative; margin:22px 0 10px; display:inline-flex; align-items:center; gap:16px; padding:14px 18px 14px 20px; background:#fff3e4; transform:rotate(-.8deg);
+  filter:drop-shadow(0 6px 10px rgba(45,36,24,.18)); max-width:640px; }
+.pinned::before { content:""; position:absolute; inset:0; background-image:var(--noise); mix-blend-mode:multiply; opacity:.6; }
+.pinned > * { position:relative; }
+.pinned .pin { top:-6px; left:16px; right:auto; }
+.pinned .t { font:italic 500 16px/1.4 "Fraunces",serif; font-variation-settings:"SOFT" 100; }
+.pinned .t small { display:block; font:14px/1.4 "Lora",serif; font-style:normal; color:var(--ink-2); }
+.entries { margin-top:14px; }
+.entry { position:relative; display:flex; gap:22px; min-height:80px; padding-top:8px; }
+.entry .tm { position:absolute; left:-118px; width:96px; text-align:right; top:10px; font:italic 14px/1.3 "Fraunces",serif; color:var(--ink-3); }
+.entry .tm b { display:block; font-weight:600; color:var(--ink-2); font-style:italic; }
+.entry .tx { font:19px/40px "Lora",serif; color:var(--ink); flex:1; background-image:repeating-linear-gradient(to bottom, transparent 0 39px, var(--rule) 39px 40px); }
+.entry .cp { opacity:0; font:italic 15px "Fraunces",serif; color:var(--terra); align-self:flex-start; margin-top:10px; transition:opacity .2s; cursor:pointer; text-decoration:underline; text-decoration-color:var(--rule); text-underline-offset:4px; }
+.entry:hover .cp, .entry.show .cp { opacity:1; }
+.dayh { font:italic 500 15px "Fraunces",serif; color:var(--terra); letter-spacing:.02em; margin:16px 0 2px; }
+
+/* Insights */
+.ledger { display:grid; grid-template-columns:1.1fr 1fr; gap:40px; margin-top:26px; }
+.big { font:400 76px/1 "Fraunces",serif; font-variation-settings:"SOFT" 100,"opsz" 144; letter-spacing:-.03em; }
+.big small { font:italic 18px "Fraunces",serif; color:var(--ink-2); letter-spacing:0; margin-left:6px; }
+.cap { font:15px/1.5 "Lora",serif; color:var(--ink-2); margin-top:6px; }
+.tally { display:flex; gap:14px; margin-top:12px; }
+.tally svg { width:54px; height:40px; }
+.tally path { stroke:var(--ink); stroke-width:2; stroke-linecap:round; fill:none; }
+.chart { width:100%; height:180px; }
+.chart path.bar { fill:none; stroke:var(--ink); stroke-width:14; stroke-linecap:round; opacity:.85; }
+.chart path.today { stroke:var(--terra); }
+.chart text { font:italic 13px "Fraunces",serif; fill:var(--ink-3); }
+.apps { margin-top:10px; }
+.apps div { display:flex; justify-content:space-between; font:17px/2.2 "Lora",serif; border-bottom:1px dashed var(--rule); }
+.apps div span:last-child { font:italic 15px "Fraunces",serif; color:var(--ink-2); }
+
+/* Onboarding */
+.onb { display:grid; grid-template-columns:repeat(2,1fr); gap:26px; }
+.letter { height:430px; background:var(--vellum); border-radius:8px; padding:46px 52px; position:relative; box-shadow:0 20px 44px rgba(0,0,0,.45); overflow:hidden; }
+.letter::before { content:""; position:absolute; inset:0; background-image:var(--noise); mix-blend-mode:multiply; opacity:.7; pointer-events:none; }
+.letter > * { position:relative; }
+.letter .step { font:500 12px "IBM Plex Mono",monospace; color:var(--ink-3); letter-spacing:.08em; }
+.letter h3 { font:400 40px/1.08 "Fraunces",serif; font-variation-settings:"SOFT" 100; letter-spacing:-.02em; margin-top:18px; }
+.letter h3 i { color:var(--terra); }
+.letter p { font:17px/1.6 "Lora",serif; color:var(--ink-2); margin-top:16px; max-width:440px; }
+.letter .sig { font:italic 22px "Fraunces",serif; color:var(--ink); margin-top:18px; }
+.letter .go { position:absolute; left:52px; bottom:40px; display:flex; gap:12px; align-items:center; }
+.bigbtn { background:var(--ink); color:var(--vellum); border:none; border-radius:999px; padding:12px 24px; font:italic 500 17px "Fraunces",serif; font-variation-settings:"SOFT" 100; cursor:pointer; transition:transform .2s var(--ease), background .2s; }
+.bigbtn:hover { background:var(--terra-deep); transform:translateY(-1px); }
+.bigbtn:active { transform:scale(.97); }
+.lnk { font:italic 16px "Fraunces",serif; color:var(--ink-2); text-decoration:underline; text-underline-offset:4px; text-decoration-color:var(--rule); }
+.mictest { margin-top:22px; height:70px; position:relative; border-bottom:1px solid var(--rule); }
+.mictest svg { width:100%; height:100%; overflow:visible; }
+.mictest path { fill:none; stroke:var(--ink); stroke-width:1.6; stroke-linecap:round; stroke-dasharray:420; stroke-dashoffset:420; animation:voice 3.2s var(--ease) infinite; }
+@keyframes voice { 0% { stroke-dashoffset:420; } 80% { stroke-dashoffset:0; } 100% { stroke-dashoffset:0; opacity:0; } }
+.practice { margin-top:18px; border:1px solid var(--rule); border-radius:6px; background:#fff; padding:14px 16px; font:17px "Lora",serif; color:var(--ink); min-height:64px; }
+.practice .cur { display:inline-block; width:1.5px; height:20px; background:var(--ink); vertical-align:-4px; animation:blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity:0; } }
+.kbd { font:500 13px "IBM Plex Mono",monospace; border:1px solid var(--rule); border-bottom-width:2px; border-radius:5px; padding:2px 7px; background:var(--paper); }
+
+/* ═════════════ ANDROID ═════════════ */
+.phones { display:flex; gap:34px; flex-wrap:wrap; }
+.device { width:390px; background:#111; border-radius:46px; padding:9px; box-shadow:0 30px 60px rgba(0,0,0,.5),0 0 0 1.5px #3a3a3a inset; }
+.screen { width:372px; height:808px; border-radius:38px; overflow:hidden; position:relative; display:flex; flex-direction:column; background:var(--paper); font-family:Roboto,system-ui; }
+.ms { font-family:"Material Symbols Rounded"; font-size:24px; line-height:1; font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24; }
+.ms.fill { font-variation-settings:"FILL" 1,"wght" 400,"GRAD" 0,"opsz" 24; }
+.sbar { height:36px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 22px 0 26px; font:500 14px Roboto; color:#1d1b20; position:relative; }
+.sbar .cam { position:absolute; left:50%; top:11px; width:13px; height:13px; margin-left:-6.5px; border-radius:50%; background:#0b0b0b; }
+.sbar .ic { display:flex; gap:4px; } .sbar .ic .ms { font-size:17px; }
+.gbar { height:22px; flex:none; display:grid; place-items:center; } .gbar i { width:108px; height:4px; border-radius:2px; background:#1d1b20; display:block; opacity:.85; }
+.chat { flex:1; display:flex; flex-direction:column; background:#EFEAE2; min-height:0; }
+.chat .ab { height:60px; background:#F7F3EE; display:flex; align-items:center; gap:10px; padding:0 8px; }
+.chat .av { width:38px; height:38px; border-radius:50%; background:#7D5260; color:#fff; display:grid; place-items:center; font:500 16px Roboto; }
+.chat .nm { font:500 16px Roboto; color:#1d1b20; flex:1; } .chat .nm small { display:block; font:12px Roboto; color:#5f6368; }
+.chat .th { flex:1; padding:10px 12px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; }
+.chat .bb { align-self:flex-start; max-width:78%; background:#fff; border-radius:12px; border-top-left-radius:4px; padding:8px 12px; font:15px/1.35 Roboto; color:#1d1b20; box-shadow:0 1px 0 rgba(0,0,0,.08); }
+.chat .bb small { font-size:11px; color:#667781; margin-left:8px; }
+.chat .cp { display:flex; gap:6px; padding:6px 8px; align-items:flex-end; }
+.chat .fld { flex:1; min-height:46px; border-radius:23px; background:#fff; display:flex; align-items:center; gap:8px; padding:0 14px; font:16px Roboto; color:#667781; }
+.chat .snd { width:46px; height:46px; border-radius:50%; background:#00A884; color:#fff; display:grid; place-items:center; }
+.kb { flex:none; background:#EDE6DD; padding:0 4px 4px; position:relative; }
+.kb .slipzone { height:74px; display:flex; align-items:center; justify-content:center; padding-top:6px; }
+.kb .slip { min-width:0 !important; width:340px; transform:rotate(-.8deg); min-height:58px; padding:6px 10px 6px 16px; gap:8px; }
+.kb .slip .note { white-space:normal; min-width:0; flex:1; }
+.kb .slip .grow { display:none; }
+.kb .slip .writing { left:56px; right:84px; }
+.kb .idle { width:100%; height:52px; display:flex; align-items:center; gap:4px; padding:0 4px; }
+.kb .idle .ms { color:#6b5c40; }
+.kb .idle .k2 { width:44px; height:44px; display:grid; place-items:center; border-radius:50%; }
+.kb .rows { padding:2px 0 4px; }
+.kb .row { display:flex; gap:6px; justify-content:center; margin-bottom:9px; }
+.kb .k { flex:1 1 0; max-width:32px; height:46px; background:#FFFDF9; border-radius:8px; display:grid; place-items:center; font:22px Roboto; color:#2d2418; }
+.kb .row.mid { padding:0 16px; }
+.kb .k.w { max-width:none; flex:1.5 1 0; background:#E2D8CC; } .kb .k.w .ms { font-size:22px; }
+.kb .k.sp { max-width:none; flex:5 1 0; font:italic 15px "Fraunces",serif; color:#6b5c40; }
+.kb .k.md { background:#E2D8CC; font:500 14px Roboto; }
+.kb .k.en { max-width:none; flex:1.4 1 0; background:var(--ink); color:var(--vellum); }
+.appbar { padding:14px 22px 6px; display:flex; align-items:center; justify-content:space-between; flex:none; }
+.appbar .wm { margin:0; font-size:30px; }
+.appbar .ic { width:44px; height:44px; display:grid; place-items:center; color:var(--ink-2); border-radius:50%; }
+.psheet { flex:1; position:relative; padding:4px 20px 20px 82px; overflow:hidden; background:var(--vellum); }
+.psheet::after { content:""; position:absolute; top:0; bottom:0; left:72px; width:1px; background:var(--margin); opacity:.7; }
+.psheet h2 { font:500 30px/1.1 "Fraunces",serif; font-variation-settings:"SOFT" 100; letter-spacing:-.02em; }
+.psheet .date { font:italic 15px "Fraunces",serif; color:var(--ink-2); margin-top:4px; }
+.psheet .pinned { margin:16px 0 6px -30px; padding:12px 14px 12px 16px; gap:12px; max-width:290px; }
+.psheet .pinned .t { font-size:14.5px; } .psheet .pinned .t small { font-size:13px; }
+.psheet .entry { min-height:72px; }
+.psheet .entry .tm { left:-80px; width:62px; font-size:12.5px; top:9px; }
+.psheet .entry .tx { font:16px/36px "Lora",serif; background-image:repeating-linear-gradient(to bottom, transparent 0 35px, var(--rule) 35px 36px); }
+.tabs3 { flex:none; height:64px; display:flex; justify-content:space-around; align-items:center; background:var(--paper-warm); border-top:1px solid var(--rule); }
+.tabs3 div { font:italic 15px "Fraunces",serif; color:var(--ink-2); padding:8px 14px; position:relative; }
+.tabs3 div.on { color:var(--ink); } .tabs3 div.on::after { content:""; position:absolute; left:14px; right:14px; bottom:2px; height:2px; background:var(--terra); border-radius:1px; }
+.cap2 { font:14px/1.5 "Lora",serif; color:#a89a80; margin-top:12px; max-width:390px; }
+.cap2 b { color:#e8dcc7; font-weight:600; }
+@media (prefers-reduced-motion: reduce) { *, *::before { animation:none !important; transition:none !important; } .trail path, .mictest path, .tick path { stroke-dashoffset:0 !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- the exact quill from overlay.html -->
+  <symbol id="quill" viewBox="0 0 16 16">
+    <path d="M 12.5 1.5 C 9 4 6.5 8 5.5 13 L 4.5 14.5 L 4 15 C 6 14.5 8 13 9.5 11 C 11.5 8.5 13 5 12.5 1.5 Z" fill="#2d2418"/>
+    <path d="M 12.2 2 C 9.5 4.5 7 8.5 5.5 13" stroke="#000" stroke-width="0.55" fill="none" stroke-linecap="round" opacity="0.6"/>
+    <path d="M 4 15 L 2 15.6 L 3 14" fill="#1a1410" stroke="#1a1410" stroke-width="0.4" stroke-linejoin="round"/>
+  </symbol>
+</defs></svg>
+
+<div class="page">
+  <header class="rv">
+    <h1>Voxa, the living desk <span style="font-style:normal;font-size:20px;color:#a89a80">(v8)</span></h1>
+    <p>Grown from today's recording strip instead of replacing it: the vellum slip, the terracotta pin, italic Fraunces, the typewriter timer and the quill that writes. Every state is a short note on the same slip, every surface moves, and the app itself is a writer's journal. Click the states below or let it play.</p>
+  </header>
+
+  <!-- ═════════════ 1. THE SLIP, LIVE ═════════════ -->
+  <div class="lbl">The slip, on your desk</div>
+  <p class="lbl-sub">Press <span class="kbd" style="color:#2d2418">Ctrl Space</span> in WhatsApp. The slip pins itself above the taskbar, writes while you talk, scribbles while it writes it out, ticks when it lands. When it needs you, it says so in one line on the same slip.</p>
+  <div class="desk">
+    <div class="app">
+      <div class="tb"><i></i>WhatsApp<span class="caps"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></span></div>
+      <div class="body">
+        <div class="list">
+          <div class="row on"><span class="av" style="background:#7D5260">P</span><div><b>Priya Raman</b><small>We can push it if you need</small></div></div>
+          <div class="row"><span class="av" style="background:#3A6EA5">D</span><div><b>Design team</b><small>Arjun: new build is up</small></div></div>
+          <div class="row"><span class="av" style="background:#5F8D4E">M</span><div><b>Mom</b><small>Call me when free</small></div></div>
+        </div>
+        <div class="conv">
+          <div class="ch"><span class="av" style="background:#7D5260;width:36px;height:36px">P</span>Priya Raman</div>
+          <div class="msgs"><div class="b">Are you still coming to the 11 o'clock?<span>10:28</span></div><div class="b">We can push it if you need<span>10:28</span></div><div class="b" id="landed" style="align-self:flex-end;background:#D9FDD3;display:none">Running ten minutes late, start without me<span>10:31</span></div></div>
+          <div class="inp"><div id="inp">Type a message</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="slip-anchor"><div id="slip" class="slip"></div></div>
+    <div class="taskbar">
+      <span class="a"><svg width="20" height="20"><rect x="1" y="1" width="8" height="8" fill="#0078D4"/><rect x="11" y="1" width="8" height="8" fill="#0078D4"/><rect x="1" y="11" width="8" height="8" fill="#0078D4"/><rect x="11" y="11" width="8" height="8" fill="#0078D4"/></svg></span>
+      <span class="a"><span style="font-family:'Segoe Fluent Icons';font-size:17px">&#xE721;</span></span>
+      <span class="a"><span style="width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,#F7C343,#E0A21B)"></span></span>
+      <span class="a on"><span style="width:22px;height:22px;border-radius:6px;background:#25D366"></span></span>
+      <span class="a"><span style="width:22px;height:22px;border-radius:6px;background:#4A154B"></span></span>
+      <div class="tray"><svg width="16" height="16"><use href="#quill"/></svg><span>10:31<br>22-11-2026</span></div>
+    </div>
+  </div>
+  <div class="state-chips" role="tablist" aria-label="Slip states" id="chips"></div>
+
+  <!-- ═════════════ 2. THE DESK ═════════════ -->
+  <div class="lbl">The desk: your journal</div>
+  <p class="lbl-sub">The window opens on today's page. What you said sits on ruled paper with the time and app in the margin. Anything waiting for you is pinned to the top of the page. Hover a line to copy it.</p>
+  <div class="window">
+    <div class="wbar"><svg width="14" height="14"><use href="#quill"/></svg>Voxa<span class="caps"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></span></div>
+    <div class="wmain">
+      <nav class="index">
+        <div class="wm">voxa<i>.</i></div>
+        <div class="tabi on">Journal <span class="n">1</span></div>
+        <div class="tabi">Insights</div>
+        <div class="tabi">Settings</div>
+        <div class="foot">Ready. Press <span class="kbd" style="font-style:normal">Ctrl Space</span> anywhere and talk.</div>
+      </nav>
+      <section class="sheet">
+        <h2>Journal</h2>
+        <div class="date">Sunday, 22 November</div>
+        <div class="pinned"><span class="pin"></span><div class="t">22 seconds for Gmail are waiting for you.<small>Your ChatGPT sign-in ran out before I could write them out.</small></div><button class="sbtn">sign in, then copy</button></div>
+        <div class="entries">
+          <div class="dayh">this morning</div>
+          <div class="entry show"><div class="tm"><b>10:31</b>WhatsApp</div><div class="tx">Running ten minutes late, start without me and I'll catch up on the notes.</div><span class="cp">copy</span></div>
+          <div class="entry"><div class="tm"><b>09:58</b>Slack</div><div class="tx">Can you push the review to Thursday? The build is ready but I want one more pass on the onboarding flow.</div><span class="cp">copy</span></div>
+          <div class="entry"><div class="tm"><b>09:12</b>Gmail</div><div class="tx">Thanks for sending the contract. I'll read it tonight and come back to you with questions.</div><span class="cp">copy</span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ═════════════ 3. INSIGHTS ═════════════ -->
+  <div class="lbl">Insights: your week, in ink</div>
+  <p class="lbl-sub">A page you visit for fun, not a dashboard on Home. Big numbers, a hand-inked week, your streak as tally marks.</p>
+  <div class="window" style="height:640px">
+    <div class="wbar"><svg width="14" height="14"><use href="#quill"/></svg>Voxa<span class="caps"><span>&#xE921;</span><span>&#xE922;</span><span>&#xE8BB;</span></span></div>
+    <div class="wmain">
+      <nav class="index">
+        <div class="wm">voxa<i>.</i></div>
+        <div class="tabi">Journal</div>
+        <div class="tabi on">Insights</div>
+        <div class="tabi">Settings</div>
+      </nav>
+      <section class="sheet" style="background-image:none">
+        <h2>Your week, in ink</h2>
+        <div class="date">16 to 22 November</div>
+        <div class="ledger">
+          <div>
+            <div class="big">2,418<small>words said</small></div>
+            <div class="cap">About 52 minutes you didn't spend typing, at your usual 46 words a minute.</div>
+            <div style="margin-top:28px" class="big">12<small>days in a row</small></div>
+            <div class="tally" aria-label="12 day streak">
+              <svg viewBox="0 0 54 40"><path d="M6 6v28M14 5v29M22 6v28M30 5v29M2 30 L36 8"/></svg>
+              <svg viewBox="0 0 54 40"><path d="M6 6v28M14 5v29M22 6v28M30 5v29M2 30 L36 8"/></svg>
+              <svg viewBox="0 0 54 40"><path d="M6 6v28M14 5v29"/></svg>
+            </div>
+          </div>
+          <div>
+            <svg class="chart" viewBox="0 0 420 180" aria-label="Words per day this week">
+              <path class="bar" d="M30 150 C 30 120, 31 110, 30 96"/><path class="bar" d="M90 150 C 90 110, 91 80, 90 62"/><path class="bar" d="M150 150 C 151 130, 150 120, 150 112"/>
+              <path class="bar" d="M210 150 C 210 100, 211 60, 210 40"/><path class="bar" d="M270 150 C 270 128, 271 118, 270 106"/><path class="bar" d="M330 150 C 331 140, 330 136, 330 132"/><path class="bar today" d="M390 150 C 390 112, 391 92, 390 78"/>
+              <text x="22" y="174">mon</text><text x="83" y="174">tue</text><text x="142" y="174">wed</text><text x="203" y="174">thu</text><text x="262" y="174">fri</text><text x="323" y="174">sat</text><text x="378" y="174">today</text>
+            </svg>
+            <div style="font:italic 16px 'Fraunces',serif;color:var(--ink-2);margin-top:18px">where you wrote the most</div>
+            <div class="apps"><div><span>WhatsApp</span><span>1,104 words</span></div><div><span>Gmail</span><span>806 words</span></div><div><span>Slack</span><span>508 words</span></div></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ═════════════ 4. FIRST RUN ═════════════ -->
+  <div class="lbl">First run: a letter, not a checklist</div>
+  <p class="lbl-sub">Four pages, one thing each. It explains the ChatGPT sign-in before asking, lets you watch the quill draw your voice, and ends with a real first dictation.</p>
+  <div class="onb">
+    <div class="letter">
+      <div class="step">1 OF 4</div>
+      <h3>Hello. I'm <i>Voxa.</i></h3>
+      <p>Talk, and I'll write it down wherever your cursor is: WhatsApp, Gmail, Slack, anywhere. Press one shortcut to start, press it again to stop.</p>
+      <div class="sig">Let's set up your desk.</div>
+      <div class="go"><button class="bigbtn">begin</button></div>
+    </div>
+    <div class="letter">
+      <div class="step">2 OF 4</div>
+      <h3>I write through your <i>ChatGPT</i> account.</h3>
+      <p>When you stop talking, your recording goes to ChatGPT to become text, and nothing else does. Your journal and recordings stay on this computer, and you can delete them any time.</p>
+      <div class="go"><button class="bigbtn">sign in to ChatGPT</button><span class="lnk">why not an API key?</span></div>
+    </div>
+    <div class="letter">
+      <div class="step">3 OF 4</div>
+      <h3>Say anything. <i>I'm listening.</i></h3>
+      <p>If the line moves, I can hear you. Using <b style="font-weight:600;color:var(--ink)">Headset Microphone (Jabra)</b>.</p>
+      <div class="mictest"><svg viewBox="0 0 440 70" preserveAspectRatio="none"><path d="M0 40 C 20 40, 26 22, 40 24 S 58 56, 74 50 S 92 12, 110 18 S 130 60, 150 52 S 168 30, 184 36 L 214 37 C 232 36, 238 14, 256 16 S 276 62, 296 54 S 316 20, 334 26 S 352 50, 370 44 S 392 34, 440 38"/></svg></div>
+      <div class="go"><button class="bigbtn">sounds right</button><span class="lnk">use another mic</span></div>
+    </div>
+    <div class="letter">
+      <div class="step">4 OF 4</div>
+      <h3>Now try it <i>for real.</i></h3>
+      <p>Click the box, press <span class="kbd">Ctrl Space</span>, say "hello, this is my first note", and press it again.</p>
+      <div class="practice">hello, this is my first note<span class="cur"></span></div>
+      <div class="go"><button class="bigbtn">open my journal</button><span class="lnk">change the shortcut</span></div>
+    </div>
+  </div>
+
+  <!-- ═════════════ 5. ANDROID ═════════════ -->
+  <div class="lbl">On your phone</div>
+  <p class="lbl-sub">The same slip, pinned to the top of the Voxa keyboard. Tap the quill to talk; the slip writes, scribbles, ticks. The app is the same journal, in your pocket.</p>
+  <div class="phones">
+    <div>
+      <div class="device"><div class="screen">
+        <div class="chat">
+          <div class="sbar" style="background:#F7F3EE"><span>10:31</span><span class="cam"></span><span class="ic"><span class="ms fill">signal_cellular_alt</span><span class="ms fill">wifi</span><span class="ms fill">battery_5_bar</span></span></div>
+          <div class="ab"><span class="ms" style="color:#3c4043">arrow_back</span><span class="av">P</span><span class="nm">Priya Raman<small>online</small></span><span class="ms" style="color:#3c4043;margin-right:8px">call</span></div>
+          <div class="th"><div class="bb">Are you still coming to the 11 o'clock?<small>10:28</small></div><div class="bb">We can push it if you need<small>10:28</small></div></div>
+          <div class="cp"><div class="fld"><span class="ms">mood</span>Message</div><span class="snd"><span class="ms fill">send</span></span></div>
+        </div>
+        <div class="kb">
+          <div class="slipzone"><div id="pslip" class="slip"></div></div>
+          <div class="rows">
+            <div class="row"><span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span></div>
+            <div class="row mid"><span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span></div>
+            <div class="row"><span class="k w"><span class="ms">shift</span></span><span class="k">z</span><span class="k">x</span><span class="k">c</span><span class="k">v</span><span class="k">b</span><span class="k">n</span><span class="k">m</span><span class="k w"><span class="ms">backspace</span></span></div>
+            <div class="row"><span class="k md" style="max-width:none;flex:1.4 1 0">?123</span><span class="k md">,</span><span class="k sp">english</span><span class="k md">.</span><span class="k en"><span class="ms">keyboard_return</span></span></div>
+          </div>
+        </div>
+        <div class="gbar" style="background:#EDE6DD"><i></i></div>
+      </div></div>
+      <p class="cap2"><b>The keyboard.</b> The slip is live and plays the same states as the desktop. When idle it shows a quill to tap and a quiet readiness note.</p>
+    </div>
+
+    <div>
+      <div class="device"><div class="screen">
+        <div class="sbar" style="background:var(--paper)"><span>10:33</span><span class="cam"></span><span class="ic"><span class="ms fill">signal_cellular_alt</span><span class="ms fill">wifi</span><span class="ms fill">battery_5_bar</span></span></div>
+        <div class="appbar"><div class="wm">voxa<i>.</i></div><span class="ic"><span class="ms">settings</span></span></div>
+        <div class="psheet">
+          <h2>Journal</h2>
+          <div class="date">Sunday, 22 November</div>
+          <div class="pinned"><span class="pin"></span><div class="t">22 seconds for Gmail are waiting.<small>Sign in to ChatGPT and I'll write them out.</small></div></div>
+          <div style="margin:6px 0 4px"><button class="sbtn">sign in</button></div>
+          <div class="dayh" style="margin-top:10px">this morning</div>
+          <div class="entry"><div class="tm"><b>10:31</b>WhatsApp</div><div class="tx">Running ten minutes late, start without me.</div></div>
+          <div class="entry"><div class="tm"><b>09:12</b>Gmail</div><div class="tx">Thanks for sending the contract, I'll read it tonight.</div></div>
+        </div>
+        <div class="tabs3"><div class="on">Journal</div><div>Insights</div></div>
+        <div class="gbar" style="background:var(--paper-warm)"><i></i></div>
+      </div></div>
+      <p class="cap2"><b>The app.</b> Opens on today's journal page. Waiting notes are pinned on top. Insights is the only other page; settings live behind the gear.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+/* A tiny state machine that plays the slip, like the real app would. */
+const QUILL = '<div class="writing CLS" aria-hidden="true"><svg class="trail" viewBox="0 0 200 18" preserveAspectRatio="none"><path pathLength="100" d="M 0 15 Q 25 12 50 15 T 100 15 T 150 15 T 200 15"/></svg><span class="quill"><svg viewBox="0 0 16 16"><use href="#quill"/></svg></span></div>';
+const PIN = '<span class="pin"></span>';
+const X = '<button class="xs" aria-label="close">×</button>';
+const TICK = '<svg class="tick" viewBox="0 0 30 24" aria-hidden="true"><path d="M3 14 C 6 14, 8 16, 11 19 C 15 12, 20 7, 27 3"/></svg>';
+const states = [
+  { key:'talking', name:'talking', ms:4200, html:t=>`${PIN}<span class="dot"></span><span class="note">rec.</span><span class="timer" data-timer>00:0${t}</span><span class="grow"></span><button class="sbtn">stop</button>${QUILL.replace('CLS','')}`, w:250 },
+  { key:'writing', name:'writing it out', ms:2600, html:()=>`${PIN}<span class="dot ink"></span><span class="note">writing it out<small>14 seconds, for WhatsApp</small></span><span class="grow"></span><button class="sbtn quiet">cancel</button>${QUILL.replace('CLS','slow')}`, w:290 },
+  { key:'landed', name:'it landed', ms:2600, html:()=>`${PIN}${TICK}<span class="note"><b>pasted in WhatsApp.</b><small>your clipboard is back the way it was</small></span><span class="grow"></span>`, w:300, after:()=>{ document.getElementById('landed').style.display='block'; } },
+  { key:'signed', name:'signed out', ms:3400, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>signed out of ChatGPT.</b><small>I didn't record anything</small></span><span class="grow"></span><button class="sbtn">sign in</button>${X}`, w:360 },
+  { key:'kept', name:'kept for later', ms:3400, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>kept 0:14 for WhatsApp.</b><small>sign in and I'll send it there</small></span><span class="grow"></span><button class="sbtn">sign in</button>${X}`, w:370 },
+  { key:'offline', name:'offline', ms:3400, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>no signal. I'll hold on to it.</b><small>sends itself when you're back online</small></span><span class="grow"></span><button class="sbtn quiet">discard</button>${X}`, w:390 },
+  { key:'slow', name:'ChatGPT quiet', ms:3400, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>ChatGPT didn't answer.</b><small>your 0:14 is safe, your sign-in is fine</small></span><span class="grow"></span><button class="sbtn">try again</button>${X}`, w:380 },
+  { key:'moved', name:'you moved', ms:3400, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>you moved to Slack.</b><small>this was meant for WhatsApp</small></span><span class="grow"></span><button class="sbtn">paste in Slack</button>${X}`, w:380 },
+  { key:'silent', name:'heard nothing', ms:3000, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>I didn't hear anything.</b><small>listening on Headset Microphone</small></span><span class="grow"></span>${X}`, w:320 },
+  { key:'mic', name:'mic blocked', ms:3400, html:()=>`${PIN}<span class="dot still"></span><span class="note"><b>Windows won't let me hear you.</b><small>microphone access is off</small></span><span class="grow"></span><button class="sbtn">open settings</button>${X}`, w:400 },
+];
+const slip = document.getElementById('slip'), pslip = document.getElementById('pslip'), chips = document.getElementById('chips');
+let i = 0, timer = null, tick = null, auto = true;
+states.forEach((s, n) => { const b = document.createElement('button'); b.className = 'chip'; b.role = 'tab'; b.textContent = s.name; b.onclick = () => { auto = false; show(n); }; chips.appendChild(b); });
+const playBtn = document.createElement('button'); playBtn.className = 'chip'; playBtn.textContent = 'play all'; playBtn.onclick = () => { auto = true; show(0); }; chips.appendChild(playBtn);
+function render(el, s, sec) { el.innerHTML = s.html(sec); el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter'); }
+function show(n) {
+  clearTimeout(timer); clearInterval(tick); i = n; const s = states[n];
+  [...chips.children].forEach((c, k) => c.classList.toggle('on', k === n && !auto || (auto && k === n)));
+  document.getElementById('landed').style.display = 'none';
+  document.getElementById('inp').textContent = 'Type a message';
+  slip.style.minWidth = s.w + 'px';
+  let sec = 1; render(slip, s, sec); render(pslip, s, sec);
+  if (s.key === 'talking') tick = setInterval(() => { sec++; slip.querySelector('[data-timer]').textContent = '00:' + String(sec).padStart(2,'0'); const p = pslip.querySelector('[data-timer]'); if (p) p.textContent = '00:' + String(sec).padStart(2,'0'); }, 1000);
+  if (s.after) s.after();
+  if (auto) timer = setTimeout(() => show((n + 1) % states.length), s.ms);
+}
+show(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voxa rebuild, v5 quill directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Instrument+Sans:wght@400;500;600&family=Epilogue:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   Voxa v4: three directions on one shared structure.
+   Structure = the flow from docs/rebuild/01-flow-audit.md (strip always shows
+   state + one action; readiness checked before you talk). Only tokens change
+   between directions, so you compare look and feel, not layout.
+   Everything here is buildable in GPUI: solid fills, borders, radii, shadows,
+   simple linear gradients. No backdrop blur, no noise textures, no CSS-only
+   effects.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Direction A: Biro. Dealt by taste-skill ("Sheet and biro"): white paper, biro-blue ink. The quill, modernised as a pen. */
+.dir-a {
+  --bg:#FFFFFF; --desk:#ECEEF2; --surface:#FFFFFF; --surface-2:#F4F4F4; --line:#E2E2E2;
+  --ink:#111111; --ink-2:#474747; --ink-3:#666666;
+  --accent:#1A4BE0; --on-accent:#FFFFFF; --accent-soft:rgba(26,75,224,.08); --stroke:#1A4BE0;
+  --danger:#B42318; --danger-soft:rgba(180,35,24,.08); --warn:#8A5A00; --warn-soft:rgba(138,90,0,.10); --ok:#1F7A45;
+  --strip-bg:#FFFFFF; --strip-ink:#111111; --strip-line:#E2E2E2;
+  --font-display:"Geist",system-ui,sans-serif; --font-body:"Geist",system-ui,sans-serif; --font-mono:"Geist Mono",ui-monospace,monospace;
+  --display-weight:500; --display-track:-0.04em; --stat-size:30px;
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-strip:14px;
+  --shadow:0 10px 30px rgba(17,17,17,.12), 0 1px 2px rgba(17,17,17,.08);
+}
+/* Direction B: Manuscript. Today's writer's desk, edited: vellum, Fraunces, sepia ink. No pin, no tilt, no noise. */
+.dir-b {
+  --bg:#F6F1E8; --desk:#E7DECF; --surface:#FFFCF6; --surface-2:#F0E8DA; --line:#E0D3BE;
+  --ink:#22190F; --ink-2:#5A4E3F; --ink-3:#736652;
+  --accent:#8C3A12; --on-accent:#FFFCF6; --accent-soft:rgba(140,58,18,.09); --stroke:#5A2A0E;
+  --danger:#A3261C; --danger-soft:rgba(163,38,28,.08); --warn:#7A5100; --warn-soft:rgba(122,81,0,.10); --ok:#2F6B45;
+  --strip-bg:#FFFCF6; --strip-ink:#22190F; --strip-line:#E0D3BE;
+  --font-display:"Fraunces",Georgia,serif; --font-body:"Instrument Sans",system-ui,sans-serif; --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --display-weight:500; --display-track:-0.02em; --stat-size:32px;
+  --r-sm:6px; --r-md:10px; --r-lg:14px; --r-strip:12px;
+  --shadow:0 10px 28px rgba(60,40,15,.14), 0 1px 2px rgba(60,40,15,.10);
+}
+/* Direction C: Index. CRL-style Swiss editorial: warm grey, black ink, footnote numbering, big numerals, a wax-seal red. */
+.dir-c {
+  --bg:#DAD8D1; --desk:#C9C6BD; --surface:#ECEAE4; --surface-2:#E2E0D9; --line:#BDBAB1;
+  --ink:#0B0B0B; --ink-2:#34332F; --ink-3:#4E4C46;
+  --accent:#B8321A; --on-accent:#FFFFFF; --accent-soft:rgba(184,50,26,.10); --stroke:#ECEAE4;
+  --danger:#A0281A; --danger-soft:rgba(160,40,26,.10); --warn:#6E4A00; --warn-soft:rgba(110,74,0,.12); --ok:#1E5E38;
+  --strip-bg:#0B0B0B; --strip-ink:#ECEAE4; --strip-line:#2B2A27;
+  --font-display:"Epilogue",system-ui,sans-serif; --font-body:"Epilogue",system-ui,sans-serif; --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --display-weight:500; --display-track:-0.045em; --stat-size:48px;
+  --r-sm:4px; --r-md:6px; --r-lg:8px; --r-strip:6px;
+  --shadow:0 12px 30px rgba(11,11,11,.25);
+}
+
+* { box-sizing:border-box; margin:0; padding:0; }
+html { background:#e7e7e4; }
+body { font-family:system-ui,sans-serif; color:#111; }
+.page { max-width:1240px; margin:0 auto; padding:40px 28px 80px; }
+
+/* review chrome (not part of the product) */
+.review-head h1 { font:700 28px/1.1 system-ui; letter-spacing:-.02em; }
+.review-head p { margin-top:8px; color:#444; font-size:14px; line-height:1.5; max-width:820px; }
+.tabs { display:flex; gap:8px; margin:22px 0 10px; flex-wrap:wrap; }
+.tab { border:1px solid #c9c9c4; background:#fff; border-radius:999px; padding:9px 16px; font:600 14px system-ui; cursor:pointer; color:#111; }
+.tab[aria-selected="true"] { background:#111; color:#fff; border-color:#111; }
+.tab:focus-visible { outline:3px solid #2236E8; outline-offset:2px; }
+.dir-note { font-size:13.5px; color:#333; line-height:1.55; max-width:900px; margin-bottom:26px; }
+.dir-note b { color:#000; }
+.label { font:600 12px/1 ui-monospace,monospace; text-transform:uppercase; letter-spacing:.08em; color:#555; margin:42px 0 14px; display:flex; gap:10px; align-items:center; }
+.label::after { content:""; flex:1; height:1px; background:#cfcfca; }
+
+/* product canvas */
+.canvas { background:var(--bg); color:var(--ink); font-family:var(--font-body); border-radius:18px; padding:28px; border:1px solid rgba(0,0,0,.08); }
+.mono { font-family:var(--font-mono); }
+
+/* ── Recording strip ───────────────────────────────────────────────── */
+.strip-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(500px,1fr)); gap:18px; }
+.state { background:var(--desk); border-radius:var(--r-lg); padding:18px 18px 16px; display:flex; flex-direction:column; gap:14px; min-height:170px; position:relative; }
+.state .when { font-size:12.5px; color:var(--ink-2); line-height:1.45; }
+.state .when b { color:var(--ink); font-weight:600; }
+.target-app { order:-1; font-size:11.5px; color:var(--ink-3); display:flex; gap:6px; align-items:center; }
+.target-app::before { content:"Typing in"; }
+.dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+
+.strip { margin-top:auto; align-self:center; background:var(--strip-bg); color:var(--strip-ink); border:1px solid var(--strip-line); border-radius:var(--r-strip); box-shadow:var(--shadow); display:flex; align-items:center; gap:12px; padding:10px 10px 10px 16px; min-height:52px; width:100%; max-width:440px; }
+.strip .msg { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.strip .t1 { font-size:14px; font-weight:600; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.strip .t2 { font-size:12px; opacity:.72; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.strip .timer { font-family:var(--font-mono); font-size:13px; opacity:.85; font-variant-numeric:tabular-nums; }
+.icon { width:20px; height:20px; flex:none; }
+.icon svg { width:100%; height:100%; display:block; }
+.ibtn { width:32px; height:32px; border:1px solid var(--strip-line); background:transparent; color:inherit; display:grid; place-items:center; flex:none; border-radius:999px; }
+.ibtn svg { width:16px; height:16px; }
+.act { flex:none; border:none; border-radius:999px; padding:8px 14px; font:600 13px var(--font-body); background:var(--accent); color:var(--on-accent); white-space:nowrap; }
+.dir-b .act, .dir-b .ibtn { border-radius:10px; }
+.act.quiet { background:transparent; color:inherit; border:1px solid var(--strip-line); }
+.rec { width:10px; height:10px; border-radius:50%; background:var(--danger); box-shadow:0 0 0 4px var(--danger-soft); flex:none; }
+.dir-a .rec { background:#FF5A4A; }
+.dir-c .rec { background:#FF4A3A; box-shadow:0 0 0 4px rgba(255,74,58,.25); }
+.ink { flex:1; min-width:0; height:26px; display:block; overflow:visible; }
+.ink path { fill:none; stroke:var(--stroke); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.ink .nib { fill:var(--stroke); stroke:none; }
+.dir-c .kb-bar .ink path { stroke:#0B0B0B; } .dir-c .kb-bar .ink .nib { fill:var(--accent); }
+.dir-c .strip .ink .nib { fill:var(--accent); }
+.fn { font-family:var(--font-mono); font-size:12px; color:var(--ink-3); margin-right:8px; font-weight:400; }
+.stat .n { font-size:var(--stat-size); }
+.dir-c .h1 { font-size:46px; }
+.dir-c .item .txt { font-size:15px; }
+.spin { width:16px; height:16px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; opacity:.8; flex:none; }
+.badge { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; padding:3px 8px; border-radius:999px; }
+.chip-ok { background:rgba(111,217,155,.14); color:var(--ok); }
+.dir-b .chip-ok, .dir-c .chip-ok { background:rgba(31,122,69,.10); }
+.chip-warn { background:var(--warn-soft); color:var(--warn); }
+.chip-danger { background:var(--danger-soft); color:var(--danger); }
+.dir-c .strip .chip-danger { color:#FF8A80; background:rgba(255,138,128,.14); }
+.dir-c .strip .chip-warn { color:#F5C451; background:rgba(245,196,81,.14); }
+
+/* ── Hub window ────────────────────────────────────────────────────── */
+.window { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); overflow:hidden; box-shadow:var(--shadow); display:grid; grid-template-columns:216px 1fr; min-height:620px; }
+.side { background:var(--surface-2); border-right:1px solid var(--line); padding:18px 12px; display:flex; flex-direction:column; gap:4px; }
+.brand { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-track); font-size:22px; padding:4px 10px 16px; }
+.nav { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:var(--r-sm); font-size:14px; color:var(--ink-2); }
+.nav .icon { width:18px; height:18px; }
+.nav.on { background:var(--surface); color:var(--ink); font-weight:600; box-shadow:0 0 0 1px var(--line); }
+.nav .count { margin-left:auto; font-size:11.5px; font-weight:600; padding:1px 7px; border-radius:999px; background:var(--danger-soft); color:var(--danger); }
+.side .foot { margin-top:auto; padding:12px 10px 4px; border-top:1px solid var(--line); display:flex; gap:10px; align-items:center; font-size:12.5px; color:var(--ink-2); }
+.avatar { width:28px; height:28px; border-radius:50%; background:var(--accent); color:var(--on-accent); display:grid; place-items:center; font-weight:700; font-size:12px; }
+.main { padding:28px 32px; display:flex; flex-direction:column; gap:22px; }
+.h1 { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-track); font-size:34px; line-height:1.05; }
+.dir-b .h1 em { font-style:italic; font-weight:400; }
+.sub { color:var(--ink-2); font-size:14px; margin-top:6px; }
+.kbd { font-family:var(--font-mono); font-size:12px; padding:2px 7px; border-radius:6px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink); }
+.row2 { display:grid; grid-template-columns:1.15fr 1fr; gap:18px; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md); padding:18px; }
+.card h3 { font-size:13px; font-weight:600; color:var(--ink-2); text-transform:none; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
+.ready-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); font-size:14px; }
+.ready-row:first-of-type { border-top:none; }
+.ready-row .grow { flex:1; }
+.ready-row .hint { font-size:12.5px; color:var(--ink-2); margin-top:2px; }
+.st { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; flex:none; }
+.st svg { width:13px; height:13px; }
+.st.ok { background:rgba(47,107,69,.12); color:var(--ok); }
+.dir-a .st.ok { background:rgba(111,217,155,.14); }
+.st.warn { background:var(--warn-soft); color:var(--warn); }
+.btn { border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:var(--r-sm); padding:7px 12px; font:600 13px var(--font-body); white-space:nowrap; }
+.btn.primary { background:var(--accent); color:var(--on-accent); border-color:transparent; }
+.stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.stat .n { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-track); font-size:28px; }
+.stat .l { font-size:12px; color:var(--ink-2); margin-top:2px; }
+.hist { display:flex; flex-direction:column; }
+.item { display:grid; grid-template-columns:1fr auto; gap:6px 14px; padding:13px 0; border-top:1px solid var(--line); align-items:start; }
+.item:first-child { border-top:none; }
+.item .txt { font-size:14px; line-height:1.45; color:var(--ink); }
+.item .meta { font-size:12px; color:var(--ink-3); display:flex; gap:8px; align-items:center; grid-column:1; }
+.item .acts { grid-row:1 / span 2; grid-column:2; display:flex; gap:6px; }
+.item.failed { background:var(--danger-soft); margin:4px -12px; padding:13px 12px; border-radius:var(--r-sm); border-top:none; }
+.item.failed + .item { border-top:none; }
+
+/* ── Android ───────────────────────────────────────────────────────── */
+.phones { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:22px; }
+.phone { background:var(--surface); border:1px solid var(--line); border-radius:34px; padding:12px; box-shadow:var(--shadow); }
+.screen { background:var(--bg); border-radius:24px; overflow:hidden; min-height:640px; display:flex; flex-direction:column; }
+.appbar { display:flex; justify-content:space-between; align-items:center; padding:22px 20px 6px; }
+.chat { flex:1; padding:12px 16px; display:flex; flex-direction:column; gap:8px; justify-content:flex-end; }
+.bubble { align-self:flex-start; background:var(--surface); border:1px solid var(--line); padding:9px 12px; border-radius:16px; font-size:13.5px; max-width:80%; }
+.bubble.me { align-self:flex-end; background:var(--accent-soft); }
+.field { margin:4px 12px 10px; background:var(--surface); border:1px solid var(--line); border-radius:22px; padding:11px 14px; font-size:14px; color:var(--ink-3); }
+.field.typed { color:var(--ink); }
+.kb { background:var(--surface-2); border-top:1px solid var(--line); padding:10px 10px 14px; }
+.kb-bar { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md); padding:8px 8px 8px 12px; min-height:52px; }
+.kb-bar .msg { flex:1; min-width:0; }
+.kb-bar .t1 { font-size:13.5px; font-weight:600; }
+.kb-bar .t2 { font-size:12px; color:var(--ink-2); }
+.mic { width:44px; height:44px; border-radius:50%; background:var(--accent); color:var(--on-accent); display:grid; place-items:center; flex:none; position:relative; }
+.mic svg { width:20px; height:20px; }
+.mic .rd { position:absolute; right:1px; top:1px; width:11px; height:11px; border-radius:50%; border:2px solid var(--surface); }
+.keys { display:grid; grid-template-columns:repeat(10,1fr); gap:5px; margin-top:10px; }
+.keys span { height:38px; border-radius:7px; background:var(--surface); border:1px solid var(--line); display:grid; place-items:center; font-size:14px; color:var(--ink); }
+.keystates { display:flex; flex-direction:column; gap:10px; padding:16px; }
+.keystates .cap { font-size:12px; color:var(--ink-2); margin:6px 2px -2px; }
+.home-pad { padding:8px 20px 20px; display:flex; flex-direction:column; gap:14px; }
+
+.decisions { margin-top:44px; background:#fff; border:1px solid #d6d6d0; border-radius:14px; padding:22px 24px; font-size:14px; line-height:1.6; color:#222; }
+.decisions h2 { font:700 18px system-ui; margin-bottom:8px; }
+.decisions ul { padding-left:20px; }
+.decisions li { margin:4px 0; }
+[hidden] { display:none !important; }
+@media (prefers-reduced-motion: no-preference) { .spin { animation:r 0.9s linear infinite; } @keyframes r { to { transform:rotate(360deg); } } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="review-head">
+    <h1>Voxa rebuild, quill directions (v5)</h1>
+    <p>Three directions that keep Voxa's writer's-desk idea without the costume. The signature in all three: your voice is drawn as an ink line being written, with a nib at its tip, in place of generic level bars. Research: taste-skill deal (Sheet and biro), Awwwards SOTD references CRL (Swiss editorial index, Nov 2026) and Sweet Tape (one spot colour), and today's Voxa quill strip. Same flow structure as v4. All buildable natively in Rust (fills, borders, radii, shadows, path strokes).</p>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Design direction">
+    <button class="tab" role="tab" aria-selected="true" data-dir="a">A · Biro</button>
+    <button class="tab" role="tab" aria-selected="false" data-dir="b">B · Manuscript</button>
+    <button class="tab" role="tab" aria-selected="false" data-dir="c">C · Index</button>
+  </div>
+  <p class="dir-note" data-note="a"><b>Biro.</b> Dealt by the taste skill for software ("Sheet and biro"): white paper, biro-blue ink, Geist. The quill grows up into a pen. Calmest over other apps, and the blue reads as ink, not as a generic button colour.</p>
+  <p class="dir-note" data-note="b" hidden><b>Manuscript.</b> Today's identity, edited: vellum, Fraunces, sepia ink, the quill stroke. Drops the thumbtack, the tilted strip and the paper noise. Warmest and most distinctive.</p>
+  <p class="dir-note" data-note="c" hidden><b>Index.</b> From CRL's Swiss editorial system: warm grey paper, black ink, footnote numbering (1) (2) (3), big numerals, square corners, one wax-seal red. A black strip that holds its own over any app. Most designed, least app-like.</p>
+
+  <main id="product" class="dir-a">
+    <!-- ═══════════════ 1. STRIP ═══════════════ -->
+    <div class="label">1 · Desktop recording strip, every state</div>
+    <div class="canvas">
+      <div class="strip-grid">
+
+        <div class="state">
+          <div class="when"><b>Blocked before you talk.</b> Session expired. Pressing the hotkey does not start recording; you get the fix instead.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="badge chip-warn">Signed out</span>
+            <div class="msg"><span class="t1">Sign in to dictate</span></div>
+            <button class="act">Sign in</button>
+            <button class="ibtn" aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Recording.</b> Live mic level (a dead mic is obvious), timer, Cancel discards, Stop sends. Esc is bound only while this is visible.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="rec" aria-hidden="true"></span>
+            <svg class="ink" viewBox="0 0 220 26" preserveAspectRatio="none" role="img" aria-label="Your voice, being written"><path d="M2 13 C 8 13, 10 6, 16 6 S 22 20, 28 20 S 34 3, 41 3 S 47 23, 54 23 S 60 9, 66 9 S 71 17, 77 17 S 83 1, 91 1 S 97 25, 105 25 S 111 8, 118 8 S 124 18, 131 18 S 137 5, 144 5 S 150 21, 157 21 S 163 11, 170 11 S 176 15, 182 15 S 188 9, 194 9 S 200 13, 206 13"/><path class="nib" d="M206 13 l9 -6 l-2.2 6 l2.2 6 z"/></svg>
+            <span class="timer">0:14</span>
+            <button class="ibtn" aria-label="Cancel recording"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+            <button class="act">Stop</button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Transcribing.</b> Hard timeout (20 s). The strip keeps the target so the text lands where you started, even if focus moved.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="spin" aria-hidden="true"></span>
+            <div class="msg"><span class="t1">Writing it out</span><span class="t2">for WhatsApp · 0:14 of audio</span></div>
+            <button class="ibtn" aria-label="Cancel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Delivered.</b> Confirms where it went, stays 3 s, offers Undo. Your clipboard is restored afterwards.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+            <div class="msg"><span class="t1">Pasted into WhatsApp</span><span class="t2">“Running ten minutes late, start without me”</span></div>
+            <button class="act quiet">Undo</button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Expired mid-dictation.</b> Audio is kept. One tap signs in, then it sends and pastes into WhatsApp by itself. No History trip.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="badge chip-danger">Not sent</span>
+            <div class="msg"><span class="t1">Sign in to send this</span><span class="t2">0:14 saved · goes to WhatsApp</span></div>
+            <button class="act">Sign in</button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Offline or ChatGPT blocked.</b> Never says "sign in" for a network problem. Retries itself when the connection is back.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="badge chip-warn">Offline</span>
+            <div class="msg"><span class="t1">Will send when you're back online</span><span class="t2">0:14 saved</span></div>
+            <button class="act quiet">Copy later</button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Focus moved away.</b> Never pastes into the wrong chat. Asks instead.</div>
+          <div class="target-app"><span class="dot" style="background:#4A154B"></span>Slack (now focused)</div>
+          <div class="strip">
+            <div class="msg"><span class="t1">You switched apps</span><span class="t2">Meant for WhatsApp</span></div>
+            <button class="act quiet">Paste here</button>
+            <button class="act">Back to WhatsApp</button>
+          </div>
+        </div>
+
+        <div class="state">
+          <div class="when"><b>Nothing heard.</b> Mic was live but silent. Points at the likely cause; no pointless Retry.</div>
+          <div class="target-app"><span class="dot" style="background:#25D366"></span>WhatsApp</div>
+          <div class="strip">
+            <span class="badge chip-warn">No speech</span>
+            <div class="msg"><span class="t1">Didn't catch that</span><span class="t2">Using “Headset mic”</span></div>
+            <button class="act quiet">Change mic</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════════ 2. HUB ═══════════════ -->
+    <div class="label">2 · Desktop Hub, Home</div>
+    <div class="canvas">
+      <div class="window">
+        <aside class="side" aria-label="Sections">
+          <div class="brand">voxa</div>
+          <div class="nav on"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg></span>Home</div>
+          <div class="nav"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8"/></svg></span>History<span class="count">1</span></div>
+          <div class="nav"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="18" height="11" rx="2"/><path d="M7 11h1M11 11h1M15 11h2M7 14h10"/></svg></span>Shortcuts</div>
+          <div class="nav"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2.1-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2.1 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2.1 1.2L10 21h4l.5-2.6a7 7 0 0 0 2.1-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></svg></span>Settings</div>
+          <div class="foot"><span class="avatar">S</span><div><div style="color:var(--ink);font-weight:600">Sam</div><div>ChatGPT linked</div></div></div>
+        </aside>
+        <section class="main">
+          <div>
+            <div class="h1">Ready when you are<span class="dir-b-only"></span></div>
+            <div class="sub">Click into any text field, press <span class="kbd">Ctrl</span> <span class="kbd">Space</span>, and talk.</div>
+          </div>
+          <div class="row2">
+            <div class="card">
+              <h3><span><span class="fn">(1)</span>Ready to dictate</span> <span class="badge chip-warn">1 to fix</span></h3>
+              <div class="ready-row"><span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><div class="grow">ChatGPT account<div class="hint">Signed in · checked 2 min ago</div></div></div>
+              <div class="ready-row"><span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><div class="grow">Microphone<div class="hint">Headset mic · level OK</div></div><button class="btn">Test</button></div>
+              <div class="ready-row"><span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><div class="grow">Shortcut<div class="hint"><span class="kbd">Ctrl</span> <span class="kbd">Space</span> registered</div></div></div>
+              <div class="ready-row"><span class="st warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 7v6M12 17h.01"/></svg></span><div class="grow">Auto-paste<div class="hint">Needs Accessibility permission on macOS</div></div><button class="btn primary">Allow</button></div>
+            </div>
+            <div class="card">
+              <h3><span><span class="fn">(2)</span>This week</span></h3>
+              <div class="stats">
+                <div class="stat"><div class="n">2,418</div><div class="l">words</div></div>
+                <div class="stat"><div class="n">41</div><div class="l">dictations</div></div>
+                <div class="stat"><div class="n">52m</div><div class="l">typing saved</div></div>
+              </div>
+              <div style="margin-top:18px;font-size:12.5px;color:var(--ink-2)">Language</div>
+              <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><span class="btn primary">Auto-detect</span><span class="btn">English</span><span class="btn">Tamil</span><span class="btn">Hindi</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3><span><span class="fn">(3)</span>Recent</span> <span style="font-weight:500">Search history</span></h3>
+            <div class="hist">
+              <div class="item failed">
+                <div class="txt"><b style="color:var(--danger)">Not sent.</b> 0:22 of audio for Gmail. Your session expired before it could be written out.</div>
+                <div class="meta">Gmail · 10:42</div>
+                <div class="acts"><button class="btn primary">Sign in and send</button></div>
+              </div>
+              <div class="item">
+                <div class="txt">Running ten minutes late, start without me and I'll catch up on the notes.</div>
+                <div class="meta">WhatsApp · 10:31 · 15 words</div>
+                <div class="acts"><button class="btn">Copy</button><button class="btn">Paste again</button></div>
+              </div>
+              <div class="item">
+                <div class="txt">Can you push the review to Thursday? The build is ready but I want one more pass on the onboarding flow.</div>
+                <div class="meta">Slack · 09:58 · 21 words</div>
+                <div class="acts"><button class="btn">Copy</button><button class="btn">Paste again</button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ═══════════════ 3. ANDROID ═══════════════ -->
+    <div class="label">3 · Android, one keyboard with the mic built in</div>
+    <div class="canvas">
+      <div class="phones">
+
+        <div class="phone"><div class="screen">
+          <div class="appbar"><span style="font-weight:600">Priya</span><span class="badge chip-ok">online</span></div>
+          <div class="chat">
+            <div class="bubble">are you coming to the 11?</div>
+            <div class="bubble me">Running ten minutes late, start without me</div>
+          </div>
+          <div class="field typed">Running ten minutes late, start without me|</div>
+          <div class="kb">
+            <div class="kb-bar">
+              <span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+              <div class="msg"><div class="t1">Inserted</div><div class="t2">7 words</div></div>
+              <button class="btn">Undo</button>
+              <span class="mic" aria-label="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span class="rd" style="background:var(--ok)"></span></span>
+            </div>
+            <div class="keys"><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div>
+            <div class="keys" style="grid-template-columns:repeat(9,1fr);padding:0 14px"><span>a</span><span>s</span><span>d</span><span>f</span><span>g</span><span>h</span><span>j</span><span>k</span><span>l</span></div>
+          </div>
+        </div></div>
+
+        <div class="phone"><div class="screen">
+          <div class="keystates">
+            <div class="cap">Signed out: the mic tells you before you talk</div>
+            <div class="kb-bar"><span class="badge chip-warn">Signed out</span><div class="msg"><div class="t1">Sign in to dictate</div></div><button class="btn primary">Sign in</button></div>
+            <div class="cap">Recording: live level, timer, cancel</div>
+            <div class="kb-bar"><span class="rec"></span><svg class="ink" viewBox="0 0 220 26" preserveAspectRatio="none" role="img" aria-label="Your voice, being written"><path d="M2 13 C 8 13, 10 6, 16 6 S 22 20, 28 20 S 34 3, 41 3 S 47 23, 54 23 S 60 9, 66 9 S 71 17, 77 17 S 83 1, 91 1 S 97 25, 105 25 S 111 8, 118 8 S 124 18, 131 18 S 137 5, 144 5 S 150 21, 157 21 S 163 11, 170 11 S 176 15, 182 15 S 188 9, 194 9 S 200 13, 206 13"/><path class="nib" d="M206 13 l9 -6 l-2.2 6 l2.2 6 z"/></svg><span class="mono" style="font-size:13px">0:09</span><button class="btn">Cancel</button><span class="mic" style="background:var(--danger)"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></span></div>
+            <div class="cap">Failed mid-send: audio kept, one tap</div>
+            <div class="kb-bar"><span class="badge chip-danger">Not sent</span><div class="msg"><div class="t1">Sign in to send this</div><div class="t2">0:09 saved</div></div><button class="btn primary">Sign in</button></div>
+            <div class="cap">Offline: queued, sends itself</div>
+            <div class="kb-bar"><span class="badge chip-warn">Offline</span><div class="msg"><div class="t1">Sends when you're online</div><div class="t2">0:09 saved</div></div><button class="btn">Discard</button></div>
+            <div class="cap">Missed text? Insert the last one again</div>
+            <div class="kb-bar"><div class="msg"><div class="t1">Last: “Running ten minutes…”</div><div class="t2">WhatsApp · 2 min ago</div></div><button class="btn">Insert</button><span class="mic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span class="rd" style="background:var(--ok)"></span></span></div>
+          </div>
+        </div></div>
+
+        <div class="phone"><div class="screen">
+          <div class="appbar"><span class="brand" style="padding:0;font-size:26px">voxa</span><span class="badge chip-ok"><span class="dot" style="background:currentColor"></span>Ready</span></div>
+          <div class="home-pad">
+            <div class="card">
+              <h3>Setup <span class="badge chip-warn">1 left</span></h3>
+              <div class="ready-row"><span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><div class="grow">ChatGPT linked</div></div>
+              <div class="ready-row"><span class="st ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><div class="grow">Microphone allowed</div></div>
+              <div class="ready-row"><span class="st warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 7v6M12 17h.01"/></svg></span><div class="grow">Voxa keyboard<div class="hint">Turn it on, then pick it</div></div><button class="btn primary">Turn on</button></div>
+            </div>
+            <div class="card">
+              <h3>Today</h3>
+              <div class="stats"><div class="stat"><div class="n">312</div><div class="l">words</div></div><div class="stat"><div class="n">9</div><div class="l">dictations</div></div><div class="stat"><div class="n">7m</div><div class="l">saved</div></div></div>
+            </div>
+            <div class="card">
+              <h3>History</h3>
+              <div class="hist">
+                <div class="item"><div class="txt" style="font-size:13.5px">Running ten minutes late, start without me</div><div class="meta">WhatsApp · 10:31</div><div class="acts"><button class="btn">Copy</button></div></div>
+                <div class="item"><div class="txt" style="font-size:13.5px">Order the blue one, the other is too small</div><div class="meta">Messages · 09:12</div><div class="acts"><button class="btn">Copy</button></div></div>
+              </div>
+            </div>
+          </div>
+        </div></div>
+
+      </div>
+    </div>
+  </main>
+
+  <section class="decisions">
+    <h2>What changes versus today</h2>
+    <ul>
+      <li><b>Removed:</b> the desktop's second settings window (preferences.html); the Android voice-only keyboard and the unregistered overlay service (one keyboard, mic always visible); settings that did nothing (Hold to talk, Trim silence, history row cap); the "captured silence" panel that showed even when nothing failed.</li>
+      <li><b>Kept:</b> hotkey-to-paste on desktop, the HeliBoard keyboard base on Android, ChatGPT sign-in via an embedded page, History with audio replay.</li>
+      <li><b>Added:</b> readiness check before recording; a strip that stays up with one action per failure; saved audio for every dictation with send-when-online; paste goes to the app you started in, with Undo and clipboard restore; Cancel; live mic level; language choice; Insert last / Undo on Android; a live setup checklist on both platforms.</li>
+      <li><b>Accessibility floor for every direction:</b> text 4.5:1 or better, 12px/12sp minimum, every control keyboard-reachable and labelled, strip state announced to screen readers, reduced-motion respected.</li>
+    </ul>
+  </section>
+</div>
+<script>
+  const product = document.getElementById('product');
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', String(x === t)));
+    product.className = 'dir-' + t.dataset.dir;
+    document.querySelectorAll('[data-note]').forEach(n => n.hidden = n.dataset.note !== t.dataset.dir);
+  }));
+</script>
+</body>
+</html>
