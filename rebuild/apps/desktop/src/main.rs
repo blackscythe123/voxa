@@ -117,8 +117,9 @@ pub(crate) struct Voxa {
     published: Option<link::Live>,
     hotkey_result: Option<(String, Option<String>)>,
     hotkey_paused: bool,
-    /// Domain in the browser's address bar when each job started, read off the UI thread.
-    tab_domains: Arc<std::sync::Mutex<HashMap<JobId, String>>>,
+    /// What each job was really dictated into, read off the UI thread while the user talks:
+    /// (name, host), e.g. ("mangafire.to", "Brave") or ("Claude Code", "VS Code").
+    job_context: Arc<std::sync::Mutex<HashMap<JobId, (String, String)>>>,
     /// The ChatGPT sign-in window is open.
     pub(crate) signing_in: bool,
     menu_open: MenuId,
@@ -253,16 +254,24 @@ impl Voxa {
                             win::cache_app_icon(fg, win::icon_owner(fg));
                             win::cache_site_icon(&target.app);
                             win::log(&format!("hotkey in {}", win::describe(fg)));
-                            let in_browser = win::browser_name(fg).is_some();
+                            let browser = win::browser_name(fg);
+                            let (pid, stem) = win::window_process(fg);
                             v.handle(Event::Hotkey { target }, cx);
-                            // Which site the browser is on: read while the user talks, off the UI thread.
-                            if let (true, State::Recording { job, .. }) = (in_browser, v.flow.state().clone()) {
-                                let map = v.tab_domains.clone();
+                            // What exactly is in front (the site in a browser tab, Claude Code in an
+                            // editor): read while the user talks, off the UI thread.
+                            if let State::Recording { job, .. } = v.flow.state().clone() {
+                                let map = v.job_context.clone();
                                 let hwnd = fg as usize;
                                 std::thread::spawn(move || {
-                                    if let Some(d) = tab::domain_of(hwnd) {
-                                        win::cache_domain_icon_or_site(&d);
-                                        map.lock().unwrap().insert(job, d);
+                                    let found = match browser {
+                                        Some(b) => tab::domain_of(hwnd).map(|d| {
+                                            win::cache_domain_icon_or_site(&d);
+                                            (win::site_for_domain(&d), b)
+                                        }),
+                                        None => tab::coding_agent(&stem, pid).inspect(|(name, _)| win::cache_named_icon(name, "claude.ai")),
+                                    };
+                                    if let Some(f) = found {
+                                        map.lock().unwrap().insert(job, f);
                                     }
                                 });
                             }
@@ -306,7 +315,7 @@ impl Voxa {
             published: None,
             hotkey_result: None,
             hotkey_paused: false,
-            tab_domains: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            job_context: Arc::new(std::sync::Mutex::new(HashMap::new())),
             signing_in: false,
             menu_open: open_item.id().clone(),
             menu_quit: quit_item.id().clone(),
@@ -566,11 +575,11 @@ impl Voxa {
         for job in jobs {
             let Some(&id) = self.job_entries.get(&job.id) else { continue };
             let secs = self.job_secs.get(&job.id).copied().unwrap_or(0.0);
-            // In a browser, name the site from the address bar when the title didn't give it.
-            let domain = if job.started_in.is_none() { self.tab_domains.lock().unwrap().get(&job.id).cloned() } else { None };
-            let app = match (&domain, win::browser_name(job.target.window as _)) {
-                (Some(d), Some(b)) if job.target.app == b => win::site_for_domain(d),
-                _ => job.target.app.clone(),
+            // Name what was really in front (site, Claude Code) unless the user pasted elsewhere.
+            let context = if job.started_in.is_none() { self.job_context.lock().unwrap().get(&job.id).cloned() } else { None };
+            let (app, host) = match context {
+                Some((name, host)) => (name, Some(host)),
+                None => (job.target.app.clone(), None),
             };
             let entry = |text: String, status: Status| Entry {
                 id,
@@ -581,7 +590,9 @@ impl Voxa {
                 audio: self.audio_paths.get(&job.id).cloned(),
                 started_in: job.started_in.as_ref().map(|t| t.app.clone()),
                 // The browser, when the app is a site; kept once known (the window may close later).
-                via: win::browser_name(job.target.window as _)
+                via: host
+                    .clone()
+                    .or_else(|| win::browser_name(job.target.window as _))
                     .filter(|b| *b != app)
                     .or_else(|| self.history.get(id).and_then(|e| e.via.clone())),
             };
@@ -1153,7 +1164,7 @@ fn run_window(tour: bool) {
     Application::new().run(move |cx: &mut App| {
         let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
         let backend = cx.new(Backend::new);
-        let first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::History };
+        let first = if tour || !backend.read(cx).settings.onboarded { Page::Setup(1) } else { Page::Home };
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions { title: Some("Voxa".into()), ..Default::default() }),
             window_bounds: Some(WindowBounds::centered(size(px(1100.), px(760.)), cx)),

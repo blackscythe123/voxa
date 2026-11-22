@@ -20,6 +20,9 @@ const CARD_BORDER: u32 = 0x0000000F;
 
 // Segoe Fluent Icons code points.
 const I_HISTORY: char = '\u{E81C}';
+const I_HOME: char = '\u{E80F}';
+const I_PREV: char = '\u{E76B}';
+const I_NEXT: char = '\u{E76C}';
 const I_INSIGHTS: char = '\u{E9D2}';
 const I_SETTINGS: char = '\u{E713}';
 const I_COPY: char = '\u{E8C8}';
@@ -45,6 +48,7 @@ pub const SETUP_STEPS: u8 = 6;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Page {
+    Home,
     History,
     Insights,
     Settings,
@@ -76,6 +80,32 @@ pub struct Home {
     confirm_entry: Option<u64>,
     /// Start with Windows as chosen on the last setup step (On unless turned off).
     autostart_choice: Option<bool>,
+    range: Range,
+    /// Custom range (local dates).
+    custom: (chrono::NaiveDate, chrono::NaiveDate),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Range {
+    Days7,
+    Days30,
+    ThisMonth,
+    Days90,
+    ThisYear,
+    All,
+    Custom,
+}
+
+impl Range {
+    const ALL: [(Range, &'static str); 7] = [
+        (Range::Days7, "7 days"),
+        (Range::Days30, "30 days"),
+        (Range::ThisMonth, "This month"),
+        (Range::Days90, "90 days"),
+        (Range::ThisYear, "This year"),
+        (Range::All, "All time"),
+        (Range::Custom, "Custom"),
+    ];
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -108,6 +138,11 @@ impl Home {
             playing: None,
             confirm_entry: None,
             autostart_choice: None,
+            range: Range::Days7,
+            custom: {
+                let t = chrono::Local::now().date_naive();
+                (t - chrono::Duration::days(29), t)
+            },
         };
         me.go(page, cx);
         me
@@ -413,7 +448,7 @@ impl Home {
 
     fn history(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let query = self.search.clone();
-        let (r, shortcut, waiting, waiting_live, entries) = {
+        let (r, shortcut, _waiting, _waiting_live, entries) = {
             let v = self.voxa.read(cx);
             let waiting: Vec<u64> = v
                 .history
@@ -427,56 +462,7 @@ impl Home {
             (v.readiness(), v.settings.hotkey.clone(), waiting, waiting_live, entries)
         };
         let mut out: Vec<AnyElement> = vec![div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("History").into_any_element()];
-        if r.session == Session::Expired && !self.dismissed.contains(&"signin") {
-            let body = if waiting_live > 0 {
-                format!("Voxa can't write anything until you sign in. {waiting_live} dictation{} waiting and will be written out when you do.", if waiting_live == 1 { " is" } else { "s are" })
-            } else {
-                "Voxa can't write anything until you sign in.".into()
-            };
-            out.push(
-                info_bar(
-                    Bar::Error,
-                    "You're signed out of ChatGPT.",
-                    &body,
-                    Some(wbtn("ib-signin", "Sign in", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.sign_in(cx)))).into_any_element()),
-                    None,
-                )
-                .into_any_element(),
-            );
-        }
-        match r.blocker() {
-            Some(Blocker::MicDenied) | Some(Blocker::MicMissing) if !self.dismissed.contains(&"mic") => {
-                let missing = r.blocker() == Some(Blocker::MicMissing);
-                out.push(
-                    info_bar(
-                        Bar::Error,
-                        if missing { "No microphone found." } else { "Voxa can't use the microphone." },
-                        if missing { "Plug one in, or turn on the built-in one in Windows settings." } else { "Allow microphone access for desktop apps in Windows settings." },
-                        Some(wbtn("ib-mic", "Open settings", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.open_mic_settings(cx)))).into_any_element()),
-                        Some(self.close_btn("mic", cx)),
-                    )
-                    .into_any_element(),
-                );
-            }
-            _ => {}
-        }
-        if r.network == Network::Down && !self.dismissed.contains(&"offline") {
-            out.push(info_bar(Bar::Warning, "You're offline.", "You can still dictate. Voxa keeps what you say and sends it when you're back.", None, Some(self.close_btn("offline", cx))).into_any_element());
-        }
-        if !waiting.is_empty() && r.session != Session::Expired && !self.dismissed.contains(&"waiting") {
-            let n = waiting.len();
-            out.push(
-                info_bar(
-                    Bar::Warning,
-                    &format!("{n} dictation{} not written out yet.", if n == 1 { " was" } else { "s were" }),
-                    "The recording is kept on this PC. Voxa can send it now; the text will be ready to copy.",
-                    Some(wbtn("ib-send", "Send now", true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend_all(cx)))).into_any_element()),
-                    Some(self.close_btn("waiting", cx)),
-                )
-                .into_any_element(),
-            );
-        }
-
+        out.extend(self.needs_you(cx));
         // One-line ready status.
         let ready = r.blocker().is_none() && r.session == Session::Valid;
         let status = if ready {
@@ -601,6 +587,74 @@ impl Home {
             }
             out.push(self.history_row(e, cx));
         }
+        out
+    }
+
+    /// What needs the user: one InfoBar per problem, each with one action.
+    fn needs_you(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let (r, waiting, waiting_live) = {
+            let v = self.voxa.read(cx);
+            let waiting: Vec<u64> = v
+                .history
+                .entries
+                .iter()
+                .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && !v.is_live(e.id) && e.audio.as_ref().is_some_and(|a| a.exists()))
+                .map(|e| e.id)
+                .collect();
+            let waiting_live = v.history.entries.iter().filter(|e| matches!(e.status, Status::Waiting(_)) && v.is_live(e.id)).count();
+            (v.readiness(), waiting, waiting_live)
+        };
+        let mut out: Vec<AnyElement> = Vec::new();
+        if r.session == Session::Expired && !self.dismissed.contains(&"signin") {
+            let body = if waiting_live > 0 {
+                format!("Voxa can't write anything until you sign in. {waiting_live} dictation{} waiting and will be written out when you do.", if waiting_live == 1 { " is" } else { "s are" })
+            } else {
+                "Voxa can't write anything until you sign in.".into()
+            };
+            out.push(
+                info_bar(
+                    Bar::Error,
+                    "You're signed out of ChatGPT.",
+                    &body,
+                    Some(wbtn("ib-signin", "Sign in", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.sign_in(cx)))).into_any_element()),
+                    None,
+                )
+                .into_any_element(),
+            );
+        }
+        match r.blocker() {
+            Some(Blocker::MicDenied) | Some(Blocker::MicMissing) if !self.dismissed.contains(&"mic") => {
+                let missing = r.blocker() == Some(Blocker::MicMissing);
+                out.push(
+                    info_bar(
+                        Bar::Error,
+                        if missing { "No microphone found." } else { "Voxa can't use the microphone." },
+                        if missing { "Plug one in, or turn on the built-in one in Windows settings." } else { "Allow microphone access for desktop apps in Windows settings." },
+                        Some(wbtn("ib-mic", "Open settings", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.open_mic_settings(cx)))).into_any_element()),
+                        Some(self.close_btn("mic", cx)),
+                    )
+                    .into_any_element(),
+                );
+            }
+            _ => {}
+        }
+        if r.network == Network::Down && !self.dismissed.contains(&"offline") {
+            out.push(info_bar(Bar::Warning, "You're offline.", "You can still dictate. Voxa keeps what you say and sends it when you're back.", None, Some(self.close_btn("offline", cx))).into_any_element());
+        }
+        if !waiting.is_empty() && r.session != Session::Expired && !self.dismissed.contains(&"waiting") {
+            let n = waiting.len();
+            out.push(
+                info_bar(
+                    Bar::Warning,
+                    &format!("{n} dictation{} not written out yet.", if n == 1 { " was" } else { "s were" }),
+                    "The recording is kept on this PC. Voxa can send it now; the text will be ready to copy.",
+                    Some(wbtn("ib-send", "Send now", true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend_all(cx)))).into_any_element()),
+                    Some(self.close_btn("waiting", cx)),
+                )
+                .into_any_element(),
+            );
+        }
+
         out
     }
 
@@ -797,53 +851,152 @@ impl Home {
         cx.notify();
     }
 
+    fn range_dates(&self, entries: &[store::Entry]) -> (chrono::NaiveDate, chrono::NaiveDate) {
+        use chrono::Datelike;
+        let today = chrono::Local::now().date_naive();
+        let days = |n: i64| today - chrono::Duration::days(n - 1);
+        match self.range {
+            Range::Days7 => (days(7), today),
+            Range::Days30 => (days(30), today),
+            Range::ThisMonth => (today.with_day(1).unwrap(), today),
+            Range::Days90 => (days(90), today),
+            Range::ThisYear => (chrono::NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap(), today),
+            Range::All => (entries.first().map(|e| e.local_time().date_naive()).unwrap_or(today).min(today), today),
+            Range::Custom => self.custom,
+        }
+    }
+
+    fn stat_card(n: String, l: &str) -> gpui::Div {
+        div()
+            .flex_1()
+            .min_w(px(0.))
+            .px(px(18.))
+            .py(px(16.))
+            .bg(rgb(0xFFFFFF))
+            .border_1()
+            .border_color(rgba(CARD_BORDER))
+            .rounded(px(4.))
+            .child(div().text_size(px(30.)).line_height(px(38.)).font_weight(FontWeight::SEMIBOLD).child(n))
+            .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(l.to_string()))
+    }
+
     fn insights(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let v = self.voxa.read(cx);
-        let i = store::insights(&v.history.entries, chrono::Local::now());
-        let stat = |n: String, l: &str| {
-            div()
-                .flex_1()
-                .px(px(18.))
-                .py(px(16.))
-                .bg(rgb(0xFFFFFF))
-                .border_1()
-                .border_color(rgba(CARD_BORDER))
-                .rounded(px(4.))
-                .child(div().text_size(px(34.)).line_height(px(40.)).font_weight(FontWeight::SEMIBOLD).child(n))
-                .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(l.to_string()))
-        };
-        let max = i.per_day.iter().copied().max().unwrap_or(0).max(1) as f32;
-        let bars = div().flex().items_end().gap(px(18.)).h(px(150.)).children(i.per_day.iter().enumerate().map(|(d, w)| {
-            let col = div().flex_1().flex().flex_col().items_center().justify_end().h_full();
-            if *w == 0 {
-                col.child(div().size(px(6.)).rounded_full().bg(rgb(0xE7E1DA)))
-            } else {
-                let h = 8.0 + 142.0 * (*w as f32 / max);
-                col.child(div().text_size(px(11.)).text_color(rgb(MUTED)).mb(px(4.)).child(fmt_thousands(*w))).child(div().w_full().h(px(h - 18.0).max(px(4.))).rounded_t(px(3.)).bg(rgb(if d == i.today { INK } else { 0xE7E1DA })))
-            }
-        }));
-        let today_idx = i.today;
-        let labels = div().flex().gap(px(18.)).mt(px(8.)).children(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].iter().enumerate().map(move |(n, d)| {
-            div()
-                .flex_1()
-                .flex()
-                .justify_center()
-                .text_size(px(12.))
-                .text_color(rgb(if n == today_idx { INK } else { MUTED }))
-                .when(n == today_idx, |x| x.font_weight(FontWeight::SEMIBOLD))
-                .child(if n == today_idx { "Today".to_string() } else { d.to_string() })
-        }));
+        let entries = self.voxa.read(cx).history.entries.clone();
+        let (from, to) = self.range_dates(&entries);
+        let today = chrono::Local::now().date_naive();
+        let st = store::stats(&entries, from, to, today);
+        let label = if chrono::Datelike::year(&from) == chrono::Datelike::year(&to) { format!("{} to {}", from.format("%-d %B"), to.format("%-d %B %Y")) } else { format!("{} to {}", from.format("%-d %B %Y"), to.format("%-d %B %Y")) };
+        let dur = |m: u32| if m >= 60 { format!("{}h {}m", m / 60, m % 60) } else { format!("{m} min") };
+
         let mut out: Vec<AnyElement> = vec![
-            div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Insights").into_any_element(),
-            div().mt(px(2.)).text_size(px(14.)).text_color(rgb(MUTED)).child(i.week_label.clone()).into_any_element(),
             div()
-                .mt(px(18.))
+                .flex()
+                .items_end()
+                .justify_between()
+                .child(div().child(div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Insights")).child(div().mt(px(2.)).text_size(px(14.)).text_color(rgb(MUTED)).child(label)))
+                .into_any_element(),
+        ];
+        // Range picker.
+        let mut chips = div().mt(px(14.)).flex().flex_wrap().items_center().gap(px(6.));
+        for (r, name) in Range::ALL {
+            chips = chips.child(self.chip(SharedString::from(format!("range-{name}")), name, self.range == r, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.range = r;
+                cx.notify();
+            })));
+        }
+        out.push(chips.into_any_element());
+        if self.range == Range::Custom {
+            let stepper = |id: &'static str, which: usize, d: chrono::NaiveDate, cx: &mut Context<Self>| {
+                let step = move |delta: i64| {
+                    move |this: &mut Self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                        let t = chrono::Local::now().date_naive();
+                        let (mut a, mut b) = this.custom;
+                        if which == 0 { a = (a + chrono::Duration::days(delta)).min(b) } else { b = (b + chrono::Duration::days(delta)).max(a).min(t) }
+                        this.custom = (a, b);
+                        cx.notify();
+                    }
+                };
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .child(self.icon_btn(format!("{id}-m30"), '\u{E892}', "30 days earlier", false, cx.listener(step(-30))))
+                    .child(self.icon_btn(format!("{id}-m1"), I_PREV, "A day earlier", false, cx.listener(step(-1))))
+                    .child(div().w(px(120.)).flex().justify_center().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(d.format("%-d %b %Y").to_string()))
+                    .child(self.icon_btn(format!("{id}-p1"), I_NEXT, "A day later", false, cx.listener(step(1))))
+                    .child(self.icon_btn(format!("{id}-p30"), '\u{E893}', "30 days later", false, cx.listener(step(30))))
+            };
+            let (a, b) = self.custom;
+            out.push(
+                div()
+                    .mt(px(10.))
+                    .px(px(14.))
+                    .py(px(8.))
+                    .flex()
+                    .items_center()
+                    .gap(px(14.))
+                    .bg(rgb(0xFFFFFF))
+                    .border_1()
+                    .border_color(rgba(CARD_BORDER))
+                    .rounded(px(4.))
+                    .text_size(px(13.))
+                    .child("From")
+                    .child(stepper("from", 0, a, cx))
+                    .child("to")
+                    .child(stepper("to", 1, b, cx))
+                    .into_any_element(),
+            );
+        }
+        out.push(
+            div()
+                .mt(px(16.))
                 .flex()
                 .gap(px(3.))
-                .child(stat(fmt_thousands(i.week_words), "words this week"))
-                .child(stat(if i.minutes_saved >= 60 { format!("{}h {}m", i.minutes_saved / 60, i.minutes_saved % 60) } else { format!("{} min", i.minutes_saved) }, "faster than typing"))
-                .child(stat(format!("{} day{}", i.streak_days, if i.streak_days == 1 { "" } else { "s" }), "in a row"))
+                .child(Self::stat_card(fmt_thousands(st.words), "words"))
+                .child(Self::stat_card(fmt_thousands(st.dictations), "dictations"))
+                .child(Self::stat_card(dur(st.minutes_saved), "faster than typing"))
                 .into_any_element(),
+        );
+        out.push(
+            div()
+                .mt(px(3.))
+                .flex()
+                .gap(px(3.))
+                .child(Self::stat_card(dur((st.secs_spoken / 60.0).round() as u32), "spent talking"))
+                .child(Self::stat_card(if st.wpm > 0 { format!("{} wpm", st.wpm) } else { "-".into() }, "speaking speed"))
+                .child(Self::stat_card(format!("{} day{}", st.streak_days, if st.streak_days == 1 { "" } else { "s" }), "in a row, up to today"))
+                .into_any_element(),
+        );
+
+        // Chart.
+        let max = st.buckets.iter().map(|b| b.1).max().unwrap_or(0).max(1) as f32;
+        let n = st.buckets.len().max(1);
+        let gap = if n > 20 { 4. } else if n > 10 { 8. } else { 18. };
+        let every = n.div_ceil(12);
+        let show_values = n <= 12;
+        let bars = div().flex().items_end().gap(px(gap)).h(px(170.)).children(st.buckets.iter().map(|(_, w, now)| {
+            let col = div().flex_1().min_w(px(0.)).flex().flex_col().items_center().justify_end().h_full();
+            if *w == 0 {
+                col.child(div().size(px(5.)).rounded_full().bg(rgb(0xE7E1DA)))
+            } else {
+                let h = 6.0 + 140.0 * (*w as f32 / max);
+                col.when(show_values, |c| c.child(div().text_size(px(11.)).text_color(rgb(MUTED)).mb(px(4.)).child(fmt_thousands(*w))))
+                    .child(div().w_full().h(px(h)).rounded_t(px(3.)).bg(rgb(if *now { INK } else { 0xE2D6CB })))
+            }
+        }));
+        let labels = div().flex().gap(px(gap)).mt(px(8.)).children(st.buckets.iter().enumerate().map(|(i, (l, _, now))| {
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .justify_center()
+                .text_size(px(11.))
+                .text_color(rgb(if *now { INK } else { MUTED }))
+                .when(*now, |x| x.font_weight(FontWeight::SEMIBOLD))
+                .child(if i % every == 0 || *now { l.clone() } else { String::new() })
+        }));
+        let unit = if n == (to - from).num_days() as usize + 1 { "Words per day" } else if st.buckets.first().is_some_and(|b| b.0.len() <= 6 && !b.0.contains(' ')) { "Words per month" } else { "Words per week" };
+        out.push(
             div()
                 .mt(px(3.))
                 .px(px(20.))
@@ -852,27 +1005,156 @@ impl Home {
                 .border_1()
                 .border_color(rgba(CARD_BORDER))
                 .rounded(px(4.))
-                .child(div().mb(px(14.)).text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child("Words per day"))
+                .child(div().mb(px(14.)).text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(unit))
                 .child(bars)
                 .child(labels)
                 .into_any_element(),
-        ];
-        if !i.per_app.is_empty() {
+        );
+
+        // Highlights.
+        let mut facts: Vec<String> = Vec::new();
+        if let Some((d, w)) = &st.busiest_day {
+            facts.push(format!("Busiest day: {d}, {} words", fmt_thousands(*w)));
+        }
+        if st.dictations > 0 {
+            facts.push(format!("Average dictation: {} words. Longest: {} words.", st.avg_words, fmt_thousands(st.longest_words)));
+        }
+        if !facts.is_empty() {
+            out.push(div().mt(px(10.)).flex().flex_col().gap(px(4.)).text_size(px(13.)).text_color(rgb(0x3D3D3D)).children(facts).into_any_element());
+        }
+
+        if !st.per_app.is_empty() {
             out.push(section("Where you dictate").into_any_element());
-            for (app, words) in i.per_app.iter().take(8) {
+            let top = st.per_app.first().map(|a| a.1).unwrap_or(1).max(1) as f32;
+            for (app, words) in st.per_app.iter().take(10) {
+                let share = *words as f32 / top;
                 out.push(
                     card()
                         .min_h(px(52.))
                         .py(px(10.))
                         .mb(px(3.))
                         .child(app_badge(app, 28.))
-                        .child(div().flex_1().text_size(px(14.)).child(app.clone()))
-                        .child(div().text_size(px(14.)).text_color(rgb(MUTED)).child(format!("{} words", fmt_thousands(*words))))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .child(div().text_size(px(14.)).child(app.clone()))
+                                .child(div().mt(px(5.)).h(px(4.)).rounded(px(2.)).bg(rgb(0xF0EBE5)).child(div().h_full().w(gpui::relative(share)).rounded(px(2.)).bg(rgb(INK)))),
+                        )
+                        .child(div().w(px(110.)).flex().justify_end().text_size(px(14.)).text_color(rgb(MUTED)).child(format!("{} words", fmt_thousands(*words))))
                         .into_any_element(),
                 );
             }
+        } else {
+            out.push(div().mt(px(30.)).text_size(px(14.)).text_color(rgb(MUTED)).child("No dictations in this range.").into_any_element());
         }
-        out.push(div().mt(px(16.)).text_size(px(12.)).text_color(rgb(MUTED)).child(format!("\"Faster than typing\" compares your speaking time with typing the same words at {} words a minute.", store::TYPING_WPM as u32)).into_any_element());
+        out.push(div().mt(px(16.)).mb(px(24.)).text_size(px(12.)).text_color(rgb(MUTED)).child(format!("\"Faster than typing\" compares your speaking time with typing the same words at {} words a minute.", store::TYPING_WPM as u32)).into_any_element());
+        out
+    }
+
+    fn home(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let (entries, shortcut, r, account) = {
+            let v = self.voxa.read(cx);
+            (v.history.entries.clone(), v.settings.hotkey.clone(), v.readiness(), v.account())
+        };
+        use chrono::Timelike;
+        let now = chrono::Local::now();
+        let today = now.date_naive();
+        let greeting = match now.hour() {
+            5..=11 => "Good morning",
+            12..=16 => "Good afternoon",
+            _ => "Good evening",
+        };
+        let first = account.as_ref().and_then(|a| a.name.split_whitespace().next().map(str::to_string)).filter(|n| !n.is_empty());
+        let mut out: Vec<AnyElement> = vec![
+            div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child(match first { Some(n) => format!("{greeting}, {n}"), None => greeting.to_string() }).into_any_element(),
+        ];
+        out.extend(self.needs_you(cx));
+
+        // The one thing Voxa does, front and centre.
+        let ready = r.blocker().is_none() && r.session == Session::Valid;
+        out.push(
+            div()
+                .mt(px(16.))
+                .px(px(24.))
+                .py(px(22.))
+                .rounded(px(8.))
+                .bg(rgb(0xFFFFFF))
+                .border_1()
+                .border_color(rgba(CARD_BORDER))
+                .flex()
+                .items_center()
+                .gap(px(24.))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(div().flex().items_center().gap(px(8.)).text_size(px(13.)).text_color(rgb(if ready { 0x0E5C0E } else { 0x9D5D00 })).child(icon(if ready { I_CHECK } else { '!' }, 12.)).child(if ready { "Ready to dictate" } else if r.session == Session::Unknown { "Checking your sign-in" } else { "Needs you first" }))
+                        .child(div().mt(px(8.)).text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::SEMIBOLD).child("Click where you want to type, press your shortcut, and talk."))
+                        .child(div().mt(px(6.)).text_size(px(13.)).text_color(rgb(MUTED)).child("Press it again to finish. Esc cancels. Works in every app.")),
+                )
+                .child(div().flex().gap(px(6.)).children(shortcut.split('+').map(|k| {
+                    div().h(px(48.)).min_w(px(48.)).px(px(14.)).flex().items_center().justify_center().rounded(px(6.)).bg(rgb(0xFBFAF8)).border_1().border_b_4().border_color(rgba(0x0000002A)).text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(k.to_string())
+                })))
+                .into_any_element(),
+        );
+
+        // Today and this week at a glance.
+        let day = store::stats(&entries, today, today, today);
+        let week = store::stats(&entries, today - chrono::Duration::days(6), today, today);
+        out.push(
+            div()
+                .mt(px(3.))
+                .flex()
+                .gap(px(3.))
+                .child(Self::stat_card(fmt_thousands(day.words), "words today"))
+                .child(Self::stat_card(fmt_thousands(week.words), "words in the last 7 days"))
+                .child(Self::stat_card(format!("{} day{}", week.streak_days, if week.streak_days == 1 { "" } else { "s" }), "in a row"))
+                .into_any_element(),
+        );
+
+        // Recent dictations.
+        let recent: Vec<store::Entry> = entries.iter().rev().take(4).cloned().collect();
+        out.push(
+            section("Recent")
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().id("see-all").text_size(px(13.)).font_weight(FontWeight::NORMAL).text_color(rgb(INK)).cursor_pointer().child("See all in History").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::History, cx))))
+                .into_any_element(),
+        );
+        if recent.is_empty() {
+            out.push(div().text_size(px(14.)).text_color(rgb(MUTED)).child(format!("Nothing yet. Press {shortcut} anywhere and your words show up here.")).into_any_element());
+        }
+        for e in &recent {
+            out.push(self.history_row(e, cx));
+        }
+
+        // Things worth knowing.
+        out.push(section("Good to know").into_any_element());
+        let tip = |glyph: char, title: &str, body: &str| {
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .px(px(16.))
+                .py(px(14.))
+                .bg(rgb(0xFFFFFF))
+                .border_1()
+                .border_color(rgba(CARD_BORDER))
+                .rounded(px(4.))
+                .child(div().flex().items_center().gap(px(8.)).text_color(rgb(INK)).child(icon(glyph, 14.)).child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(title.to_string())))
+                .child(div().mt(px(6.)).text_size(px(13.)).line_height(px(19.)).text_color(rgb(MUTED)).child(body.to_string()))
+        };
+        out.push(
+            div()
+                .flex()
+                .gap(px(3.))
+                .child(tip(I_KEEP, "Nothing is lost", "If you're signed out, offline or switch apps, your words wait in History."))
+                .child(tip(I_TEXT, "Long takes work", "Pauses are trimmed before sending, so a long ramble still goes through."))
+                .child(tip(I_SETTINGS, "Make it yours", "Change the shortcut, remove filler words, or keep history longer in Settings."))
+                .into_any_element(),
+        );
+        out.push(div().h(px(24.)).into_any_element());
         out
     }
 
@@ -1328,7 +1610,7 @@ impl Home {
             }
             v.update_settings(|s| s.onboarded = true, cx)
         });
-        self.go(Page::History, cx);
+        self.go(Page::Home, cx);
     }
 }
 
@@ -1365,6 +1647,7 @@ impl Render for Home {
             return root.child(self.setup(step, cx));
         }
         let content = match self.page {
+            Page::Home => self.home(cx),
             Page::History => self.history(cx),
             Page::Insights => self.insights(cx),
             _ => self.settings(cx),
@@ -1380,6 +1663,7 @@ impl Render for Home {
             .flex_col()
             .gap(px(2.))
             .child(div().px(px(12.)).pt(px(8.)).pb(px(14.)).font_family("Fraunces NonWonky").font_weight(FontWeight::SEMIBOLD).text_size(px(24.)).child("voxa"))
+            .child(self.nav_item("nav-home", I_HOME, "Home", Page::Home, cx))
             .child(self.nav_item("nav-history", I_HISTORY, "History", Page::History, cx))
             .child(self.nav_item("nav-insights", I_INSIGHTS, "Insights", Page::Insights, cx))
             .child(div().flex_1())

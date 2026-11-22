@@ -37,7 +37,11 @@ $Shots = "$env:TEMP\voxa-shots"; New-Item -ItemType Directory -Force $Shots | Ou
 $Ff = (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName
 $UiExe = "C:\projects\voxa\rebuild\target\release\voxa-desktop.exe"
 
-function Get-Ui { $p = Get-Process voxa-desktop -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $p) { return [IntPtr]::Zero }; [UiWin]::Main([uint32]$p.Id) }
+# The main window may live in its own process (--window): search every Voxa process.
+function Get-Ui {
+  foreach ($p in @(Get-Process voxa-desktop, Voxa -ErrorAction SilentlyContinue)) { $h = [UiWin]::Main([uint32]$p.Id); if ($h -ne [IntPtr]::Zero) { return $h } }
+  return [IntPtr]::Zero
+}
 
 function Start-VoxaUi([string]$Data, [string]$Fake = "ok") {
   Get-Process voxa-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -61,6 +65,7 @@ function Front-Ui {
 
 function Click-Ui([double]$x, [double]$y) {
   $h = Front-Ui
+  if ($h -eq [IntPtr]::Zero) { throw "Voxa window not found: not clicking" }
   $s = [UiWin]::GetDpiForWindow($h) / 96.0
   $p = New-Object UiWin+POINT; $p.X = [int]($x * $s); $p.Y = [int]($y * $s)
   [UiWin]::ClientToScreen($h, [ref]$p) | Out-Null

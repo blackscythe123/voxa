@@ -265,6 +265,20 @@ pub fn site_for_domain(domain: &str) -> String {
         .unwrap_or_else(|| domain.to_string())
 }
 
+/// Icon for a name that is a service rather than an exe ("Claude Code" uses claude.ai's).
+pub fn cache_named_icon(name: &str, domain: &str) {
+    fetch_site_icon(domain.to_string(), icon_file(name));
+}
+
+/// The owning process id of a window, and its exe name without extension, lowercased.
+pub fn window_process(hwnd: HWND) -> (u32, String) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    let stem = std::path::Path::new(&exe_path(hwnd)).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+    (pid, stem)
+}
+
 /// Icon for a site that is not on the known list, straight from the site.
 pub fn cache_domain_icon(domain: &str) {
     fetch_site_icon(domain.to_string(), icon_file(domain));

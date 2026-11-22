@@ -196,6 +196,7 @@ pub struct Insights {
     pub per_app: Vec<(String, usize)>,
 }
 
+#[allow(dead_code)]
 pub fn insights(entries: &[Entry], now: DateTime<Local>) -> Insights {
     let today = now.date_naive();
     let monday = today - Days::days(today.weekday().num_days_from_monday() as i64);
@@ -235,6 +236,100 @@ pub fn insights(entries: &[Entry], now: DateTime<Local>) -> Insights {
         format!("{} {} to {} {}", monday.day(), monday.format("%B"), sunday.day(), sunday.format("%B"))
     };
     Insights { week_label, week_words, minutes_saved, streak_days, per_day, today: (today - monday).num_days() as usize, per_app }
+}
+
+/// Numbers for any date range (Insights page).
+#[derive(Debug, PartialEq)]
+pub struct Stats {
+    pub words: usize,
+    pub dictations: usize,
+    pub secs_spoken: f32,
+    pub minutes_saved: u32,
+    /// Words a minute while talking.
+    pub wpm: u32,
+    pub avg_words: usize,
+    pub longest_words: usize,
+    /// (label, words) of the day with the most words.
+    pub busiest_day: Option<(String, usize)>,
+    /// Consecutive days with a dictation, ending today (or yesterday). Not limited to the range.
+    pub streak_days: u32,
+    /// Chart: (label, words, contains today).
+    pub buckets: Vec<(String, usize, bool)>,
+    /// Words per app in the range, most first.
+    pub per_app: Vec<(String, usize)>,
+}
+
+/// Stats for `from..=to` (local dates). Buckets are days up to 31 days, weeks up to 26 weeks,
+/// else months, so the chart stays readable for any range.
+pub fn stats(entries: &[Entry], from: NaiveDate, to: NaiveDate, today: NaiveDate) -> Stats {
+    let written: Vec<&Entry> = entries.iter().filter(|e| matches!(e.status, Status::Pasted | Status::Ready) && !e.text.trim().is_empty()).collect();
+    let in_range: Vec<&Entry> = written.iter().copied().filter(|e| (from..=to).contains(&e.local_time().date_naive())).collect();
+    let words: usize = in_range.iter().map(|e| e.words()).sum();
+    let secs_spoken: f32 = in_range.iter().map(|e| e.secs).sum();
+    let dictations = in_range.len();
+
+    let mut per_app: Vec<(String, usize)> = Vec::new();
+    let mut per_day: std::collections::BTreeMap<NaiveDate, usize> = Default::default();
+    for e in &in_range {
+        let w = e.words();
+        *per_day.entry(e.local_time().date_naive()).or_default() += w;
+        match per_app.iter_mut().find(|(a, _)| *a == e.app) {
+            Some((_, n)) => *n += w,
+            None => per_app.push((e.app.clone(), w)),
+        }
+    }
+    per_app.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let busiest_day = per_day.iter().max_by_key(|(_, w)| **w).map(|(d, w)| (d.format("%a %-d %b").to_string(), *w));
+
+    let span = (to - from).num_days() + 1;
+    let mut buckets = Vec::new();
+    if span <= 31 {
+        let mut d = from;
+        while d <= to {
+            let label = if span <= 7 { if d == today { "Today".into() } else { d.format("%a").to_string() } } else { d.format("%-d").to_string() };
+            buckets.push((label, per_day.get(&d).copied().unwrap_or(0), d == today));
+            d += Days::days(1);
+        }
+    } else if span <= 182 {
+        let mut start = from - Days::days(from.weekday().num_days_from_monday() as i64);
+        while start <= to {
+            let end = start + Days::days(6);
+            let w: usize = per_day.range(start.max(from)..=end.min(to)).map(|(_, w)| *w).sum();
+            buckets.push((start.max(from).format("%-d %b").to_string(), w, (start..=end).contains(&today)));
+            start = end + Days::days(1);
+        }
+    } else {
+        let mut m = NaiveDate::from_ymd_opt(from.year(), from.month(), 1).unwrap();
+        while m <= to {
+            let next = if m.month() == 12 { NaiveDate::from_ymd_opt(m.year() + 1, 1, 1) } else { NaiveDate::from_ymd_opt(m.year(), m.month() + 1, 1) }.unwrap();
+            let w: usize = per_day.range(m.max(from)..next).map(|(_, w)| *w).sum();
+            let label = if from.year() == to.year() { m.format("%b").to_string() } else { m.format("%b %y").to_string() };
+            buckets.push((label, w, (m..next).contains(&today)));
+            m = next;
+        }
+    }
+
+    let days: std::collections::BTreeSet<NaiveDate> = written.iter().map(|e| e.local_time().date_naive()).collect();
+    let mut day = if days.contains(&today) { today } else { today - Days::days(1) };
+    let mut streak_days = 0;
+    while days.contains(&day) {
+        streak_days += 1;
+        day -= Days::days(1);
+    }
+
+    Stats {
+        words,
+        dictations,
+        secs_spoken,
+        minutes_saved: ((words as f32 / TYPING_WPM) - secs_spoken / 60.0).max(0.0).round() as u32,
+        wpm: if secs_spoken > 1.0 { (words as f32 / (secs_spoken / 60.0)).round() as u32 } else { 0 },
+        avg_words: if dictations > 0 { words / dictations } else { 0 },
+        longest_words: in_range.iter().map(|e| e.words()).max().unwrap_or(0),
+        busiest_day,
+        streak_days,
+        buckets,
+        per_app,
+    }
 }
 
 /// "Today", "Yesterday", or "Monday 17 November".
@@ -292,6 +387,26 @@ mod tests {
         let now = at(2026, 11, 22, 8);
         let e = vec![entry(at(2026, 11, 20, 9), "a", "x", 1.0, Status::Pasted), entry(at(2026, 11, 21, 9), "a", "x", 1.0, Status::Pasted)];
         assert_eq!(insights(&e, now).streak_days, 2);
+    }
+
+    #[test]
+    fn stats_for_any_range_with_fitting_buckets() {
+        let e = vec![
+            entry(at(2026, 11, 2, 9), "Slack", "one two three", 6.0, Status::Pasted),
+            entry(at(2026, 11, 20, 9), "Gmail", "four five", 3.0, Status::Pasted),
+            entry(at(2026, 11, 22, 9), "Gmail", "six seven eight nine", 6.0, Status::Pasted),
+            entry(at(2026, 10, 1, 9), "Slack", "outside the range", 2.0, Status::Pasted),
+        ];
+        let d = |m, day| NaiveDate::from_ymd_opt(2026, m, day).unwrap();
+        let s = stats(&e, d(11, 1), d(11, 22), d(11, 22));
+        assert_eq!((s.words, s.dictations, s.longest_words, s.avg_words), (9, 3, 4, 3));
+        assert_eq!(s.buckets.len(), 22, "daily up to a month");
+        assert_eq!(s.buckets.last().unwrap(), &("22".to_string(), 4, true));
+        assert_eq!(s.per_app[0], ("Gmail".to_string(), 6));
+        assert_eq!(s.wpm, 36, "9 words in 15 s");
+        assert_eq!(s.busiest_day.as_ref().unwrap().1, 4);
+        assert!(stats(&e, d(8, 1), d(11, 22), d(11, 22)).buckets.len() <= 27, "weekly for a few months");
+        assert_eq!(stats(&e, d(1, 1), d(11, 22), d(11, 22)).buckets.len(), 11, "monthly for a year");
     }
 
     #[test]

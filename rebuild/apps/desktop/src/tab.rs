@@ -72,3 +72,96 @@ mod probe {
         assert!(d.is_some());
     }
 }
+
+/// Names of the focused element and its ancestors (nearest first), e.g. to tell Claude Code's
+/// panel from the editor inside VS Code. Only element names, never their text content.
+pub fn focus_path(max: usize) -> Vec<String> {
+    use windows::Win32::UI::Accessibility::IUIAutomationTreeWalker;
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let out = (|| -> windows::core::Result<Vec<String>> {
+            let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+            let walker: IUIAutomationTreeWalker = uia.ControlViewWalker()?;
+            let mut el = uia.GetFocusedElement()?;
+            let mut names = Vec::new();
+            for _ in 0..max {
+                let n = el.CurrentName().map(|b| b.to_string()).unwrap_or_default();
+                if !n.trim().is_empty() {
+                    names.push(n.chars().take(80).collect());
+                }
+                match walker.GetParentElement(&el) {
+                    Ok(p) => el = p,
+                    Err(_) => break,
+                }
+            }
+            Ok(names)
+        })()
+        .unwrap_or_default();
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod focus_probe {
+    #[test]
+    #[ignore]
+    fn probe_focus_path() {
+        let t = std::time::Instant::now();
+        let p = super::focus_path(25);
+        eprintln!("{} names in {:?}", p.len(), t.elapsed());
+        for n in p {
+            eprintln!("  {n}");
+        }
+    }
+}
+
+/// Editors and terminals that can host Claude Code.
+const HOSTS: &[(&str, &str)] = &[("code", "VS Code"), ("cursor", "Cursor"), ("windsurf", "Windsurf"), ("windowsterminal", "Terminal")];
+
+/// "Claude Code" when the focused part of an editor or terminal is Claude Code: its extension
+/// panel, or a terminal running the claude CLI. Returns (app, host), e.g. ("Claude Code", "VS Code").
+pub fn coding_agent(exe_stem: &str, pid: u32) -> Option<(String, String)> {
+    let host = HOSTS.iter().find(|(s, _)| *s == exe_stem)?.1.to_string();
+    let path = focus_path(8);
+    let first = path.first().map(|s| s.as_str()).unwrap_or("");
+    let names = path.join(" | ").to_lowercase();
+    let in_terminal = first.starts_with("Terminal") || exe_stem == "windowsterminal";
+    // Claude Code titles its terminal with a status mark (idle or working).
+    let claude_title = first.chars().take(24).any(|c| matches!(c, '✳' | '✻' | '✽' | '◐' | '◑' | '◒' | '◓' | '✶' | '✢' | '·'));
+    let is_claude = names.contains("claude") || (in_terminal && (claude_title || claude_under(pid)));
+    is_claude.then(|| ("Claude Code".to_string(), host))
+}
+
+/// Is a claude.exe running somewhere under process `root` (e.g. in one of VS Code's terminals)?
+fn claude_under(root: u32) -> bool {
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    let mut procs: Vec<(u32, u32, String)> = Vec::new();
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
+        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        if Process32FirstW(snap, &mut e).is_ok() {
+            loop {
+                let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+                procs.push((e.th32ProcessID, e.th32ParentProcessID, String::from_utf16_lossy(&e.szExeFile[..len]).to_lowercase()));
+                if Process32NextW(snap, &mut e).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = windows::Win32::Foundation::CloseHandle(snap);
+    }
+    procs.iter().filter(|(_, _, n)| n == "claude.exe").any(|(pid, _, _)| {
+        let mut cur = *pid;
+        for _ in 0..12 {
+            match procs.iter().find(|(p, _, _)| *p == cur) {
+                Some((_, parent, _)) if *parent == root => return true,
+                Some((_, parent, _)) if *parent != 0 && *parent != cur => cur = *parent,
+                _ => return false,
+            }
+        }
+        false
+    })
+}
