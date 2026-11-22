@@ -125,6 +125,21 @@ impl ChatGpt {
 
     /// Fetch a short-lived access token. This is also the readiness check for the session.
     pub fn access_token(&self, s: &Session) -> Result<String, TranscribeError> {
+        let v = self.session_json(s)?;
+        // An empty session object ({}) means signed out.
+        v.get("accessToken").and_then(|t| t.as_str()).map(str::to_string).ok_or(TranscribeError::SessionExpired)
+    }
+
+    /// Who is signed in, from the same session call (no extra request). Never includes tokens.
+    pub fn account(&self, s: &Session) -> Result<Account, TranscribeError> {
+        let v = self.session_json(s)?;
+        if v.get("accessToken").is_none() {
+            return Err(TranscribeError::SessionExpired);
+        }
+        Ok(Account::from_session(&v))
+    }
+
+    fn session_json(&self, s: &Session) -> Result<serde_json::Value, TranscribeError> {
         if s.cookie_header.is_empty() {
             return Err(TranscribeError::SignedOut);
         }
@@ -139,9 +154,7 @@ impl ChatGpt {
         if let Some(e) = TranscribeError::from_response(status, is_html(&headers, &body), headers.contains_key("cf-mitigated")) {
             return Err(e);
         }
-        let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| TranscribeError::Server(status))?;
-        // An empty session object ({}) means signed out.
-        v.get("accessToken").and_then(|t| t.as_str()).map(str::to_string).ok_or(TranscribeError::SessionExpired)
+        serde_json::from_str(&body).map_err(|_| TranscribeError::Server(status))
     }
 
     /// Turn recorded speech into text. `audio` is a complete file (e.g. WAV), `file_name` carries its extension.
@@ -170,5 +183,57 @@ impl ChatGpt {
             .find_map(|k| v.get(*k).and_then(|t| t.as_str()))
             .unwrap_or_default()
             .to_string())
+    }
+}
+
+/// The signed-in ChatGPT account, as shown in Settings.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Account {
+    pub name: String,
+    pub email: String,
+    /// Profile picture URL.
+    pub image: String,
+    /// "free", "plus", "pro", "team"...
+    pub plan: String,
+}
+
+impl Account {
+    pub fn from_session(v: &serde_json::Value) -> Self {
+        let user = &v["user"];
+        let s = |x: &serde_json::Value| x.as_str().unwrap_or("").to_string();
+        Self {
+            name: s(&user["name"]),
+            email: s(&user["email"]),
+            image: if user["image"].is_string() { s(&user["image"]) } else { s(&user["picture"]) },
+            plan: s(&v["account"]["planType"]),
+        }
+    }
+
+    /// "ChatGPT Plus", "ChatGPT Free".
+    pub fn plan_label(&self) -> String {
+        let mut p = self.plan.clone();
+        if let Some(f) = p.get_mut(0..1) {
+            f.make_ascii_uppercase();
+        }
+        if p.is_empty() { "ChatGPT".into() } else { format!("ChatGPT {p}") }
+    }
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::Account;
+
+    #[test]
+    fn account_from_session_json() {
+        let v = serde_json::json!({
+            "user": {"name": "Sam Example", "email": "sam@example.com", "image": "https://cdn.example/a.png"},
+            "account": {"planType": "plus"},
+            "accessToken": "secret"
+        });
+        let a = Account::from_session(&v);
+        assert_eq!(a.name, "Sam Example");
+        assert_eq!(a.plan_label(), "ChatGPT Plus");
+        assert!(!format!("{a:?}").contains("secret"), "never carries the token");
     }
 }

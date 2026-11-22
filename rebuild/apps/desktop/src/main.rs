@@ -4,6 +4,7 @@
 #![windows_subsystem = "windows"]
 
 mod home;
+mod import;
 mod link;
 mod prepare;
 mod remote;
@@ -60,6 +61,37 @@ pub(crate) fn data_dir() -> PathBuf {
         return d.into();
     }
     PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("voxa-next")
+}
+
+/// Keep who is signed in for the Settings page, and their picture (fetched only when it changes).
+fn save_account(a: &voxa_chatgpt::Account) {
+    let dir = data_dir();
+    let path = dir.join("account.json");
+    let before: voxa_chatgpt::Account = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    if before == *a && (a.image.is_empty() || dir.join("avatar.png").exists()) {
+        return;
+    }
+    if let Ok(b) = serde_json::to_vec_pretty(a) {
+        let _ = std::fs::write(&path, b);
+    }
+    if a.image.starts_with("https://") && (before.image != a.image || !dir.join("avatar.png").exists()) {
+        let url = a.image.clone();
+        let out = dir.join("avatar.png");
+        std::thread::spawn(move || {
+            let img = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(8))
+                .build()
+                .ok()
+                .and_then(|c| c.get(url).send().ok())
+                .filter(|r| r.status().is_success())
+                .and_then(|r| r.bytes().ok())
+                .and_then(|b| image::load_from_memory(&b).ok());
+            if let Some(img) = img {
+                let _ = img.resize_to_fill(96, 96, image::imageops::FilterType::Lanczos3).save_with_format(&out, image::ImageFormat::Png);
+                win::log("profile picture saved");
+            }
+        });
+    }
 }
 
 fn now_ms() -> u64 {
@@ -130,6 +162,9 @@ impl Voxa {
         let flow = Flow::new(Readiness { session, network: Network::Up, mic });
         let mut settings = Settings::load(&data_dir());
         let mut history = History::load(&data_dir());
+        if let Some(n) = import::run_once(&electron_dir(), &data_dir(), &mut history, &mut settings) {
+            win::log(&format!("imported {n} dictations from the old Voxa"));
+        }
         if history.prune(settings.keep_days, now_ms()) > 0 {
             history.save();
         }
@@ -144,9 +179,20 @@ impl Voxa {
             HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space)
         });
         let esc_key = HotKey::new(None, Code::Escape);
+        let mut main_key = main_key;
         match hotkeys.register(main_key) {
             Ok(()) => win::log(&format!("hotkey {} registered", settings.hotkey)),
-            Err(e) => win::log(&format!("FAIL hotkey: {e}")),
+            Err(e) => {
+                // Taken by another app (e.g. the old Voxa still running): never end up with no
+                // shortcut; fall back to the default and say so in Settings.
+                win::log(&format!("hotkey {} unavailable ({e}); using the default", settings.hotkey));
+                let fallback = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
+                if fallback.id() != main_key.id() && hotkeys.register(fallback).is_ok() {
+                    main_key = fallback;
+                    settings.hotkey = Settings::default().hotkey;
+                    settings.save(&data_dir());
+                }
+            }
         }
         let menu = Menu::new();
         let open_item = MenuItem::new("Open Voxa", true, None);
@@ -299,8 +345,11 @@ impl Voxa {
                     let saved = GptSession::from_voxa_dir(&dir).or_else(|| if dir.join("signed-out").exists() { None } else { GptSession::from_electron_dir(&electron_dir()) });
                     match saved {
                         None => (None, Session::Expired, Network::Up),
-                        Some(s) => match gpt.access_token(&s) {
-                            Ok(_) => (Some(s), Session::Valid, Network::Up),
+                        Some(s) => match gpt.account(&s) {
+                            Ok(a) => {
+                                save_account(&a);
+                                (Some(s), Session::Valid, Network::Up)
+                            }
                             Err(TranscribeError::SignedOut | TranscribeError::SessionExpired) => (Some(s), Session::Expired, Network::Up),
                             Err(TranscribeError::Offline) => (Some(s), Session::Unknown, Network::Down),
                             Err(_) => (Some(s), Session::Unknown, Network::Up),
@@ -626,6 +675,8 @@ impl Voxa {
         // The sign-in window's cookies too, so the next sign-in really asks.
         let _ = std::fs::remove_dir_all(dir.join("webview"));
         let _ = std::fs::write(dir.join("signed-out"), b"");
+        let _ = std::fs::remove_file(dir.join("account.json"));
+        let _ = std::fs::remove_file(dir.join("avatar.png"));
         self.session = None;
         win::log("signed out");
         let r = Readiness { session: Session::Expired, ..self.flow.readiness() };
@@ -691,7 +742,8 @@ impl Voxa {
                 .background_executor()
                 .spawn(async move {
                     let bytes = prepare::audio_for_upload(&audio).ok_or(TranscribeError::Server(0))?;
-                    gpt.transcribe(&session, bytes, "recording.wav", "audio/wav").map(|t| prepare::finish_text(t, &data_dir()))
+                    let (name, mime) = if audio.extension().is_some_and(|e| e == "webm") { ("recording.webm", "audio/webm") } else { ("recording.wav", "audio/wav") };
+                    gpt.transcribe(&session, bytes, name, mime).map(|t| prepare::finish_text(t, &data_dir()))
                 })
                 .await;
             let _ = this.update(cx, |v, cx| {

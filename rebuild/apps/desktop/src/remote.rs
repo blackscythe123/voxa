@@ -97,6 +97,11 @@ impl Backend {
         true
     }
 
+    /// Who is signed in (saved by the tray app at each sign-in check).
+    pub fn account(&self) -> Option<voxa_chatgpt::Account> {
+        std::fs::read(data_dir().join("account.json")).ok().and_then(|b| serde_json::from_slice(&b).ok())
+    }
+
     pub fn readiness(&self) -> Readiness {
         self.live.readiness()
     }
@@ -191,6 +196,11 @@ impl Backend {
 
     pub fn play_entry(&self, id: u64) -> Option<f32> {
         let path = self.history.get(id)?.audio.clone().filter(|a| a.exists())?;
+        // Recordings from the old Voxa are .webm: open them in the default player.
+        if path.extension().is_some_and(|e| e != "wav") {
+            let _ = std::process::Command::new("explorer").arg(&path).spawn();
+            return None;
+        }
         let secs = hound::WavReader::open(&path).ok().map(|r| r.duration() as f32 / r.spec().sample_rate as f32)?;
         win::play_audio(&path).then_some(secs)
     }

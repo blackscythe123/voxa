@@ -901,7 +901,43 @@ impl Home {
             ),
             Session::Unknown => ("Checking your sign-in...".to_string(), wbtn("signin", "Sign in", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.sign_in(cx))))),
         };
-        out.push(card().mb(px(3.)).child(icon(I_ACCOUNT, 18.).w(px(20.))).child(row_text("ChatGPT", acct)).child(btn).into_any_element());
+        let account = self.voxa.read(cx).account().filter(|_| session == Session::Valid);
+        match account {
+            Some(a) => {
+                let avatar_file = crate::data_dir().join("avatar.png");
+                let initial = a.name.chars().next().or(a.email.chars().next()).map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                let avatar = if avatar_file.exists() {
+                    div().size(px(48.)).flex_none().rounded_full().overflow_hidden().child(gpui::img(avatar_file).size(px(48.)).rounded_full())
+                } else {
+                    div().size(px(48.)).flex_none().rounded_full().bg(rgb(0x10A37F)).text_color(rgb(0xFFFFFF)).text_size(px(20.)).flex().items_center().justify_center().child(initial)
+                };
+                out.push(
+                    card()
+                        .mb(px(3.))
+                        .py(px(16.))
+                        .child(avatar)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(if a.name.is_empty() { a.email.clone() } else { a.name.clone() }))
+                                .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(a.email.clone()))
+                                .child(
+                                    div()
+                                        .mt(px(6.))
+                                        .flex()
+                                        .gap(px(6.))
+                                        .child(div().px(px(8.)).py(px(2.)).rounded(px(10.)).bg(rgb(0xE8F5EF)).text_color(rgb(0x0E6B4F)).text_size(px(12.)).child(a.plan_label()))
+                                        .child(div().px(px(8.)).py(px(2.)).rounded(px(10.)).bg(rgb(0xDFF6DD)).text_color(rgb(0x0E5C0E)).text_size(px(12.)).child("Signed in")),
+                                ),
+                        )
+                        .child(btn)
+                        .into_any_element(),
+                );
+                out.push(div().mb(px(3.)).px(px(16.)).py(px(10.)).text_size(px(12.)).text_color(rgb(MUTED)).child(acct).into_any_element());
+            }
+            None => out.push(card().mb(px(3.)).child(icon(I_ACCOUNT, 18.).w(px(20.))).child(row_text("ChatGPT", acct)).child(btn).into_any_element()),
+        }
 
         out.push(section("Dictation").into_any_element());
         let shortcut_right = if self.capturing {
