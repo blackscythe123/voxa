@@ -247,3 +247,17 @@ mod account_tests {
         assert!(!format!("{a:?}").contains("secret"), "never carries the token");
     }
 }
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::upload_timeout;
+    use std::time::Duration;
+
+    #[test]
+    fn upload_time_grows_with_the_recording() {
+        assert_eq!(upload_timeout(200_000), Duration::from_secs(30));
+        // A 10-minute WAV at 16 kHz mono 16-bit is about 19 MB.
+        assert_eq!(upload_timeout(19_200_000), Duration::from_secs(30 + 19 * 20));
+        assert_eq!(upload_timeout(500_000_000), Duration::from_secs(15 * 60));
+    }
+}
