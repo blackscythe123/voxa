@@ -117,13 +117,15 @@ impl History {
         old.len()
     }
 
-    pub fn delete_all(&mut self) {
-        for e in &self.entries {
+    /// Delete every entry (and its audio) except `keep`.
+    pub fn delete_all_except(&mut self, keep: &[u64]) {
+        let (kept, gone): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| keep.contains(&e.id));
+        for e in &gone {
             if let Some(a) = &e.audio {
                 let _ = std::fs::remove_file(a);
             }
         }
-        self.entries.clear();
+        self.entries = kept;
         self.save();
     }
 

@@ -296,7 +296,7 @@ impl Flow {
 
     fn on_transcribed(&mut self, job: JobId, result: Result<String, TranscribeError>, fx: &mut Vec<Effect>) {
         // A cancelled job stays cancelled; a superseded one only updates its record.
-        if matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Discarded) | None) {
+        if !matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Transcribing)) {
             return;
         }
         self.kept.remove(&job);

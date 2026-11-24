@@ -298,3 +298,27 @@ fn cancelling_a_fresh_take_while_writing_drops_it() {
     f.handle(Event::Cancel);
     assert_eq!(f.job(job).unwrap().state, JobState::Discarded);
 }
+
+#[test]
+fn a_late_result_after_cancelling_a_retry_changes_nothing() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Err(TranscribeError::Timeout) });
+    f.handle(Event::Retry { job });
+    f.handle(Event::Cancel);
+    let fx = f.handle(Event::Transcribed { job, result: Ok("late".into()) });
+    assert!(fx.is_empty());
+    assert_eq!(f.job(job).unwrap().state, JobState::Failed(TranscribeError::Timeout));
+}
+
+#[test]
+fn a_duplicate_result_never_unpastes_a_dictation() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Ok("hello".into()) });
+    f.handle(Event::Delivered { job, result: Delivery::Pasted });
+    f.handle(Event::Transcribed { job, result: Ok("hello again".into()) });
+    assert_eq!(f.job(job).unwrap().state, JobState::Delivered("hello".into()));
+}

@@ -307,6 +307,7 @@ impl Voxa {
                                 match audio::Mic::with_preferred(v.settings.mic_device.clone()) {
                                     Ok(m) => {
                                         os::log(&format!("microphone found again: {}", m.device_name()));
+                                        v.mic_name = m.device_name().to_string();
                                         v.mic = Some(m);
                                         let r = Readiness { mic: Mic::Granted, ..v.flow.readiness() };
                                         v.handle(Event::Readiness(r), cx);
@@ -561,8 +562,16 @@ impl Voxa {
                             // A dropped connection is common on flaky Wi-Fi: try twice more before
                             // calling it offline.
                             let mut result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
+                            // A big recording that timed out would only time out again (and block new
+                            // dictations meanwhile): keep it for Retry instead.
+                            let small = audio.len() < 2_000_000;
                             for wait in [1500u64, 4000] {
-                                if !matches!(result, Err(TranscribeError::Offline | TranscribeError::Timeout)) {
+                                let again = match &result {
+                                    Err(TranscribeError::Offline) => true,
+                                    Err(TranscribeError::Timeout) => small,
+                                    _ => false,
+                                };
+                                if !again {
                                     break;
                                 }
                                 os::log(&format!("  upload failed ({:?}); retrying in {wait} ms", result.as_ref().err()));
@@ -860,9 +869,12 @@ impl Voxa {
     }
 
     pub(crate) fn delete_history(&mut self, cx: &mut Context<Self>) {
-        self.history.delete_all();
-        self.job_entries.clear();
-        os::log("history deleted");
+        // Dictations still in progress (recording, writing, waiting to send) are kept: deleting
+        // their audio would break them. Everything else goes.
+        let live: Vec<u64> = self.history.entries.iter().map(|e| e.id).filter(|id| self.is_live(*id)).collect();
+        self.history.delete_all_except(&live);
+        self.job_entries.retain(|_, id| live.contains(id));
+        os::log(&format!("history deleted (kept {} in progress)", live.len()));
         cx.notify();
     }
 
@@ -1401,24 +1413,27 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: gpui::AnyWindowHandle, cx
     let rect = os::strip_rect();
     let target = cx.update(|cx| strip_origin(cx)).ok()?;
     let v = voxa.clone();
+    let old_strip = os::STRIP.load(std::sync::atomic::Ordering::Relaxed);
+    let opened = cx.update(|cx| {
+        let mut o = strip_options(target);
+        o.show = false;
+        cx.open_window(o, move |window, _| {
+            if let Some(h) = os::window_ptr(window) {
+                os::make_overlay(h);
+                os::STRIP.store(h as usize, std::sync::atomic::Ordering::Relaxed);
+            }
+            v
+        })
+    });
+    let Ok(Ok(new)) = opened else {
+        // Keep using the old strip (and never leave it blank).
+        os::STRIP.store(old_strip, std::sync::atomic::Ordering::Relaxed);
+        return None;
+    };
     let _ = voxa.update(cx, |v, cx| {
         v.strip_blank = true;
         cx.notify();
     });
-    let new = cx
-        .update(|cx| {
-            let mut o = strip_options(target);
-            o.show = false;
-            cx.open_window(o, move |window, _| {
-                if let Some(h) = os::window_ptr(window) {
-                    os::make_overlay(h);
-                    os::STRIP.store(h as usize, std::sync::atomic::Ordering::Relaxed);
-                }
-                v
-            })
-        })
-        .ok()?
-        .ok()?;
     if let Some((x, y, w, h)) = rect {
         os::move_strip(x, y, w, h);
     }
