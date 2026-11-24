@@ -126,6 +126,13 @@ pub(crate) struct Voxa {
     mic_testing: bool,
     /// History entry id for each job of this run.
     job_entries: HashMap<JobId, u64>,
+    /// The job state last written to History, so an entry is only rewritten when its dictation
+    /// moves on (otherwise the user's edits and deletes would be undone by the next event).
+    job_synced: HashMap<JobId, voxa_core::JobState>,
+    /// When the shortcut was paused for picking a new one (resumed if the window goes quiet).
+    hotkey_paused_at: Option<Instant>,
+    /// Draw nothing in the strip (while a rebuilt strip paints its first frame unseen).
+    strip_blank: bool,
     job_secs: HashMap<JobId, f32>,
     /// Last state published to the window process (live.json), to write only on change.
     published: Option<link::Live>,
@@ -233,6 +240,10 @@ impl Voxa {
             cx.background_executor().timer(Duration::from_millis(40)).await;
             let alive = this
                 .update(cx, |v, cx| {
+                    if v.hotkey_paused && v.hotkey_paused_at.is_some_and(|t| t.elapsed() > Duration::from_secs(30)) {
+                        os::log("shortcut picking stopped answering: resuming the shortcut");
+                        v.pause_hotkey(false);
+                    }
                     while let Ok(ev) = MenuEvent::receiver().try_recv() {
                         if ev.id == v.menu_open {
                             v.open_home(None, cx);
@@ -290,6 +301,19 @@ impl Voxa {
                             os::cache_app_icon(fg, os::icon_owner(fg));
                             os::cache_site_icon(&target.app);
                             os::log(&format!("hotkey in {}", os::describe(fg)));
+                            // The mic was missing or refused (at startup, or one failed start):
+                            // look again now, so plugging it in or allowing it works without a restart.
+                            if matches!(v.flow.readiness().mic, Mic::Missing | Mic::Denied) && !fake_mode() {
+                                match audio::Mic::with_preferred(v.settings.mic_device.clone()) {
+                                    Ok(m) => {
+                                        os::log(&format!("microphone found again: {}", m.device_name()));
+                                        v.mic = Some(m);
+                                        let r = Readiness { mic: Mic::Granted, ..v.flow.readiness() };
+                                        v.handle(Event::Readiness(r), cx);
+                                    }
+                                    Err(e) => os::log(&format!("microphone still unavailable: {e:?}")),
+                                }
+                            }
                             let browser = os::browser_name(fg);
                             let (pid, stem) = os::window_process(fg);
                             v.handle(Event::Hotkey { target }, cx);
@@ -360,6 +384,9 @@ impl Voxa {
             mic_name,
             mic_testing: false,
             job_entries: HashMap::new(),
+            job_synced: HashMap::new(),
+            hotkey_paused_at: None,
+            strip_blank: false,
             job_secs: HashMap::new(),
             published: None,
             hotkey_result: None,
@@ -643,6 +670,9 @@ impl Voxa {
         let jobs: Vec<voxa_core::Job> = self.flow.jobs().cloned().collect();
         for job in jobs {
             let Some(&id) = self.job_entries.get(&job.id) else { continue };
+            if self.job_synced.get(&job.id) == Some(&job.state) {
+                continue;
+            }
             let secs = self.job_secs.get(&job.id).copied().unwrap_or(0.0);
             // Name what was really in front (site, Claude Code) unless the user pasted elsewhere.
             let context = if job.started_in.is_none() { self.job_context.lock().unwrap().get(&job.id).cloned() } else { None };
@@ -683,6 +713,7 @@ impl Voxa {
                 Some(e) => self.history.upsert(e),
                 None => self.history.remove(id),
             };
+            self.job_synced.insert(job.id, job.state.clone());
         }
         if changed {
             self.history.save();
@@ -791,6 +822,9 @@ impl Voxa {
 
     /// Stop listening for the shortcut while the user picks a new one.
     pub(crate) fn pause_hotkey(&mut self, pause: bool) {
+        // The window repeats "pause" while it waits for the new keys; if it stops (closed or
+        // crashed mid-pick), the shortcut comes back by itself.
+        self.hotkey_paused_at = if pause { Some(Instant::now()) } else { None };
         if pause == self.hotkey_paused {
             return;
         }
@@ -827,6 +861,7 @@ impl Voxa {
 
     pub(crate) fn delete_history(&mut self, cx: &mut Context<Self>) {
         self.history.delete_all();
+        self.job_entries.clear();
         os::log("history deleted");
         cx.notify();
     }
@@ -861,6 +896,10 @@ impl Voxa {
                     Err(e) if e.needs_sign_in() => Entry { status: Status::Waiting("Sign in to send".into()), ..entry },
                     Err(_) => Entry { status: Status::Failed("Couldn't reach ChatGPT".into()), ..entry },
                 };
+                // Deleted while it was being sent: leave it deleted.
+                if v.history.get(id).is_none() {
+                    return;
+                }
                 v.history.upsert(next);
                 v.history.save();
                 cx.notify();
@@ -877,6 +916,8 @@ impl Voxa {
             self.history.save();
             os::log("history entry deleted");
         }
+        // Forget it for good: nothing from this run may write it back.
+        self.job_entries.retain(|_, e| *e != id);
         cx.notify();
     }
 
@@ -1156,7 +1197,16 @@ pub(crate) fn ink_line_faded(levels: Vec<f32>, tick: usize, fade: bool) -> AnyEl
 }
 
 impl Render for Voxa {
-    fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.strip_blank {
+            return div().into_any_element();
+        }
+        self.strip_view(w, cx).into_any_element()
+    }
+}
+
+impl Voxa {
+    fn strip_view(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.flow.state().clone();
         let mark = div()
             .size(px(24.))
@@ -1343,16 +1393,23 @@ fn strip_options(origin: gpui::Point<gpui::Pixels>) -> WindowOptions {
     }
 }
 
-/// A fresh strip window for the same Voxa, painted off screen first (so it never flashes), then
-/// hidden and moved into place; the old window is closed. Returns the new window.
+/// A fresh strip window for the same Voxa, replacing one whose graphics were lost in sleep.
+/// Never takes focus and never shows on screen: the window is created hidden, given the old
+/// strip's exact place, then shown without activation for one blank (transparent) frame so it
+/// has painted, and hidden again. Returns the new window.
 async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: gpui::AnyWindowHandle, cx: &mut gpui::AsyncApp) -> Option<gpui::AnyWindowHandle> {
-    let prev = os::foreground() as usize;
+    let rect = os::strip_rect();
     let target = cx.update(|cx| strip_origin(cx)).ok()?;
-    let old_size = os::strip_size();
     let v = voxa.clone();
+    let _ = voxa.update(cx, |v, cx| {
+        v.strip_blank = true;
+        cx.notify();
+    });
     let new = cx
         .update(|cx| {
-            cx.open_window(strip_options(point(px(-6000.), px(-6000.))), move |window, _| {
+            let mut o = strip_options(target);
+            o.show = false;
+            cx.open_window(o, move |window, _| {
                 if let Some(h) = os::window_ptr(window) {
                     os::make_overlay(h);
                     os::STRIP.store(h as usize, std::sync::atomic::Ordering::Relaxed);
@@ -1362,22 +1419,24 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: gpui::AnyWindowHandle, cx
         })
         .ok()?
         .ok()?;
-    os::give_focus_back(prev as _);
+    if let Some((x, y, w, h)) = rect {
+        os::move_strip(x, y, w, h);
+    }
+    os::strip_visible(true);
     cx.background_executor().timer(Duration::from_millis(500)).await;
-    os::strip_visible(false);
-    // Same outer size as the old strip, centred where the strip belongs.
-    let s = os::strip_scale();
-    let (w, h) = old_size.unwrap_or(((760. * s).round() as i32, (84. * s).round() as i32));
-    let (cx_, cy_) = ((f32::from(target.x) + 380.) * s, (f32::from(target.y) + 42.) * s);
-    os::move_strip((cx_ - w as f32 / 2.).round() as i32, (cy_ - h as f32 / 2.).round() as i32, w, h);
+    let busy = voxa
+        .update(cx, |v, cx| {
+            v.strip_blank = false;
+            cx.notify();
+            !matches!(v.flow.state(), State::Idle)
+        })
+        .unwrap_or(false);
+    // A dictation started meanwhile keeps its (now drawn) strip.
+    if !busy {
+        os::strip_visible(false);
+    }
     let _ = old.update(cx, |_, window, _| window.remove_window());
     os::log("strip rebuilt");
-    // Dev only: show the rebuilt strip with a stand-in recording.
-    if std::env::var_os("VOXA_DEMO_RECORD").is_some() && fake_mode() {
-        let fg = os::foreground();
-        let target = Target { app: os::app_name(fg), window: fg as u64 };
-        let _ = voxa.update(cx, |v, cx| v.handle(Event::Hotkey { target }, cx));
-    }
     Some(new.into())
 }
 
@@ -1431,9 +1490,8 @@ fn main() {
                     }
                     // Let the graphics driver settle, and never swap the strip while it's in use.
                     cx.background_executor().timer(Duration::from_secs(2)).await;
-                    // Wait while the strip is in use or a full-screen app (a game) is in front:
-                    // opening a window would pull it out of focus.
-                    while os::strip_is_visible() || os::foreground_is_fullscreen() {
+                    // Never swap the strip while it's in use.
+                    while os::strip_is_visible() {
                         cx.background_executor().timer(Duration::from_millis(500)).await;
                     }
                     let _ = os::take_woke();

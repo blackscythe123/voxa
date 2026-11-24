@@ -100,13 +100,14 @@ impl History {
         before != self.entries.len()
     }
 
-    /// Drop entries (and their audio) older than `keep_days`. 0 keeps everything.
+    /// Drop entries (and their audio) older than `keep_days`. 0 keeps everything. Dictations still
+    /// waiting to be sent (or that failed) are kept whatever their age: their audio is the only copy.
     pub fn prune(&mut self, keep_days: u32, now_ms: u64) -> usize {
         if keep_days == 0 {
             return 0;
         }
         let cutoff = now_ms.saturating_sub(keep_days as u64 * 86_400_000);
-        let (old, keep): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| e.id < cutoff);
+        let (old, keep): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| e.id < cutoff && !matches!(e.status, Status::Waiting(_) | Status::Failed(_)));
         self.entries = keep;
         for e in &old {
             if let Some(a) = &e.audio {
@@ -508,6 +509,17 @@ mod tests {
         assert_eq!(s.busiest_day.as_ref().unwrap().1, 4);
         assert!(stats(&e, d(8, 1), d(11, 22), d(11, 22)).buckets.len() <= 27, "weekly for a few months");
         assert_eq!(stats(&e, d(1, 1), d(11, 22), d(11, 22)).buckets.len(), 11, "monthly for a year");
+    }
+
+    #[test]
+    fn prune_keeps_unsent_recordings() {
+        let day = 86_400_000u64;
+        let now = 100 * day;
+        let mk = |id: u64, status: Status| Entry { id, app: "A".into(), text: "t".into(), secs: 1.0, status, audio: None, started_in: None, via: None };
+        let mut h = History { path: std::env::temp_dir().join("voxa-prune-test.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("Sign in to send".into())), mk(3 * day, Status::Failed("x".into())), mk(99 * day, Status::Pasted)] };
+        assert_eq!(h.prune(30, now), 1);
+        let left: Vec<u64> = h.entries.iter().map(|e| e.id).collect();
+        assert_eq!(left, vec![2 * day, 3 * day, 99 * day]);
     }
 
     #[test]

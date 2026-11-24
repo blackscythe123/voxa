@@ -100,6 +100,14 @@ impl Default for ChatGpt {
     }
 }
 
+/// Time allowed to upload and transcribe `bytes` of audio: 30 s, plus 20 s per MB (a slow
+/// ~400 kbit/s uplink), at most 15 minutes. The client's 20 s default is for small requests;
+/// a long dictation would never fit in it.
+pub fn upload_timeout(bytes: usize) -> Duration {
+    let secs = 30 + (bytes as u64 / 1_000_000) * 20;
+    Duration::from_secs(secs.min(15 * 60))
+}
+
 impl ChatGpt {
     pub fn new() -> Self {
         let http = Client::builder()
@@ -160,6 +168,7 @@ impl ChatGpt {
     /// Turn recorded speech into text. `audio` is a complete file (e.g. WAV), `file_name` carries its extension.
     pub fn transcribe(&self, s: &Session, audio: Vec<u8>, file_name: &str, mime: &str) -> Result<String, TranscribeError> {
         let token = self.access_token(s)?;
+        let limit = upload_timeout(audio.len());
         let part = multipart::Part::bytes(audio).file_name(file_name.to_string()).mime_str(mime).map_err(|_| TranscribeError::Server(0))?;
         let form = multipart::Form::new().part("file", part).text("model", "whisper-1");
         let resp = self
@@ -169,6 +178,7 @@ impl ChatGpt {
             .header("x-openai-target-path", "/backend-api/transcribe")
             .header("x-openai-target-route", "/backend-api/transcribe")
             .multipart(form)
+            .timeout(limit)
             .send()
             .map_err(|e| classify_send_error(&e))?;
         let status = resp.status().as_u16();

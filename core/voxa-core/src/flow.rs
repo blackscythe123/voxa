@@ -102,6 +102,9 @@ pub struct Flow {
     readiness: Readiness,
     jobs: BTreeMap<JobId, Job>,
     next_id: u64,
+    /// What a kept dictation (waiting or failed) was before a retry, so cancelling the retry
+    /// keeps it instead of throwing the recording away.
+    kept: BTreeMap<JobId, JobState>,
 }
 
 impl Default for Flow {
@@ -112,7 +115,7 @@ impl Default for Flow {
 
 impl Flow {
     pub fn new(readiness: Readiness) -> Self {
-        Self { state: State::Idle, readiness, jobs: BTreeMap::new(), next_id: 1 }
+        Self { state: State::Idle, readiness, jobs: BTreeMap::new(), next_id: 1, kept: BTreeMap::new() }
     }
 
     pub fn state(&self) -> &State {
@@ -196,7 +199,11 @@ impl Flow {
                 fx.push(Effect::DiscardCapture { job });
                 self.set_job(job, JobState::Discarded, fx);
             }
-            State::Transcribing { job } => self.set_job(job, JobState::Discarded, fx),
+            // A fresh take is dropped; a retry of a kept one goes back to being kept.
+            State::Transcribing { job } => {
+                let back = self.kept.remove(&job).unwrap_or(JobState::Discarded);
+                self.set_job(job, back, fx);
+            }
             _ => return,
         }
         self.state = State::Idle;
@@ -270,6 +277,11 @@ impl Flow {
     }
 
     fn retry(&mut self, job: JobId, fx: &mut Vec<Effect>) {
+        if let Some(before) = self.jobs.get(&job).map(|j| j.state.clone()) {
+            if matches!(before, JobState::WaitingForNetwork | JobState::Failed(_)) {
+                self.kept.insert(job, before);
+            }
+        }
         self.set_job(job, JobState::Transcribing, fx);
         self.state = State::Transcribing { job };
         fx.extend([Effect::ShowStrip, Effect::Transcribe { job }]);
@@ -287,6 +299,7 @@ impl Flow {
         if matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Discarded) | None) {
             return;
         }
+        self.kept.remove(&job);
         let current = matches!(self.state, State::Transcribing { job: j } if j == job);
         match result {
             Ok(text) if text.trim().is_empty() => {

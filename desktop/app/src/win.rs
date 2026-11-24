@@ -66,7 +66,8 @@ pub fn make_overlay(hwnd: HWND) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
         SetWindowSubclass(hwnd, Some(no_activate_proc), 0x5658_4131, 0);
-        // Modern Standby only tells windows that ask about waking up.
+        // Modern Standby only tells windows that ask about waking up (asked once: the rebuilt
+        // strip isn't asked again; a closed window's registration ends with it).
         const DEVICE_NOTIFY_WINDOW_HANDLE: u32 = 0;
         windows_sys::Win32::System::Power::RegisterSuspendResumeNotification(hwnd, DEVICE_NOTIFY_WINDOW_HANDLE);
         let none: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE: no Windows 11 frame border
@@ -323,43 +324,17 @@ pub fn take_woke() -> bool {
     WOKE.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Is the app in front covering its whole screen (a game, a video, a presentation)? Never take
-/// focus from it.
-pub fn foreground_is_fullscreen() -> bool {
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetDesktopWindow, GetShellWindow, GetWindowRect};
-    unsafe {
-        let fg = foreground();
-        if fg.is_null() || fg == GetDesktopWindow() || fg == GetShellWindow() {
-            return false;
-        }
-        let class = describe(fg);
-        if class.contains("[Progman]") || class.contains("[WorkerW]") {
-            return false;
-        }
-        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        let mut mi: MONITORINFO = std::mem::zeroed();
-        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetWindowRect(fg, &mut r) == 0 || GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mut mi) == 0 {
-            return false;
-        }
-        let m = mi.rcMonitor;
-        r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
-    }
-}
-
 /// Is the strip on screen right now?
 pub fn strip_is_visible() -> bool {
     let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
     !h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) != 0 }
 }
 
-/// The strip's outer size in physical pixels (including the frame GPUI adds).
-pub fn strip_size() -> Option<(i32, i32)> {
+/// The strip's outer rectangle in physical pixels (x, y, width, height), frame included.
+pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
     let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
     let mut r = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    (!h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(h, &mut r) } != 0).then(|| (r.right - r.left, r.bottom - r.top))
+    (!h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(h, &mut r) } != 0).then(|| (r.left, r.top, r.right - r.left, r.bottom - r.top))
 }
 
 /// Place the strip (physical pixels) without showing or activating it.
@@ -368,15 +343,6 @@ pub fn move_strip(x: i32, y: i32, w: i32, h: i32) {
     if !hw.is_null() {
         unsafe { SetWindowPos(hw, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE) };
     }
-}
-
-/// Pixels per logical pixel for the strip.
-pub fn strip_scale() -> f32 {
-    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
-    if h.is_null() {
-        return 1.0;
-    }
-    unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) as f32 / 96.0 }
 }
 
 /// A dev/test instance (its own data folder) runs beside the installed Voxa.

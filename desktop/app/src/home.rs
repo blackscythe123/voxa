@@ -1804,6 +1804,20 @@ impl Home {
                 this.capturing = true;
                 this.hotkey_error = None;
                 this.voxa.update(cx, |v, _| v.pause_hotkey(true));
+                // Keep the shortcut paused while waiting; if this window closes, the tray resumes it.
+                cx.spawn(async move |this, cx| loop {
+                    cx.background_executor().timer(std::time::Duration::from_secs(10)).await;
+                    let still = this.update(cx, |h, cx| {
+                        if h.capturing {
+                            h.voxa.update(cx, |v, _| v.pause_hotkey(true));
+                        }
+                        h.capturing
+                    });
+                    if !matches!(still, Ok(true)) {
+                        break;
+                    }
+                })
+                .detach();
                 window.focus(&this.focus);
                 cx.notify();
             })))

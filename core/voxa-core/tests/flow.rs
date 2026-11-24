@@ -275,3 +275,26 @@ fn late_result_for_a_cancelled_job_does_not_paste() {
     assert!(!fx.iter().any(|e| matches!(e, Effect::Paste { .. })));
     assert_eq!(f.state(), &State::Idle);
 }
+
+#[test]
+fn cancelling_a_retry_keeps_the_recording() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Err(TranscribeError::Timeout) });
+    assert_eq!(f.job(job).unwrap().state, JobState::Failed(TranscribeError::Timeout));
+    f.handle(Event::Retry { job });
+    assert_eq!(f.state(), &State::Transcribing { job });
+    f.handle(Event::Cancel);
+    assert_eq!(f.state(), &State::Idle);
+    assert_eq!(f.job(job).unwrap().state, JobState::Failed(TranscribeError::Timeout), "still kept, can be sent later");
+}
+
+#[test]
+fn cancelling_a_fresh_take_while_writing_drops_it() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Cancel);
+    assert_eq!(f.job(job).unwrap().state, JobState::Discarded);
+}
