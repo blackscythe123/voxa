@@ -1,0 +1,32 @@
+[package]
+name = "voxa-ffi"
+description = "Voxa's shared Rust core for the Android app, exposed to Kotlin through UniFFI."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "voxa_ffi"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# Generates the Kotlin bindings: cargo run -p voxa-ffi --features cli --bin uniffi-bindgen -- generate ...
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = ["uniffi/cli"]
+# Silero silence trimming. Needs libonnxruntime.so at runtime, so it is off on Android for now:
+# long takes use voxa-core's loudness trim instead.
+vad = ["voxa-store/vad"]
+
+[dependencies]
+voxa-core = { path = "../voxa-core" }
+voxa-chatgpt = { path = "../voxa-chatgpt" }
+voxa-store = { path = "../voxa-store" }
+uniffi = "0.32"
+serde_json = "1"
+thiserror = "2"

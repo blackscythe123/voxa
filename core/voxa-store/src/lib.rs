@@ -1,0 +1,362 @@
+//! What Voxa keeps, and the rules around a take, shared by every app.
+//!
+//! Copied out of the desktop crate so Android can use the same code (the desktop switches over
+//! when this is merged):
+//! - [`History`], [`Entry`], [`Status`], [`Settings`], [`Words`], [`Pair`], [`AppRule`]: from
+//!   `desktop/app/src/store.rs` (Insights/stats not copied yet). Same JSON files and fields.
+//! - [`finish_text`]: from `desktop/app/src/prepare.rs`.
+//! - [`take`]: the silence rules and the 3-try upload retry from `desktop/app/src/main.rs`.
+//! - [`audio`]: preparing a recording for upload (long-silence trimming), from `prepare.rs`.
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use serde::{Deserialize, Serialize};
+
+pub mod audio;
+pub mod take;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Status {
+    /// Pasted (inserted) into the app the user was in.
+    Pasted,
+    /// Written out but not pasted (the user moved, or paste failed): ready to copy.
+    Ready,
+    /// Not written yet; the reason says what it is waiting for.
+    Waiting(String),
+    Failed(String),
+}
+
+impl Status {
+    /// Still owed to the user: never pruned, whatever the keep setting says.
+    pub fn is_unsent(&self) -> bool {
+        matches!(self, Status::Waiting(_) | Status::Failed(_))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Entry {
+    /// Milliseconds since the epoch when recording started. Also the entry's identity.
+    pub id: u64,
+    pub app: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub secs: f32,
+    pub status: Status,
+    #[serde(default)]
+    pub audio: Option<PathBuf>,
+    /// The app the user started in, when they moved and chose to paste somewhere else.
+    #[serde(default)]
+    pub started_in: Option<String>,
+    /// The browser, when `app` is a site in a browser tab ("ChatGPT" via "Brave").
+    #[serde(default)]
+    pub via: Option<String>,
+}
+
+impl Entry {
+    pub fn words(&self) -> usize {
+        self.text.split_whitespace().count()
+    }
+}
+
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(tmp, path)
+}
+
+/// One lock for every read-modify-write of history.json in this process (Android's keyboard and
+/// app screens share the file).
+static HISTORY_LOCK: Mutex<()> = Mutex::new(());
+
+pub struct History {
+    path: PathBuf,
+    /// Oldest first.
+    pub entries: Vec<Entry>,
+}
+
+impl History {
+    pub fn load(dir: &Path) -> Self {
+        let path = dir.join("history.json");
+        let entries = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        Self { path, entries }
+    }
+
+    pub fn save(&self) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(&self.entries) {
+            let _ = write_atomic(&self.path, &bytes);
+        }
+    }
+
+    /// Load, change and save under the process-wide lock. `f` returns (changed, result).
+    pub fn edit<R>(dir: &Path, f: impl FnOnce(&mut History) -> (bool, R)) -> R {
+        let _g = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut h = Self::load(dir);
+        let (changed, r) = f(&mut h);
+        if changed {
+            h.save();
+        }
+        r
+    }
+
+    pub fn get(&self, id: u64) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Insert or replace. Returns whether anything changed.
+    pub fn upsert(&mut self, entry: Entry) -> bool {
+        match self.entries.iter_mut().find(|e| e.id == entry.id) {
+            Some(e) if *e == entry => false,
+            Some(e) => {
+                *e = entry;
+                true
+            }
+            None => {
+                let at = self.entries.partition_point(|e| e.id < entry.id);
+                self.entries.insert(at, entry);
+                true
+            }
+        }
+    }
+
+    pub fn remove(&mut self, id: u64) -> bool {
+        let before = self.entries.len();
+        self.entries.retain(|e| e.id != id);
+        before != self.entries.len()
+    }
+
+    /// Drop entries (and their audio) older than `keep_days`. 0 keeps everything. Dictations not
+    /// written out yet (waiting or failed) are never dropped: they are still owed to the user.
+    pub fn prune(&mut self, keep_days: u32, now_ms: u64) -> usize {
+        if keep_days == 0 {
+            return 0;
+        }
+        let cutoff = now_ms.saturating_sub(keep_days as u64 * 86_400_000);
+        let (old, keep): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| e.id < cutoff && !e.status.is_unsent());
+        self.entries = keep;
+        for e in &old {
+            if let Some(a) = &e.audio {
+                let _ = std::fs::remove_file(a);
+            }
+        }
+        old.len()
+    }
+
+    pub fn delete_all(&mut self) {
+        for e in &self.entries {
+            if let Some(a) = &e.audio {
+                let _ = std::fs::remove_file(a);
+            }
+        }
+        self.entries.clear();
+        self.save();
+    }
+
+    /// Bytes of audio kept on disk.
+    pub fn audio_bytes(&self) -> u64 {
+        self.entries.iter().filter_map(|e| e.audio.as_ref()).filter_map(|a| std::fs::metadata(a).ok()).map(|m| m.len()).sum()
+    }
+
+    /// Entries matching `query` (case-insensitive, text or app), newest first.
+    pub fn search(&self, query: &str) -> Vec<&Entry> {
+        let q = query.trim().to_lowercase();
+        self.entries
+            .iter()
+            .rev()
+            .filter(|e| q.is_empty() || e.text.to_lowercase().contains(&q) || e.app.to_lowercase().contains(&q))
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Strip "um", "uh", "hmm" from transcripts. Off by default: wording is kept as spoken.
+    pub remove_fillers: bool,
+    /// Days of history to keep; 0 = forever.
+    pub keep_days: u32,
+    pub hotkey: String,
+    /// The guided setup has been finished or skipped.
+    pub onboarded: bool,
+    /// The old (Electron) Voxa's history and shortcut were brought over.
+    pub imported_old_voxa: bool,
+    /// Hold the shortcut (or the mic key) while talking; a quick tap still toggles.
+    pub hold_to_talk: bool,
+    /// Microphone chosen in Settings, by name; None follows the system default.
+    pub mic_device: Option<String>,
+    /// Leave the dictation on the clipboard after pasting (desktop only).
+    pub keep_on_clipboard: bool,
+    /// A short vibration on the keyboard's keys (Android).
+    pub haptics: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            remove_fillers: false,
+            keep_days: 30,
+            hotkey: "Ctrl+Alt+Space".into(),
+            onboarded: false,
+            imported_old_voxa: false,
+            hold_to_talk: false,
+            mic_device: None,
+            keep_on_clipboard: true,
+            haptics: true,
+        }
+    }
+}
+
+impl Settings {
+    pub fn load(dir: &Path) -> Self {
+        std::fs::read(dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+    pub fn save(&self, dir: &Path) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
+            let _ = write_atomic(&dir.join("settings.json"), &bytes);
+        }
+    }
+    pub const KEEP_CHOICES: [u32; 4] = [7, 30, 90, 0];
+    pub fn keep_label(days: u32) -> String {
+        if days == 0 { "Forever".into() } else { format!("{days} days") }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pair {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppRule {
+    pub app: String,
+    pub no_final_period: bool,
+    pub lowercase: bool,
+}
+
+/// The user's word list (words.json): fixes for words ChatGPT gets wrong, spoken snippets,
+/// spoken formatting, and per-app style. Applied on the device after every dictation.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Words {
+    pub fixes: Vec<Pair>,
+    pub snippets: Vec<Pair>,
+    pub spoken_formatting: bool,
+    pub rules: Vec<AppRule>,
+}
+
+impl Words {
+    pub fn load(dir: &Path) -> Self {
+        std::fs::read(dir.join("words.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+    pub fn save(&self, dir: &Path) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
+            let _ = write_atomic(&dir.join("words.json"), &bytes);
+        }
+    }
+    /// Fixes, then snippets, then spoken formatting, then the rule for `app` if there is one.
+    pub fn apply(&self, text: &str, app: &str) -> String {
+        use voxa_core::text::{apply_style, replace_phrases, spoken_formatting};
+        let pairs = |v: &[Pair]| v.iter().map(|p| (p.from.clone(), p.to.clone())).collect::<Vec<_>>();
+        let mut s = replace_phrases(text, &pairs(&self.fixes));
+        s = replace_phrases(&s, &pairs(&self.snippets));
+        if self.spoken_formatting {
+            s = spoken_formatting(&s);
+        }
+        if let Some(r) = self.rules.iter().find(|r| r.app.eq_ignore_ascii_case(app)) {
+            s = apply_style(&s, r.no_final_period, r.lowercase);
+        }
+        s
+    }
+}
+
+/// After transcription: filler removal (if on), then the user's word list for `app`.
+pub fn finish_text(text: String, dir: &Path, app: &str) -> String {
+    let text = if Settings::load(dir).remove_fillers { voxa_core::text::remove_fillers(&text) } else { text };
+    Words::load(dir).apply(&text, app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("voxa-store-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn entry(id: u64, text: &str, status: Status) -> Entry {
+        Entry { id, app: "A".into(), text: text.into(), secs: 1.0, status, audio: None, started_in: None, via: None }
+    }
+
+    #[test]
+    fn history_upsert_keeps_order_and_persists() {
+        let dir = tmp("history");
+        let mut h = History::load(&dir);
+        assert!(h.upsert(entry(20, "b", Status::Pasted)));
+        assert!(h.upsert(entry(10, "a", Status::Pasted)));
+        assert!(!h.upsert(entry(10, "a", Status::Pasted)), "no change");
+        h.save();
+        let back = History::load(&dir);
+        assert_eq!(back.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [10, 20]);
+        assert_eq!(back.search("b").len(), 1);
+        assert_eq!(back.search("").first().unwrap().id, 20, "newest first");
+    }
+
+    #[test]
+    fn prune_drops_old_written_entries_but_never_unsent_ones() {
+        let dir = tmp("prune");
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("old.wav");
+        std::fs::write(&wav, b"x").unwrap();
+        let day = 86_400_000u64;
+        let now = 100 * day;
+        let mut h = History::load(&dir);
+        let mut old = entry(now - 40 * day, "old", Status::Pasted);
+        old.audio = Some(wav.clone());
+        h.upsert(old);
+        h.upsert(entry(now - 41 * day, "", Status::Waiting("Sign in to send".into())));
+        h.upsert(entry(now - 42 * day, "", Status::Failed("Couldn't reach ChatGPT".into())));
+        h.upsert(entry(now - day, "new", Status::Pasted));
+        assert_eq!(h.prune(30, now), 1);
+        assert_eq!(h.entries.len(), 3);
+        assert!(!wav.exists());
+        assert_eq!(h.prune(0, u64::MAX), 0, "forever keeps all");
+    }
+
+    #[test]
+    fn settings_default_and_roundtrip() {
+        let dir = tmp("settings");
+        let s = Settings::load(&dir);
+        assert_eq!(s, Settings::default());
+        let s2 = Settings { remove_fillers: true, keep_days: 7, ..s };
+        s2.save(&dir);
+        assert_eq!(Settings::load(&dir), s2);
+        std::fs::write(dir.join("settings.json"), r#"{"remove_fillers": true}"#).unwrap();
+        assert_eq!(Settings::load(&dir).keep_days, 30, "older files still load");
+    }
+
+    #[test]
+    fn words_apply_in_order_and_finish_text_follows_settings() {
+        let dir = tmp("words");
+        let w = Words {
+            fixes: vec![Pair { from: "clawed code".into(), to: "Claude Code".into() }],
+            snippets: vec![Pair { from: "my email".into(), to: "sam@example.com".into() }],
+            spoken_formatting: true,
+            rules: vec![AppRule { app: "Claude Code".into(), no_final_period: true, lowercase: false }],
+        };
+        w.save(&dir);
+        assert_eq!(Words::load(&dir), w);
+        assert_eq!(w.apply("Ask clawed code. New line. Mail my email.", "Claude Code"), "Ask Claude Code.\nMail sam@example.com");
+        assert_eq!(finish_text("Um, ask clawed code.".into(), &dir, "Slack"), "Um, ask Claude Code.", "fillers off by default");
+        Settings { remove_fillers: true, ..Settings::default() }.save(&dir);
+        assert_eq!(finish_text("Um, ask clawed code.".into(), &dir, "Slack"), "Ask Claude Code.");
+    }
+}

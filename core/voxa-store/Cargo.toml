@@ -1,0 +1,19 @@
+[package]
+name = "voxa-store"
+description = "What Voxa keeps and the rules around a take: history, settings, word list, the after-transcription text pipeline, silence rules, upload retries and preparing audio. Shared by every app."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Silero silence trimming for long takes; without it they use voxa-core's loudness trim.
+vad = ["dep:voxa-vad"]
+
+[dependencies]
+voxa-core = { path = "../voxa-core" }
+voxa-vad = { path = "../voxa-vad", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hound = "3.5"
