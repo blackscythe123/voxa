@@ -26,8 +26,10 @@ val isWindows = System.getProperty("os.name").lowercase().contains("windows")
 val cargoHome = File(System.getenv("CARGO_HOME") ?: "${System.getProperty("user.home")}/.cargo")
 val cargo: String = File(cargoHome, "bin/cargo" + if (isWindows) ".exe" else "").takeIf { it.exists() }?.path ?: "cargo"
 val pathWithCargo = File(cargoHome, "bin").path + File.pathSeparator + (System.getenv("PATH") ?: "")
-// -PrustProfile=debug for faster local Rust builds; release by default (much smaller .so).
-val rustRelease = (findProperty("rustProfile") as String?) != "debug"
+// Cargo profile for the .so: "release-android" (root Cargo.toml: opt-level z, fat LTO, one codegen
+// unit, panic = abort, stripped) by default; -PrustProfile=debug for faster local Rust builds.
+val rustProfile = (findProperty("rustProfile") as String?) ?: "release-android"
+val rustProfileDir = if (rustProfile == "dev") "debug" else rustProfile
 
 val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
     group = "rust"
@@ -38,10 +40,12 @@ val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
     val args = mutableListOf(cargo, "ndk")
     rustAbis.forEach { args += listOf("-t", it) }
     args += listOf("-P", "29", "-o", rustJniLibs.get().asFile.path, "build", "-p", "voxa-ffi")
-    if (rustRelease) args += "--release"
+    args += if (rustProfile == "debug" || rustProfile == "dev") listOf() else listOf("--profile", rustProfile)
     commandLine(args)
     inputs.files(fileTree(repoRoot.resolve("core")) { include("**/*.rs", "**/Cargo.toml") })
     inputs.file(repoRoot.resolve("Cargo.lock"))
+    inputs.file(repoRoot.resolve("Cargo.toml"))
+    inputs.property("rustProfile", rustProfile)
     outputs.dir(rustJniLibs)
     onlyIf { !project.hasProperty("skipRust") }
 }
@@ -52,7 +56,7 @@ val uniffiBindgen = tasks.register<Exec>("uniffiBindgen") {
     dependsOn(cargoNdkBuild)
     workingDir = repoRoot
     environment("PATH", pathWithCargo)
-    val lib = repoRoot.resolve("target/x86_64-linux-android/${if (rustRelease) "release" else "debug"}/libvoxa_ffi.so")
+    val lib = repoRoot.resolve("target/x86_64-linux-android/${if (rustProfile == "debug") "debug" else rustProfileDir}/libvoxa_ffi.so")
     commandLine(
         cargo, "run", "-q", "-p", "voxa-ffi", "--features", "cli", "--bin", "uniffi-bindgen", "--",
         "generate", "--library", lib.path, "--language", "kotlin", "--no-format",
@@ -76,19 +80,34 @@ android {
         versionCode = 3
         versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testProguardFiles("proguard-test-rules.pro")
         // Only the ABIs the Rust core is built for, so no device installs an APK without it.
-        ndk { abiFilters += rustAbis }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 (keep rules for JNA and the UniFFI bindings in proguard-rules.pro).
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // As before: the debug keystore, so the APK is sideload-installable. A real release key
             // is still to be set up (every key change needs an uninstall).
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    // One APK per ABI: a phone gets only its own .so. No universal APK.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include(*rustAbis.toTypedArray())
+            isUniversalApk = false
+        }
+    }
+
+    // -PtestBuildType=release runs the instrumented tests against the R8-minified build.
+    testBuildType = (findProperty("testBuildType") as String?) ?: "debug"
 
     sourceSets {
         getByName("main") {
@@ -119,13 +138,10 @@ tasks.named("preBuild") { dependsOn(uniffiBindgen) }
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.kotlinx.coroutines.android)
     // UniFFI's Kotlin bindings call the Rust library through JNA.

@@ -7,3 +7,15 @@ edition = "2024"
 version = "0.4.4"
 license = "MIT"
 publish = false
+
+# Android's libvoxa_ffi.so (cargo ndk ... --profile release-android): as small as possible.
+# The desktop's release profile is unchanged.
+[profile.release-android]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+# Symbols stay for UniFFI's bindgen (it reads metadata from them); AGP strips the .so it packages.
+strip = "debuginfo"
+debug = false
