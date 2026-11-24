@@ -66,6 +66,9 @@ pub fn make_overlay(hwnd: HWND) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         );
         SetWindowSubclass(hwnd, Some(no_activate_proc), 0x5658_4131, 0);
+        // Modern Standby only tells windows that ask about waking up.
+        const DEVICE_NOTIFY_WINDOW_HANDLE: u32 = 0;
+        windows_sys::Win32::System::Power::RegisterSuspendResumeNotification(hwnd, DEVICE_NOTIFY_WINDOW_HANDLE);
         let none: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE: no Windows 11 frame border
         DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR as u32, &none as *const u32 as *const c_void, 4);
         let policy: i32 = DWMNCRP_DISABLED;
@@ -84,6 +87,16 @@ unsafe extern "system" fn no_activate_proc(
 ) -> LRESULT {
     if msg == WM_MOUSEACTIVATE {
         return MA_NOACTIVATE as LRESULT;
+    }
+    // Woken from sleep or standby, or the screens changed: the strip's graphics may be gone
+    // (it stayed invisible after Modern Standby), so main.rs rebuilds the window.
+    const WM_POWERBROADCAST: u32 = 0x0218;
+    const WM_DISPLAYCHANGE: u32 = 0x007E;
+    const PBT_APMRESUMESUSPEND: usize = 0x0007;
+    const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
+    if (msg == WM_POWERBROADCAST && matches!(wparam, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC)) || msg == WM_DISPLAYCHANGE {
+        WOKE.store(true, std::sync::atomic::Ordering::Relaxed);
+        log(&format!("strip needs rebuilding: {}", if msg == WM_DISPLAYCHANGE { "display changed" } else { "woke from sleep" }));
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
@@ -303,6 +316,47 @@ pub fn switch_to(hwnd: HWND) {
 }
 
 pub static STRIP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static WOKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True once after the PC woke up or the screens changed (the strip should be rebuilt).
+pub fn take_woke() -> bool {
+    WOKE.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Is the strip on screen right now?
+pub fn strip_is_visible() -> bool {
+    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    !h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) != 0 }
+}
+
+/// The strip's outer size in physical pixels (including the frame GPUI adds).
+pub fn strip_size() -> Option<(i32, i32)> {
+    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    let mut r = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    (!h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(h, &mut r) } != 0).then(|| (r.right - r.left, r.bottom - r.top))
+}
+
+/// Place the strip (physical pixels) without showing or activating it.
+pub fn move_strip(x: i32, y: i32, w: i32, h: i32) {
+    let hw = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    if !hw.is_null() {
+        unsafe { SetWindowPos(hw, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE) };
+    }
+}
+
+/// Pixels per logical pixel for the strip.
+pub fn strip_scale() -> f32 {
+    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    if h.is_null() {
+        return 1.0;
+    }
+    unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) as f32 / 96.0 }
+}
+
+/// A dev/test instance (its own data folder) runs beside the installed Voxa.
+fn instance_suffix() -> String {
+    std::env::var("VOXA_DATA").map(|d| format!("-{:x}", d.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)))).unwrap_or_default()
+}
 
 pub fn strip_visible(show: bool) {
     let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
@@ -338,9 +392,10 @@ pub fn single_instance() -> bool {
     use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, INFINITE, SetEvent, WaitForSingleObject};
     unsafe {
-        let mutex = CreateMutexW(std::ptr::null(), 0, wide(r"Local\VoxaNextSingleInstance").as_ptr());
+        let sfx = instance_suffix();
+        let mutex = CreateMutexW(std::ptr::null(), 0, wide(&format!(r"Local\VoxaNextSingleInstance{sfx}")).as_ptr());
         let already = GetLastError() == ERROR_ALREADY_EXISTS;
-        let event = CreateEventW(std::ptr::null(), 0, 0, wide(r"Local\VoxaNextOpenWindow").as_ptr());
+        let event = CreateEventW(std::ptr::null(), 0, 0, wide(&format!(r"Local\VoxaNextOpenWindow{sfx}")).as_ptr());
         if already {
             if !event.is_null() {
                 SetEvent(event);

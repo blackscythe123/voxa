@@ -204,6 +204,21 @@ pub fn make_overlay(view: HWND) {
 
 pub static STRIP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// Rebuilding the strip after sleep is Windows-only for now.
+pub fn take_woke() -> bool {
+    false
+}
+pub fn strip_is_visible() -> bool {
+    false
+}
+pub fn move_strip(_x: i32, _y: i32, _w: i32, _h: i32) {}
+pub fn strip_size() -> Option<(i32, i32)> {
+    None
+}
+pub fn strip_scale() -> f32 {
+    1.0
+}
+
 pub fn strip_visible(show: bool) {
     let view = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
     let w = ns_window(view);

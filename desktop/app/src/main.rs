@@ -1321,6 +1321,66 @@ fn run_window(tour: bool) {
     });
 }
 
+/// Where the strip sits: bottom centre of the main screen.
+fn strip_origin(cx: &App) -> gpui::Point<gpui::Pixels> {
+    let (w, h) = (px(760.), px(84.));
+    let db = cx.primary_display().expect("display").bounds();
+    point(db.origin.x + (db.size.width - w) / 2., db.origin.y + db.size.height - h - px(64.))
+}
+
+fn strip_options(origin: gpui::Point<gpui::Pixels>) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds { origin, size: size(px(760.), px(84.)) })),
+        titlebar: None,
+        focus: false,
+        show: true,
+        kind: WindowKind::PopUp,
+        is_movable: false,
+        is_resizable: false,
+        is_minimizable: false,
+        window_background: WindowBackgroundAppearance::Transparent,
+        ..Default::default()
+    }
+}
+
+/// A fresh strip window for the same Voxa, painted off screen first (so it never flashes), then
+/// hidden and moved into place; the old window is closed. Returns the new window.
+async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: gpui::AnyWindowHandle, cx: &mut gpui::AsyncApp) -> Option<gpui::AnyWindowHandle> {
+    let prev = os::foreground() as usize;
+    let target = cx.update(|cx| strip_origin(cx)).ok()?;
+    let old_size = os::strip_size();
+    let v = voxa.clone();
+    let new = cx
+        .update(|cx| {
+            cx.open_window(strip_options(point(px(-6000.), px(-6000.))), move |window, _| {
+                if let Some(h) = os::window_ptr(window) {
+                    os::make_overlay(h);
+                    os::STRIP.store(h as usize, std::sync::atomic::Ordering::Relaxed);
+                }
+                v
+            })
+        })
+        .ok()?
+        .ok()?;
+    os::give_focus_back(prev as _);
+    cx.background_executor().timer(Duration::from_millis(500)).await;
+    os::strip_visible(false);
+    // Same outer size as the old strip, centred where the strip belongs.
+    let s = os::strip_scale();
+    let (w, h) = old_size.unwrap_or(((760. * s).round() as i32, (84. * s).round() as i32));
+    let (cx_, cy_) = ((f32::from(target.x) + 380.) * s, (f32::from(target.y) + 42.) * s);
+    os::move_strip((cx_ - w as f32 / 2.).round() as i32, (cy_ - h as f32 / 2.).round() as i32, w, h);
+    let _ = old.update(cx, |_, window, _| window.remove_window());
+    os::log("strip rebuilt");
+    // Dev only: show the rebuilt strip with a stand-in recording.
+    if std::env::var_os("VOXA_DEMO_RECORD").is_some() && fake_mode() {
+        let fg = os::foreground();
+        let target = Target { app: os::app_name(fg), window: fg as u64 };
+        let _ = voxa.update(cx, |v, cx| v.handle(Event::Hotkey { target }, cx));
+    }
+    Some(new.into())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--window") {
@@ -1337,21 +1397,7 @@ fn main() {
     Application::new().run(move |cx: &mut App| {
         let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
         os::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
-        let (w, h) = (px(760.), px(84.));
-        let db = cx.primary_display().expect("display").bounds();
-        let origin = point(db.origin.x + (db.size.width - w) / 2., db.origin.y + db.size.height - h - px(64.));
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds { origin, size: size(w, h) })),
-            titlebar: None,
-            focus: false,
-            show: true,
-            kind: WindowKind::PopUp,
-            is_movable: false,
-            is_resizable: false,
-            is_minimizable: false,
-            window_background: WindowBackgroundAppearance::Transparent,
-            ..Default::default()
-        };
+        let options = strip_options(strip_origin(cx));
         let prev = os::foreground() as usize;
         let opened = cx.open_window(options, move |window, cx| {
             if let Some(h) = os::window_ptr(window) {
@@ -1374,6 +1420,29 @@ fn main() {
         }
         // GPUI shows (and activates) the window once; give focus back and hide until the hotkey.
         os::give_focus_back(prev as _);
+        // After sleep or a display change, build the strip again (its graphics can be lost).
+        if let Ok(first) = &opened {
+            let mut current: gpui::AnyWindowHandle = (*first).into();
+            if let Ok(voxa) = first.entity(cx) {
+                cx.spawn(async move |cx| loop {
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                    if !os::take_woke() {
+                        continue;
+                    }
+                    // Let the graphics driver settle, and never swap the strip while it's in use.
+                    cx.background_executor().timer(Duration::from_secs(2)).await;
+                    while os::strip_is_visible() {
+                        cx.background_executor().timer(Duration::from_millis(500)).await;
+                    }
+                    let _ = os::take_woke();
+                    match rebuild_strip(&voxa, current, cx).await {
+                        Some(h) => current = h,
+                        None => os::log("FAIL rebuilding the strip"),
+                    }
+                })
+                .detach();
+            }
+        }
         // Hide only after the first frame is painted, or the strip comes back blank later.
         let demo = std::env::var_os("VOXA_DEMO_RECORD").is_some() && fake_mode();
         cx.spawn(async move |cx| {

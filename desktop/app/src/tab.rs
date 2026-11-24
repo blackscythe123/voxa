@@ -165,3 +165,57 @@ fn claude_under(root: u32) -> bool {
         false
     })
 }
+
+/// What the focused element looks like to UI Automation, for deciding whether a paste lands.
+/// Only types, classes and flags; never the element's text.
+#[allow(dead_code)] // used by the text-box check (in progress)
+#[derive(Debug, Default, Clone)]
+pub struct FocusInfo {
+    pub control_type: i32,
+    pub class: String,
+    pub framework: String,
+    /// Some(read_only) when the element has a Value pattern.
+    pub value_read_only: Option<bool>,
+    pub has_text_pattern: bool,
+    pub keyboard_focusable: bool,
+}
+
+#[allow(dead_code)]
+pub fn focus_info() -> Option<FocusInfo> {
+    use windows::Win32::UI::Accessibility::UIA_TextPatternId;
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let out = (|| -> windows::core::Result<FocusInfo> {
+            let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+            let el = uia.GetFocusedElement()?;
+            let value_read_only = el.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).ok().and_then(|v| v.CurrentIsReadOnly().ok()).map(|b| b.as_bool());
+            Ok(FocusInfo {
+                control_type: el.CurrentControlType().map(|c| c.0).unwrap_or(0),
+                class: el.CurrentClassName().map(|b| b.to_string()).unwrap_or_default(),
+                framework: el.CurrentFrameworkId().map(|b| b.to_string()).unwrap_or_default(),
+                value_read_only,
+                has_text_pattern: el.GetCurrentPatternAs::<windows::Win32::UI::Accessibility::IUIAutomationTextPattern>(UIA_TextPatternId).is_ok(),
+                keyboard_focusable: el.CurrentIsKeyboardFocusable().is_ok_and(|b| b.as_bool()),
+            })
+        })()
+        .ok();
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod focus_info_probe {
+    /// Manual: prints the focused element once a second for 40 s while you click around.
+    #[test]
+    #[ignore]
+    fn probe_focus_info() {
+        for i in 0..150 {
+            let (_, exe) = crate::os::window_process(crate::os::foreground());
+            eprintln!("{i:>3}s {exe:<20} {:?}", super::focus_info());
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+}
