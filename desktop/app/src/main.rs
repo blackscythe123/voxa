@@ -1420,7 +1420,7 @@ fn main() {
         }
         // GPUI shows (and activates) the window once; give focus back and hide until the hotkey.
         os::give_focus_back(prev as _);
-        // After sleep or a display change, build the strip again (its graphics can be lost).
+        // After sleep, build the strip again (its graphics can be lost).
         if let Ok(first) = &opened {
             let mut current: gpui::AnyWindowHandle = (*first).into();
             if let Ok(voxa) = first.entity(cx) {
@@ -1431,7 +1431,9 @@ fn main() {
                     }
                     // Let the graphics driver settle, and never swap the strip while it's in use.
                     cx.background_executor().timer(Duration::from_secs(2)).await;
-                    while os::strip_is_visible() {
+                    // Wait while the strip is in use or a full-screen app (a game) is in front:
+                    // opening a window would pull it out of focus.
+                    while os::strip_is_visible() || os::foreground_is_fullscreen() {
                         cx.background_executor().timer(Duration::from_millis(500)).await;
                     }
                     let _ = os::take_woke();

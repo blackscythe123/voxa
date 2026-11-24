@@ -208,6 +208,9 @@ pub static STRIP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsiz
 pub fn take_woke() -> bool {
     false
 }
+pub fn foreground_is_fullscreen() -> bool {
+    false
+}
 pub fn strip_is_visible() -> bool {
     false
 }

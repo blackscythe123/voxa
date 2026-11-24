@@ -88,15 +88,15 @@ unsafe extern "system" fn no_activate_proc(
     if msg == WM_MOUSEACTIVATE {
         return MA_NOACTIVATE as LRESULT;
     }
-    // Woken from sleep or standby, or the screens changed: the strip's graphics may be gone
-    // (it stayed invisible after Modern Standby), so main.rs rebuilds the window.
+    // Woken from sleep or standby: the strip's graphics may be gone (it stayed invisible after
+    // Modern Standby), so main.rs rebuilds the window. Not on display changes: full-screen games
+    // change the display mode constantly, and rebuilding then pulled them out of focus.
     const WM_POWERBROADCAST: u32 = 0x0218;
-    const WM_DISPLAYCHANGE: u32 = 0x007E;
     const PBT_APMRESUMESUSPEND: usize = 0x0007;
     const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
-    if (msg == WM_POWERBROADCAST && matches!(wparam, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC)) || msg == WM_DISPLAYCHANGE {
+    if msg == WM_POWERBROADCAST && matches!(wparam, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC) {
         WOKE.store(true, std::sync::atomic::Ordering::Relaxed);
-        log(&format!("strip needs rebuilding: {}", if msg == WM_DISPLAYCHANGE { "display changed" } else { "woke from sleep" }));
+        log("strip needs rebuilding: woke from sleep");
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
@@ -321,6 +321,32 @@ static WOKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
 /// True once after the PC woke up or the screens changed (the strip should be rebuilt).
 pub fn take_woke() -> bool {
     WOKE.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Is the app in front covering its whole screen (a game, a video, a presentation)? Never take
+/// focus from it.
+pub fn foreground_is_fullscreen() -> bool {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetDesktopWindow, GetShellWindow, GetWindowRect};
+    unsafe {
+        let fg = foreground();
+        if fg.is_null() || fg == GetDesktopWindow() || fg == GetShellWindow() {
+            return false;
+        }
+        let class = describe(fg);
+        if class.contains("[Progman]") || class.contains("[WorkerW]") {
+            return false;
+        }
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetWindowRect(fg, &mut r) == 0 || GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mut mi) == 0 {
+            return false;
+        }
+        let m = mi.rcMonitor;
+        r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+    }
 }
 
 /// Is the strip on screen right now?
