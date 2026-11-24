@@ -51,6 +51,11 @@ class Recorder(
     }
 
     val isRecording get() = running
+    /** Bytes written and the loudest meter level of the current or last take (diagnostics). */
+    @Volatile var bytesWritten = 0L
+        private set
+    @Volatile var peakLevel = 0f
+        private set
 
     @SuppressLint("MissingPermission")
     fun start(pcmPath: String): StartError? {
@@ -89,6 +94,8 @@ class Recorder(
         record = r
         path = pcmPath
         running = true
+        bytesWritten = 0L
+        peakLevel = 0f
         startedAt = SystemClock.elapsedRealtime()
         thread = Thread({
             val buf = ByteArray(CHUNK_BYTES)
@@ -97,7 +104,10 @@ class Recorder(
                     val n = r.read(buf, 0, buf.size)
                     if (n <= 0) continue
                     it.write(buf, 0, n)
+                    bytesWritten += n
                     val lvl = meterLevel(buf.copyOf(n))
+                    if (lvl > peakLevel) peakLevel = lvl
+
                     main.post { onLevel(lvl) }
                 }
                 it.flush()

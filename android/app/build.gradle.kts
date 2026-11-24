@@ -90,6 +90,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (findProperty("testBuildType") == "release") proguardFiles("proguard-release-under-test.pro")
             // As before: the debug keystore, so the APK is sideload-installable. A real release key
             // is still to be set up (every key change needs an uninstall).
             signingConfig = signingConfigs.getByName("debug")
@@ -127,6 +128,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

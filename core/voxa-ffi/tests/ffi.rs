@@ -223,3 +223,24 @@ fn history_file_reads_the_desktop_format() {
     let h = VoxaCore::new(dir).history(String::new());
     assert_eq!(h[0].status, EntryStatus::Waiting("Sign in to send".into()), "unsent entries survive pruning however old");
 }
+
+struct Collect(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+impl LogSink for Collect {
+    fn log(&self, line: String) {
+        self.0.lock().unwrap().push(line);
+    }
+}
+
+#[test]
+fn diagnostics_log_events_but_never_the_transcript() {
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    set_log_sink(Box::new(Collect(lines.clone())), false);
+    let flow = VoxaFlow::new(tmp("diag"), ready());
+    let (job, _) = start(&flow, mic("Signal", 9));
+    flow.handle(FlowEvent::Stop);
+    flow.handle(FlowEvent::Transcribed { job, text: "my secret plans for friday".into() });
+    let log = lines.lock().unwrap().join("\n");
+    assert!(log.contains("MicPressed") && log.contains("StartCapture"), "{log}");
+    assert!(log.contains("<26 chars>"), "{log}");
+    assert!(!log.contains("secret"), "transcript text must never reach the log");
+}

@@ -380,7 +380,20 @@ fun SettingsScreen(activity: MainActivity, go: (Screen) -> Unit) {
             VButton("Delete", enabled = count > 0) { confirmClear = true }
         }
 
+        if (com.voxa.android.diag.Diag.enabled) {
+            Section("Diagnostics")
+            VCard(onClick = { activity.shareDiagnostics() }) {
+                CardIcon(R.drawable.ic_alert)
+                Column(Modifier.weight(1f)) {
+                    Text("Share diagnostics", fontSize = 14.sp, color = V.Text)
+                    Muted("The last 3 days of Voxa's log, without what you said or typed")
+                }
+                Icon(painterResource(R.drawable.ic_chevron), null, tint = V.Muted)
+            }
+        }
+
         Section("Help")
+
         VCard(onClick = { save(settings.copy(onboarded = false)); activity.recreate() }) {
             CardIcon(R.drawable.ic_refresh)
             Text("Take the tour again", Modifier.weight(1f), fontSize = 14.sp, color = V.Text)

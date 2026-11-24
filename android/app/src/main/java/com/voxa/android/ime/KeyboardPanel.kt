@@ -82,7 +82,7 @@ class KeyboardPanel(context: Context) : LinearLayout(context) {
             background = ripple(rounded(INK, dp(18f).toFloat()))
             isClickable = true
         }
-        bar.addView(action, LayoutParams(WRAP_CONTENT, dp(36f)))
+        bar.addView(action, LayoutParams(WRAP_CONTENT, dp(36f)).apply { marginEnd = dp(8f) })
         close = icon(R.drawable.ic_close, MUTED).apply {
             setPadding(dp(10f), dp(10f), dp(10f), dp(10f))
             background = ripple(null)

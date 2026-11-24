@@ -1,0 +1,15 @@
+INSTRUMENTATION_STATUS: test=spikeChatGptReachableFromRust
+INSTRUMENTATION_STATUS: test=spikeChatGptReachableFromRust
+INSTRUMENTATION_STATUS: test=passwordFieldsAreBlocked
+INSTRUMENTATION_STATUS: test=passwordFieldsAreBlocked
+INSTRUMENTATION_STATUS: test=nativeLibraryLoads
+INSTRUMENTATION_STATUS: test=nativeLibraryLoads
+INSTRUMENTATION_STATUS: test=flowRoundTripInsertsAndSavesHistory
+INSTRUMENTATION_STATUS: test=flowRoundTripInsertsAndSavesHistory
+INSTRUMENTATION_STATUS: test=textPipelineRunsInRust
+INSTRUMENTATION_STATUS: test=textPipelineRunsInRust
+OK (5 tests)
+11-25 01:42:32.900  3496  3512 I VoxaTest: SPIKE rust/rustls session check: session=EXPIRED network=UP blocked=false
+11-25 01:42:33.991  3496  3512 I VoxaTest: SPIKE android/platform same request: status=200 content-type=application/json; charset=utf-8 cf-mitigated=null
+11-25 01:42:33.995  3496  3512 I VoxaTest: FFI coreVersion() = 0.4.4
+11-25 01:42:34.008  3496  3512 I VoxaTest: FFI cleanText -> Ask Claude Code.\nMail sam@example.com.

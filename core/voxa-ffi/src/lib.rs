@@ -20,9 +20,11 @@ use voxa_chatgpt::{ChatGpt, Session as GptSession};
 use voxa_core::TranscribeError;
 use voxa_store::{History, Status, take};
 
+mod diag;
 mod flow;
 mod records;
 
+pub use diag::{LogSink, set_log_sink};
 pub use flow::*;
 pub use records::*;
 
@@ -159,8 +161,14 @@ impl VoxaCore {
     /// desktop: only a real rejection means signed out; being offline or blocked does not.
     pub fn check_session(&self) -> SessionCheck {
         let check = |session, network, account, blocked| SessionCheck { session, network, account, blocked };
-        let Some(s) = self.session() else { return check(SessionState::Expired, NetworkState::Up, None, false) };
-        match self.gpt().account(&s) {
+        let Some(s) = self.session() else {
+            diag::log(|| "session check: no session saved".into());
+            return check(SessionState::Expired, NetworkState::Up, None, false);
+        };
+        let t = std::time::Instant::now();
+        let result = self.gpt().account(&s);
+        diag::log(|| format!("session check: {} in {} ms", match &result { Ok(_) => "ok".to_string(), Err(e) => format!("{e:?}") }, t.elapsed().as_millis()));
+        match result {
             Ok(a) => {
                 if let Ok(b) = serde_json::to_vec_pretty(&a) {
                     let _ = voxa_store::write_atomic(&self.dir.join("account.json"), &b);
@@ -186,16 +194,38 @@ impl VoxaCore {
     /// long-pause trimming, upload with up to three tries, Whisper's silence inventions dropped,
     /// then filler removal and the word list. Blocking network call. Empty text means no speech.
     pub fn transcribe_recording(&self, pcm_path: String, app: String) -> Result<String, TranscribeFailure> {
-        let Some(session) = self.session() else { return Err(TranscribeFailure::SignedOut) };
-        let Some(p) = voxa_store::audio::prepare_pcm(Path::new(&pcm_path)) else { return Err(TranscribeFailure::Server { status: 0 }) };
+        let Some(session) = self.session() else {
+            diag::log(|| "transcribe: signed out, not sent".into());
+            return Err(TranscribeFailure::SignedOut);
+        };
+        let pcm_bytes = std::fs::metadata(&pcm_path).map(|m| m.len()).unwrap_or(0);
+        let Some(p) = voxa_store::audio::prepare_pcm(Path::new(&pcm_path)) else {
+            diag::log(|| format!("transcribe: recording unreadable ({pcm_bytes} bytes)"));
+            return Err(TranscribeFailure::Server { status: 0 });
+        };
+        diag::log(|| format!("transcribe: recording {pcm_bytes} bytes, {:.1} s, peak rms {:.4}, upload {} bytes", p.secs, p.peak, p.wav.len()));
         if p.is_silent() {
+            diag::log(|| "transcribe: silent take, not sent".into());
             return Ok(String::new());
         }
-        let text = take::with_retries(|| self.gpt().transcribe(&session, p.wav.clone(), "recording.wav", "audio/wav"))?;
+        let mut tries = 0;
+        let t = std::time::Instant::now();
+        let result = take::with_retries(|| {
+            tries += 1;
+            self.gpt().transcribe(&session, p.wav.clone(), "recording.wav", "audio/wav")
+        });
+        diag::log(|| match &result {
+            Ok(text) => format!("transcribe: ok (HTTP 2xx) in {} ms, {tries} tries, text {}", t.elapsed().as_millis(), diag::text(text)),
+            Err(e) => format!("transcribe: failed {e:?} in {} ms, {tries} tries", t.elapsed().as_millis()),
+        });
+        let text = result?;
         if take::invented_for_silence(&text, p.peak) {
+            diag::log(|| "transcribe: dropped Whisper's silence phrase".into());
             return Ok(String::new());
         }
-        Ok(voxa_store::finish_text(text, &self.dir, &app))
+        let out = voxa_store::finish_text(text, &self.dir, &app);
+        diag::log(|| format!("transcribe: finished text {}", diag::text(&out)));
+        Ok(out)
     }
 
     /// History's "Send now" (waiting or failed) or "Write it out again". The result stays in

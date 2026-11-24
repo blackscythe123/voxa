@@ -12,6 +12,7 @@ import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import com.voxa.android.data.SessionVault
+import com.voxa.android.diag.Diag
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,12 +20,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.voxa_ffi.AccountInfo
+import uniffi.voxa_ffi.LogSink
 import uniffi.voxa_ffi.MicState
 import uniffi.voxa_ffi.NetworkState
 import uniffi.voxa_ffi.ReadinessInfo
 import uniffi.voxa_ffi.SessionState
 import uniffi.voxa_ffi.VoxaCore
 import uniffi.voxa_ffi.coreVersion
+import uniffi.voxa_ffi.setLogSink
 
 /**
  * App-wide state shared by the keyboard and the app screens (same process): the Rust core, the
@@ -47,9 +50,19 @@ class VoxaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Diagnostics are on in debug builds (the owner's test APK), off in release.
+        Diag.init(this, BuildConfig.DEBUG)
+        if (Diag.enabled) {
+            setLogSink(object : LogSink {
+                override fun log(line: String) = Diag.log("core", line)
+            }, BuildConfig.DEBUG)
+        }
         Log.i(TAG, "voxa core ${coreVersion()} loaded")
+        Diag.log("app", "start: Voxa ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}), core ${coreVersion()}, Android ${android.os.Build.VERSION.RELEASE} on ${android.os.Build.MODEL}")
+        Diag.memory("app start")
         val saved = vault.load()
         if (saved != null) core.useSession(saved.cookieHeader, saved.userAgent)
+        Diag.log("app", "saved session: ${if (saved != null) "yes" else "none"}; mic ${if (micGranted()) "granted" else "not granted"}")
         session.value = if (saved != null) SessionState.UNKNOWN else SessionState.EXPIRED
         account.value = core.cachedAccount()
         watchNetwork()
@@ -72,6 +85,7 @@ class VoxaApp : Application() {
         scope.launch {
             val r = withContext(Dispatchers.IO) { core.checkSession() }
             Log.i(TAG, "session check: ${r.session}, network ${r.network}, blocked ${r.blocked}")
+            Diag.log("readiness", "session ${r.session}, network ${r.network}, blocked ${r.blocked}")
             session.value = r.session
             blocked.value = r.blocked
             if (r.network == NetworkState.DOWN) online.value = false
@@ -85,10 +99,12 @@ class VoxaApp : Application() {
         vault.save(SessionVault.Saved(cookieHeader, userAgent))
         core.useSession(cookieHeader, userAgent)
         Log.i(TAG, "session captured (${cookieHeader.length} bytes of cookies)")
+        Diag.log("signin", "success: session captured")
         checkSession(force = true)
     }
 
     fun signOut() {
+        Diag.log("signin", "signed out")
         vault.clear()
         core.signOut()
         CookieManager.getInstance().removeAllCookies(null)
@@ -96,7 +112,20 @@ class VoxaApp : Application() {
         account.value = null
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Diag.log("memory", "onTrimMemory level $level")
+        Diag.memory("trim $level")
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        Diag.log("memory", "onLowMemory")
+        Diag.memory("low memory")
+    }
+
     fun historyChanged() {
+
         historyVersion.value++
     }
 
@@ -111,12 +140,14 @@ class VoxaApp : Application() {
                 val up = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 scope.launch {
                     val was = online.value
+                    if (was != up) Diag.log("network", if (up) "online (validated)" else "connected, not validated")
                     online.value = up
                     if (up && !was) checkSession(force = session.value != SessionState.VALID)
                 }
             }
 
             override fun onLost(network: Network) {
+                Diag.log("network", "lost")
                 scope.launch { online.value = false }
             }
         })

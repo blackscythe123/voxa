@@ -23,6 +23,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.FileProvider
+import com.voxa.android.diag.Diag
+import java.io.File
 import com.voxa.android.ui.HistoryScreen
 import com.voxa.android.ui.HomeScreen
 import com.voxa.android.ui.SettingsScreen
@@ -44,13 +47,15 @@ class MainActivity : ComponentActivity() {
             tick.intValue++
         }
     }
-    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        Diag.log("permission", "microphone ${if (granted) "granted" else "denied"}")
         tick.intValue++
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         openRequest = intent.getStringExtra(EXTRA_OPEN)
+        debugSeams(intent)
         for (key in listOf(Settings.Secure.ENABLED_INPUT_METHODS, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
@@ -60,10 +65,22 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         openRequest = intent.getStringExtra(EXTRA_OPEN)
+        debugSeams(intent)
     }
+
+    /** Debug builds only, for testing without a ChatGPT account:
+     *  `adb shell am start -n com.voxa.android/.MainActivity --ez debug_fake_session true`
+     *  stores a dummy session (ChatGPT rejects it, so nothing is ever transcribed with it). */
+    private fun debugSeams(intent: Intent) {
+        if (!BuildConfig.DEBUG || !intent.getBooleanExtra("debug_fake_session", false)) return
+        Diag.log("debug", "dummy session stored for testing")
+        voxa.signedIn("voxa-debug=1", android.webkit.WebSettings.getDefaultUserAgent(this))
+    }
+
 
     override fun onResume() {
         super.onResume()
+        Diag.log("app", "screen shown")
         tick.intValue++
         voxa.checkSession()
     }
@@ -85,7 +102,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Zip files/diag and open the share sheet. */
+    fun shareDiagnostics() {
+        Diag.log("app", "share diagnostics")
+        val zip = Diag.zip(File(cacheDir, "share"))
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", zip)
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("application/zip")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .putExtra(Intent.EXTRA_SUBJECT, "Voxa diagnostics")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(send, "Share diagnostics"))
+    }
+
     fun openKeyboardSettings() {
+
         startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
     }
 

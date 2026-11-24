@@ -18,6 +18,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.voxa.android.MainActivity
 import com.voxa.android.R
+import com.voxa.android.diag.Diag
 import com.voxa.android.voxa
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +63,6 @@ class VoxaKeyboard : InputMethodService() {
     private var haptics = true
 
     // Mic key: press-and-hold over 400 ms then release stops (hold to talk); a quick tap stays on.
-    private var pressDownAt = 0L
     private var pressStarted = false
 
     private val timerTick = object : Runnable {
@@ -76,6 +76,7 @@ class VoxaKeyboard : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
+        Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
         recorder = Recorder(this, onLevel = { panel?.ink?.level(it) }, onInterrupted = { stopIfRecording("interrupted") })
         app.historyChanged()
@@ -85,6 +86,7 @@ class VoxaKeyboard : InputMethodService() {
     }
 
     override fun onDestroy() {
+        Diag.log("ime", "onDestroy")
         if (recorder.isRecording) recorder.stop()
         scope.cancel()
         main.removeCallbacksAndMessages(null)
@@ -95,6 +97,7 @@ class VoxaKeyboard : InputMethodService() {
     override fun onEvaluateFullscreenMode() = false
 
     override fun onCreateInputView(): View {
+        Diag.log("ime", if (panel == null) "panel created" else "panel recreated")
         val p = KeyboardPanel(this)
         panel = p
         ViewCompat.setOnApplyWindowInsetsListener(p) { v, insets ->
@@ -114,6 +117,7 @@ class VoxaKeyboard : InputMethodService() {
         editorInfo = info
         field = fieldKind(info.inputType, info.imeOptions)
         val t = targetOf(info)
+        Diag.log("ime", "onStartInput ${info.packageName} field ${info.fieldId} inputType 0x${Integer.toHexString(info.inputType)} imeOptions 0x${Integer.toHexString(info.imeOptions)} -> $field, restarting $restarting")
         target = t
         dispatch(FlowEvent.Focus(t))
         pendingPaste?.let {
@@ -124,12 +128,15 @@ class VoxaKeyboard : InputMethodService() {
 
     override fun onFinishInput() {
         super.onFinishInput()
+        Diag.log("ime", "onFinishInput")
         target = null
         editorInfo = null
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        Diag.log("ime", "shown (onStartInputView ${info.packageName}, restarting $restarting)")
+        Diag.memory("keyboard shown")
         val s = app.core.settings()
         haptics = s.haptics
         pushReadiness()
@@ -139,11 +146,14 @@ class VoxaKeyboard : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         // The keyboard going away while listening means "done", not "throw it away".
+        Diag.log("ime", "onFinishInputView finishing $finishingInput")
         stopIfRecording("keyboard hidden")
         super.onFinishInputView(finishingInput)
     }
 
     override fun onWindowHidden() {
+        Diag.log("ime", "onWindowHidden")
+        Diag.memory("keyboard hidden")
         stopIfRecording("window hidden")
         super.onWindowHidden()
     }
@@ -151,6 +161,7 @@ class VoxaKeyboard : InputMethodService() {
     private fun stopIfRecording(why: String) {
         if (flow.state() is FlowState.Recording) {
             Log.i(TAG, "stop: $why")
+            Diag.log("ime", "stop: $why")
             dispatch(FlowEvent.Stop)
         }
     }
@@ -169,7 +180,10 @@ class VoxaKeyboard : InputMethodService() {
 
     private fun pushReadiness() {
         val r = app.readiness()
-        if (r != flow.readiness()) dispatch(FlowEvent.Readiness(r))
+        if (r != flow.readiness()) {
+            Diag.log("readiness", "keyboard: session ${r.session}, network ${r.network}, mic ${r.mic}")
+            dispatch(FlowEvent.Readiness(r))
+        }
     }
 
     // ── events in, effects out ───────────────────────────────────────────────
@@ -192,11 +206,14 @@ class VoxaKeyboard : InputMethodService() {
             is FlowEffect.StartCapture -> startCapture(effect)
             is FlowEffect.StopCapture -> {
                 val secs = recorder.stop()
+                Diag.log("mic", "stopped: %.1f s, %d bytes, peak level %.2f".format(secs, recorder.bytesWritten, recorder.peakLevel))
+                Diag.memory("recording stopped")
                 main.removeCallbacks(timerTick)
                 flow.setRecordingSecs(effect.job, secs)
             }
             is FlowEffect.DiscardCapture -> {
                 recorder.discard()
+                Diag.log("mic", "discarded")
                 main.removeCallbacks(timerTick)
             }
             is FlowEffect.Transcribe -> transcribe(effect)
@@ -204,6 +221,7 @@ class VoxaKeyboard : InputMethodService() {
             is FlowEffect.PasteHere -> {
                 val ic = currentInputConnection
                 val ok = ic != null && target != null && insert(ic, effect.text)
+                Diag.log("insert", "here: ${if (ok) "ok" else "failed"} (${effect.text.length} chars)")
                 dispatch(FlowEvent.Delivered(effect.job, if (ok) DeliveryResult.Inserted else DeliveryResult.Failed))
             }
             is FlowEffect.OpenSignIn -> openApp(MainActivity.OPEN_SIGN_IN)
@@ -214,6 +232,8 @@ class VoxaKeyboard : InputMethodService() {
     private fun startCapture(effect: FlowEffect.StartCapture) {
         val err = recorder.start(effect.pcmPath)
         if (err == null) {
+            Diag.log("mic", "started")
+            Diag.memory("recording started")
             recordingSince = SystemClock.elapsedRealtime()
             main.removeCallbacks(timerTick)
             main.post(timerTick)
@@ -222,6 +242,7 @@ class VoxaKeyboard : InputMethodService() {
         }
         // The mic would not open: undo the take and show why instead (as the desktop does).
         Log.w(TAG, "mic failed: $err")
+        Diag.log("mic", "failed to start: $err")
         val t = target
         main.post {
             dispatch(FlowEvent.Cancel)
@@ -257,6 +278,7 @@ class VoxaKeyboard : InputMethodService() {
         val now = target
         if (ic == null || now == null) {
             // No field bound (keyboard closed): nothing is inserted; the next field decides.
+            Diag.log("insert", "no field bound; waiting for the next field")
             pendingPaste = effect
             return
         }
@@ -265,6 +287,7 @@ class VoxaKeyboard : InputMethodService() {
         } else {
             DeliveryResult.TargetChanged(now)
         }
+        Diag.log("insert", "paste: ${result.javaClass.simpleName} (${effect.text.length} chars)")
         dispatch(FlowEvent.Delivered(effect.job, result))
     }
 
@@ -280,6 +303,8 @@ class VoxaKeyboard : InputMethodService() {
     }
 
     private fun openApp(open: String) {
+        Diag.log("ime", "open app: $open")
+
         startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN, open).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
@@ -292,7 +317,6 @@ class VoxaKeyboard : InputMethodService() {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
                     tap(v)
-                    pressDownAt = SystemClock.elapsedRealtime()
                     pressStarted = false
                     when (flow.state()) {
                         is FlowState.Recording, is FlowState.Transcribing, is FlowState.Delivering -> Unit
@@ -302,7 +326,9 @@ class VoxaKeyboard : InputMethodService() {
                 }
                 MotionEvent.ACTION_UP -> {
                     v.isPressed = false
-                    val held = SystemClock.elapsedRealtime() - pressDownAt
+                    // From the touch itself, not from when it is handled: starting the mic can
+                    // block the main thread for a few hundred ms, which must not turn a tap into a hold.
+                    val held = ev.eventTime - ev.downTime
                     val recording = flow.state() is FlowState.Recording
                     if (recording && (!pressStarted || held > HOLD_MS)) dispatch(FlowEvent.Stop)
                     v.performClick()

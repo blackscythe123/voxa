@@ -1,0 +1,2 @@
+11-25 01:46:29.960  3809  3809 I Voxa    : voxa core 0.4.4 loaded
+11-25 01:46:29.991  3809  3809 I Voxa    : session check: EXPIRED, network UP, blocked false

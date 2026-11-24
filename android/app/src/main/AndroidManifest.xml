@@ -30,7 +30,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Shares the diagnostics zip (Settings, Share diagnostics). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- The Voxa voice keyboard. Same process as the app, so they share the core. -->
+
         <service
             android:name=".ime.VoxaKeyboard"
             android:exported="true"

@@ -281,6 +281,7 @@ impl VoxaFlow {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let inner = &mut *g;
         let private = matches!(event, FlowEvent::MicPressed { private: true, .. });
+        let described = crate::diag::event(&event);
         let effects = inner.flow.handle(event.into());
         let mut out = Vec::new();
         for e in effects {
@@ -317,6 +318,10 @@ impl VoxaFlow {
             out.push(fx);
         }
         inner.sync_history();
+        crate::diag::log(|| {
+            let fx: Vec<String> = out.iter().map(crate::diag::effect).collect();
+            format!("flow: {described} -> {} | effects [{}]", crate::diag::state(&FlowState::from(inner.flow.state())), fx.join(", "))
+        });
         out
     }
 
