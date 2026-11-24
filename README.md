@@ -12,7 +12,7 @@ Native, fast and light: the strip appears in about 30 ms and Voxa uses about 65 
 |---|---|
 | **Windows 10/11** | [Voxa-Setup-0.4.4.exe](https://github.com/blackscythe123/voxa/releases/download/v0.4.4/Voxa-Setup-0.4.4.exe) |
 | **Mac** (Apple Silicon and Intel) | [Voxa-0.4.4-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v0.4.4/Voxa-0.4.4-mac.dmg) |
-| **Android** (keyboard) | [Voxa-Android-0.1.1.apk](https://github.com/blackscythe123/voxa/releases/download/android-v0.1.1/Voxa-Android-0.1.1.apk) |
+| **Android** (keyboard) | Being rebuilt as a voice keyboard on the shared Rust core. The previous build: [Voxa-Android-0.1.1.apk](https://github.com/blackscythe123/voxa/releases/download/android-v0.1.1/Voxa-Android-0.1.1.apk) |
 
 Always the newest version: [Windows](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-Setup.exe)
 · [Mac](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-mac.dmg)
@@ -48,13 +48,15 @@ computer.
 
 ## For developers
 
-One Rust codebase for Windows and macOS, plus the Android app.
+One Rust codebase for Windows, macOS and Android. The Android app is a thin Kotlin shell over the same core.
 
 ```
 core/            shared Rust, used by every app
   voxa-core        the dictation flow (a tested state machine), strip wording, trimming, word list
   voxa-chatgpt     ChatGPT session, account and transcription client
   voxa-vad         Silero voice detection (cuts long silences before upload)
+  voxa-store       history, settings, word list, finish-text pipeline, silence rules, upload retries
+  voxa-ffi         the core for Kotlin, through UniFFI (Android)
 desktop/
   app/             the Windows + macOS app (GPUI): strip, tray, Home, History, Words, Insights, Settings
     src/win.rs       Windows-only code   } the only per-OS files; the build picks one
@@ -62,7 +64,7 @@ desktop/
   signin/          the ChatGPT sign-in window (system WebView)
   windows/         Windows packaging: installer (Inno Setup), ONNX runtime download
   macos/           macOS packaging: Info.plist, entitlements, .app and .dmg script
-android/         Android app and keyboard (Kotlin)
+android/         Android voice keyboard and companion app (Kotlin, Compose), calling core/ via voxa-ffi
 docs/            flow audit, design mockups, reviews, measurements
 ```
 
@@ -74,6 +76,18 @@ ISCC desktop\windows\voxa.iss             # installer -> target\dist
 ```
 
 **Build on macOS:** `bash desktop/macos/package.sh` -> `target/dist/Voxa-<version>-mac.dmg`
+
+**Build for Android** (Windows, macOS or Linux)
+```
+rustup target add aarch64-linux-android x86_64-linux-android   # once
+cargo install cargo-ndk                                          # once
+cd android && ./gradlew assembleDebug                            # -> app/build/outputs/apk/debug
+```
+Needs the Android SDK with NDK 28.0.13004108 (`android/local.properties`: `sdk.dir=...`) and JDK 17+
+(Android Studio's JBR works). Gradle's `preBuild` runs `cargo ndk` for arm64-v8a (phones) and
+x86_64 (emulator), then generates the Kotlin bindings with UniFFI (`voxa-ffi`'s `uniffi-bindgen`
+bin). `-PskipRust` reuses the last Rust build; `-PrustProfile=debug` builds Rust faster.
+Instrumented tests (FFI, flow, ChatGPT reachability): `./gradlew connectedDebugAndroidTest`.
 
 **Tests:** `cargo test --workspace`
 

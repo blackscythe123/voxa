@@ -1,4 +1,2 @@
-# GitHub language stats: count Voxa's own code, not the vendored HeliBoard keyboard
-# (android/keyboard, ~50 MB of Kotlin/Java/C++) or the HTML design mockups in docs/.
-android/keyboard/** linguist-vendored
+# GitHub language stats: count Voxa's own code, not the HTML design mockups in docs/.
 docs/** linguist-documentation
