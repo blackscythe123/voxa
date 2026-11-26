@@ -8,12 +8,14 @@ plugins {
 
 // ── The shared Rust core (core/voxa-ffi), built with cargo-ndk, bindings from UniFFI ──────────
 //
-// preBuild runs `cargo ndk` for arm64-v8a (phones) and x86_64 (emulator), then generates the Kotlin
-// bindings from the built library. Pass -PskipRust to reuse what was built last time.
+// preBuild runs `cargo ndk` for arm64-v8a (phones), then generates the Kotlin bindings from the
+// built library. Phones only by default; for the x86_64 emulator pass -Pabis=arm64-v8a,x86_64.
+// Pass -PskipRust to reuse what was built last time.
 
 val repoRoot: File = rootProject.projectDir.parentFile
 val ndkVersionPinned = "28.0.13004108"
-val rustAbis = listOf("arm64-v8a", "x86_64")
+val rustAbis: List<String> = ((findProperty("abis") as String?) ?: "arm64-v8a").split(",").map { it.trim() }.filter { it.isNotEmpty() }
+val abiTriple = mapOf("arm64-v8a" to "aarch64-linux-android", "x86_64" to "x86_64-linux-android")
 val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
 val uniffiOut = layout.buildDirectory.dir("generated/uniffi")
 
@@ -56,7 +58,7 @@ val uniffiBindgen = tasks.register<Exec>("uniffiBindgen") {
     dependsOn(cargoNdkBuild)
     workingDir = repoRoot
     environment("PATH", pathWithCargo)
-    val lib = repoRoot.resolve("target/x86_64-linux-android/${if (rustProfile == "debug") "debug" else rustProfileDir}/libvoxa_ffi.so")
+    val lib = repoRoot.resolve("target/${abiTriple.getValue(rustAbis.first())}/${if (rustProfile == "debug") "debug" else rustProfileDir}/libvoxa_ffi.so")
     commandLine(
         cargo, "run", "-q", "-p", "voxa-ffi", "--features", "cli", "--bin", "uniffi-bindgen", "--",
         "generate", "--library", lib.path, "--language", "kotlin", "--no-format",
@@ -77,8 +79,8 @@ android {
         applicationId = "com.voxa.android"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-test-rules.pro")
         // Only the ABIs the Rust core is built for, so no device installs an APK without it.
