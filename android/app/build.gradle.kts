@@ -14,8 +14,11 @@ plugins {
 
 val repoRoot: File = rootProject.projectDir.parentFile
 val ndkVersionPinned = "28.0.13004108"
-val rustAbis: List<String> = ((findProperty("abis") as String?) ?: "arm64-v8a").split(",").map { it.trim() }.filter { it.isNotEmpty() }
-val abiTriple = mapOf("arm64-v8a" to "aarch64-linux-android", "x86_64" to "x86_64-linux-android")
+val rustAbis: List<String> = ((findProperty("abis") as String?) ?: if (project.hasProperty("universal")) "arm64-v8a,armeabi-v7a,x86_64" else "arm64-v8a").split(",").map { it.trim() }.filter { it.isNotEmpty() }
+val abiTriple = mapOf("arm64-v8a" to "aarch64-linux-android", "armeabi-v7a" to "armv7-linux-androideabi", "x86_64" to "x86_64-linux-android")
+// -Puniversal: one APK for every phone (arm64, 32-bit ARM, x86_64), libraries compressed so the
+// download stays small; Android extracts only the phone's own copy at install.
+val universal = project.hasProperty("universal")
 val rustJniLibs = layout.buildDirectory.dir("rustJniLibs")
 val uniffiOut = layout.buildDirectory.dir("generated/uniffi")
 
@@ -84,6 +87,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-test-rules.pro")
         // Only the ABIs the Rust core is built for, so no device installs an APK without it.
+        if (universal) ndk { abiFilters += rustAbis }
+    }
+
+    // Older and newer signature schemes too, so every installer accepts the APK.
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
 
     buildTypes {
@@ -102,7 +115,7 @@ android {
     // One APK per ABI: a phone gets only its own .so. No universal APK.
     splits {
         abi {
-            isEnable = true
+            isEnable = !universal
             reset()
             include(*rustAbis.toTypedArray())
             isUniversalApk = false
@@ -134,7 +147,9 @@ android {
     }
 
     packaging {
-        jniLibs.useLegacyPackaging = false
+        // Per-phone APKs: stored uncompressed (smallest on the phone). Universal: compressed (smallest
+        // download; the phone's own copy is extracted at install).
+        jniLibs.useLegacyPackaging = universal
     }
 }
 
