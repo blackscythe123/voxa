@@ -65,6 +65,9 @@ class VoxaKeyboard : InputMethodService() {
     // Mic key: press-and-hold over 400 ms then release stops (hold to talk); a quick tap stays on.
     private var pressStarted = false
 
+    /** Set first thing in onDestroy: nothing may use the Rust flow after that. */
+    private var destroyed = false
+
     private val timerTick = object : Runnable {
         override fun run() {
             val p = panel ?: return
@@ -87,11 +90,13 @@ class VoxaKeyboard : InputMethodService() {
 
     override fun onDestroy() {
         Diag.log("ime", "onDestroy")
+        destroyed = true
         if (recorder.isRecording) recorder.stop()
         scope.cancel()
         main.removeCallbacksAndMessages(null)
-        flow.destroy()
+        // super.onDestroy() calls onFinishInputView (which checks the flow): destroy the flow after it.
         super.onDestroy()
+        flow.destroy()
     }
 
     override fun onEvaluateFullscreenMode() = false
@@ -159,6 +164,7 @@ class VoxaKeyboard : InputMethodService() {
     }
 
     private fun stopIfRecording(why: String) {
+        if (destroyed) return
         if (flow.state() is FlowState.Recording) {
             Log.i(TAG, "stop: $why")
             Diag.log("ime", "stop: $why")
@@ -317,12 +323,15 @@ class VoxaKeyboard : InputMethodService() {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
                     tap(v)
-                    pressStarted = false
-                    when (flow.state()) {
-                        is FlowState.Recording, is FlowState.Transcribing, is FlowState.Delivering -> Unit
-                        else -> onMicPressed()
+                    // Only a press that starts the recording can be a hold-to-talk press; a tap
+                    // while recording always stops it (on release).
+                    val wasBusy = when (flow.state()) {
+                        is FlowState.Recording, is FlowState.Transcribing, is FlowState.Delivering -> true
+                        else -> false
                     }
-                    pressStarted = flow.state() is FlowState.Recording
+                    if (!wasBusy) onMicPressed()
+                    pressStarted = !wasBusy && flow.state() is FlowState.Recording
+                    Diag.log("ime", "mic down: ${if (wasBusy) "while busy" else "start"}")
                 }
                 MotionEvent.ACTION_UP -> {
                     v.isPressed = false
@@ -330,7 +339,9 @@ class VoxaKeyboard : InputMethodService() {
                     // block the main thread for a few hundred ms, which must not turn a tap into a hold.
                     val held = ev.eventTime - ev.downTime
                     val recording = flow.state() is FlowState.Recording
-                    if (recording && (!pressStarted || held > HOLD_MS)) dispatch(FlowEvent.Stop)
+                    val stop = recording && (!pressStarted || held > HOLD_MS)
+                    Diag.log("ime", "mic up after $held ms: ${if (stop) "stop" else if (recording) "keep listening (tap)" else "not recording"}")
+                    if (stop) dispatch(FlowEvent.Stop)
                     v.performClick()
                 }
                 MotionEvent.ACTION_CANCEL -> v.isPressed = false

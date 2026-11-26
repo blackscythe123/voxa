@@ -40,12 +40,28 @@ class Recorder(
     private var path: String? = null
     private var focus: AudioFocusRequest? = null
 
+    /** Some phones (seen on OnePlus, Android 14) report the mic as silenced for a moment while
+     *  a recording starts. Only a silence that lasts, after the first second, is a real
+     *  interruption (a call, another app taking the mic). */
+    @Volatile private var silenced = false
+    private val confirmSilenced = Runnable {
+        if (running && silenced) {
+            Log.i(TAG, "recording silenced by the system (lasting)")
+            com.voxa.android.diag.Diag.log("mic", "interrupted: silenced by the system")
+            onInterrupted()
+        }
+    }
+
     private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
         override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
             val mine = record?.audioSessionId ?: return
-            if (configs.any { it.clientAudioSessionId == mine && it.isClientSilenced }) {
-                Log.i(TAG, "recording silenced by the system")
-                main.post(onInterrupted)
+            val now = configs.any { it.clientAudioSessionId == mine && it.isClientSilenced }
+            if (now != silenced) com.voxa.android.diag.Diag.log("mic", "system silenced: $now")
+            silenced = now
+            main.removeCallbacks(confirmSilenced)
+            if (now) {
+                val sinceStart = SystemClock.elapsedRealtime() - startedAt
+                main.postDelayed(confirmSilenced, maxOf(1500L, 1000L - sinceStart + 1500L))
             }
         }
     }
@@ -134,6 +150,8 @@ class Recorder(
     }
 
     private fun release() {
+        main.removeCallbacks(confirmSilenced)
+        silenced = false
         runCatching { audio.unregisterAudioRecordingCallback(recordingCallback) }
         record?.let {
             runCatching { it.stop() }
@@ -148,8 +166,10 @@ class Recorder(
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setOnAudioFocusChangeListener({ change ->
                 if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                    Log.i(TAG, "audio focus lost")
-                    if (running) onInterrupted()
+                    val sinceStart = SystemClock.elapsedRealtime() - startedAt
+                    com.voxa.android.diag.Diag.log("mic", "audio focus lost after $sinceStart ms")
+                    // A focus change in the first second is the system settling, not a call.
+                    if (running && sinceStart > 1000) onInterrupted()
                 }
             }, main)
             .build()
