@@ -12,7 +12,7 @@ Native, fast and light: the strip appears in about 30 ms and Voxa uses about 65 
 |---|---|
 | **Windows 10/11** | [Voxa-Setup-0.4.5.exe](https://github.com/blackscythe123/voxa/releases/download/v0.4.5/Voxa-Setup-0.4.5.exe) |
 | **Mac** (Apple Silicon and Intel) | [Voxa-0.4.5-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v0.4.5/Voxa-0.4.5-mac.dmg) |
-| **Android** (keyboard) | [Voxa-Android-0.1.1.apk](https://github.com/blackscythe123/voxa/releases/download/android-v0.1.1/Voxa-Android-0.1.1.apk) |
+| **Android** (voice keyboard, Android 10+) | [Voxa-Android-0.2.1.apk](https://github.com/blackscythe123/voxa/releases/download/android-v0.2.1/Voxa-Android-0.2.1.apk) |
 
 Always the newest version: [Windows](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-Setup.exe)
 · [Mac](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-mac.dmg)
@@ -23,7 +23,7 @@ Always the newest version: [Windows](https://github.com/blackscythe123/voxa/rele
   click *More info* > *Run anyway*. It updates the old Voxa and keeps your history and sign-in.
 - **Mac:** drag Voxa to Applications, then the first time **right-click > Open** (not notarized yet).
   Allow the microphone, and Accessibility so Voxa can paste.
-- **Android:** if you had Voxa 0.1.0, uninstall it first, then install the APK.
+- **Android:** if you had an older Voxa for Android, uninstall it first, then install the APK. Send it as a file (Drive, or a WhatsApp/Telegram document); a broken copy shows "problem while parsing the package".
 
 You need a ChatGPT account (free works). Voxa signs in on ChatGPT's own page and never sees your
 password.
