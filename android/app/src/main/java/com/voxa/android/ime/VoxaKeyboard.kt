@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.media.AudioManager
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -68,6 +69,10 @@ class VoxaKeyboard : InputMethodService() {
     /** Set first thing in onDestroy: nothing may use the Rust flow after that. */
     private var destroyed = false
 
+    /** A short message shown in the bar while idle, e.g. "You're on a call" (cleared after a few s). */
+    private var notice: Pair<String, String>? = null
+    private val clearNotice = Runnable { notice = null; render() }
+
     private val timerTick = object : Runnable {
         override fun run() {
             val p = panel ?: return
@@ -81,7 +86,7 @@ class VoxaKeyboard : InputMethodService() {
         super.onCreate()
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
-        recorder = Recorder(this, onLevel = { panel?.ink?.level(it) }, onInterrupted = { stopIfRecording("interrupted") })
+        recorder = Recorder(this, onLevel = { panel?.ink?.level(it) }, onInterrupted = { onMicInterrupted() })
         app.historyChanged()
         scope.launch {
             combine(app.session, app.online) { _, _ -> }.collect { pushReadiness() }
@@ -374,7 +379,44 @@ class VoxaKeyboard : InputMethodService() {
     private fun onMicPressed() {
         val t = target ?: return
         if (field == FieldKind.PASSWORD) return
+        // During a call the call owns the microphone: other apps only get silence. Say so instead
+        // of pretending to listen.
+        if (inCall()) {
+            Diag.log("ime", "mic refused: in a call (audio mode ${audioMode()})")
+            showNotice("You're on a call", "Voxa can't use the microphone during a call. Try again when it ends.")
+            return
+        }
+        notice = null
         dispatch(FlowEvent.MicPressed(t, field == FieldKind.PRIVATE))
+    }
+
+    private fun audioMode(): Int = getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
+
+    /** Phone call, VoIP call (WhatsApp, Meet), call screening or a redirected call. */
+    private fun inCall(): Boolean = audioMode() in setOf(
+        AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION,
+        4 /* MODE_CALL_SCREENING */, 5 /* MODE_CALL_REDIRECT */, 6 /* MODE_COMMUNICATION_REDIRECT */,
+    )
+
+    private fun showNotice(title: String, detail: String) {
+        notice = title to detail
+        main.removeCallbacks(clearNotice)
+        main.postDelayed(clearNotice, 6000)
+        render()
+    }
+
+    /** The system took the microphone mid-take (a call started, another app grabbed it). Keep
+     *  what was said; if nothing was heard at all, drop the empty take and say why. */
+    private fun onMicInterrupted() {
+        if (destroyed || flow.state() !is FlowState.Recording) return
+        if (recorder.peakLevel <= 0.001f) {
+            Diag.log("ime", "mic taken with nothing recorded: cancelling (audio mode ${audioMode()})")
+            dispatch(FlowEvent.Cancel)
+            if (inCall()) showNotice("You're on a call", "Voxa can't use the microphone during a call. Nothing was recorded.")
+            else showNotice("Another app is using the microphone", "Nothing was recorded. Try again when it's free.")
+        } else {
+            stopIfRecording("interrupted")
+        }
     }
 
     private fun tap(v: View) {
@@ -447,7 +489,14 @@ class VoxaKeyboard : InputMethodService() {
             status != null -> status
             else -> null
         }
-        if (shown != null) {
+        val n = notice
+        if (shown == null && n != null && state is FlowState.Idle) {
+            p.title.text = n.first
+            p.detail.text = n.second
+            p.detail.visibility = View.VISIBLE
+            p.action.visibility = View.GONE
+            p.close.visibility = View.GONE
+        } else if (shown != null) {
             p.title.text = shown.title
             p.detail.text = shown.detail ?: ""
             p.detail.visibility = if (shown.detail.isNullOrEmpty()) View.GONE else View.VISIBLE
