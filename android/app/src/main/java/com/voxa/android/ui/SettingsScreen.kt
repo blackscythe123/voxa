@@ -100,6 +100,10 @@ fun SettingsScreen(activity: MainActivity) {
                     },
                 )
             }
+            val lookLabel = remember(tick) { com.voxa.android.ime.KeyboardLook.label(com.voxa.android.ime.KeyboardLook.load(activity)) }
+            OptionRow(R.drawable.ic_palette, "Keyboard look", onClick = { activity.go(Route.KeyboardLook) }) {
+                OptionValue(lookLabel)
+            }
             OptionRow(R.drawable.ic_hand, "Hold to talk", onClick = { save(settings.copy(holdToTalk = !settings.holdToTalk)) }) {
                 VSwitch(settings.holdToTalk) { save(settings.copy(holdToTalk = it)) }
             }
