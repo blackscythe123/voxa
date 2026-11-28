@@ -15,7 +15,14 @@ mod greet_view;
 mod tour;
 use tour::Tour;
 use crate::remote::Backend as Voxa;
+use crate::link::Command;
 use voxa_core::{Blocker, Network, Session};
+
+/// macOS: Privacy and Security, Accessibility (the bar after an update that changed the signature).
+fn open_accessibility() {
+    #[cfg(target_os = "macos")]
+    crate::os::open_accessibility_settings();
+}
 
 
 // Segoe Fluent Icons code points.
@@ -561,12 +568,15 @@ fn app_badge(app: &str, size: f32) -> gpui::Div {
 enum Bar {
     Error,
     Warning,
+    /// News, not a problem (an update): the card colour with the accent mark.
+    Info,
 }
 
 fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, close: Option<AnyElement>) -> gpui::Div {
     let (bg, dot) = match kind {
         Bar::Error => (p().error_bar, p().error_glyph),
         Bar::Warning => (p().warn_bar, p().warn_glyph),
+        Bar::Info => (p().card, p().accent),
     };
     div()
         .flex()
@@ -587,11 +597,15 @@ fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, clos
                 .flex_none()
                 .rounded_full()
                 .bg(rgb(dot))
-                .text_color(rgb(p().bar_mark))
+                .text_color(rgb(if matches!(kind, Bar::Info) { p().on_accent } else { p().bar_mark }))
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(if matches!(kind, Bar::Error) { icon(I_CLOSE, 8.) } else { alert_mark(10., p().bar_mark) }),
+                .child(match kind {
+                    Bar::Error => icon(I_CLOSE, 8.).into_any_element(),
+                    Bar::Warning => alert_mark(10., p().bar_mark).into_any_element(),
+                    Bar::Info => icon('\u{E946}', 9.).into_any_element(),
+                }),
         )
         .child(
             div()
@@ -867,7 +881,79 @@ impl Home {
                 .into_any_element(),
             );
         }
+        out.extend(self.update_bars(cx));
 
+        out
+    }
+
+    /// Home bars from the updater (in context, never a toast; docs/notifications.md): Windows
+    /// "Voxa was updated", macOS "Voxa X is out" and "needs Accessibility access again".
+    fn update_bars(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let u = self.voxa.read(cx).update_view().clone();
+        let mut out = Vec::new();
+        let close = |cx: &mut Context<Self>| {
+            div()
+                .id("close-update")
+                .size(px(28.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(4.))
+                .cursor_pointer()
+                .hover(|s| s.bg(rgba(p().hover_a)))
+                .text_color(rgb(p().muted))
+                .child(icon(I_CLOSE, 10.))
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_command(Command::DismissUpdateNote, cx))))
+                .into_any_element()
+        };
+        if let Some(to) = &u.updated_to {
+            out.push(
+                info_bar(
+                    Bar::Info,
+                    &format!("Voxa was updated to {to}."),
+                    "Your history, settings and shortcut are as you left them.",
+                    Some(wbtn("ib-whats-new", "What's new", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_command(Command::OpenReleaseNotes, cx)))).into_any_element()),
+                    Some(close(cx)),
+                )
+                .into_any_element(),
+            );
+        }
+        if let Some(v) = &u.mac_available {
+            let url = u.download_url.clone().unwrap_or_default();
+            out.push(
+                info_bar(
+                    Bar::Info,
+                    &format!("Voxa {v} is out."),
+                    "To update, download it, quit Voxa, then drag the new Voxa into Applications and choose Replace. Your history and settings stay. The first time you open it, macOS may say it can't check Voxa. Go to System Settings, Privacy and Security, and choose Open Anyway. macOS may ask again for microphone and Accessibility access.",
+                    Some(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(wbtn("ib-mac-download", format!("Download Voxa {v}"), true).on_click(move |_, _, _| {
+                                if url.starts_with("https://github.com/blackscythe123/voxa/releases/download/") {
+                                    crate::os::open(std::ffi::OsStr::new(&url));
+                                }
+                            }))
+                            .child(wbtn("ib-mac-how", "How to update", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_command(Command::OpenReleaseNotes, cx)))))
+                            .into_any_element(),
+                    ),
+                    Some(close(cx)),
+                )
+                .into_any_element(),
+            );
+        }
+        if u.mac_accessibility_again {
+            out.push(
+                info_bar(
+                    Bar::Warning,
+                    crate::update::ACCESS_TITLE,
+                    crate::update::ACCESS_BODY,
+                    Some(wbtn("ib-access", "Open settings", true).on_click(|_, _, _| open_accessibility()).into_any_element()),
+                    None,
+                )
+                .into_any_element(),
+            );
+        }
         out
     }
 
@@ -2224,6 +2310,19 @@ impl Home {
                 .child(looks)
                 .into_any_element(),
         );
+        let (auto_title, auto_sub) = if crate::update::INSTALLS {
+            ("Update automatically", "Voxa installs new versions by itself when you're not using it, then starts again in a few seconds.")
+        } else {
+            ("Check for updates automatically", "Voxa tells you when a new version is out. You replace the app yourself.")
+        };
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon('\u{E895}', 18.).w(px(20.)))
+                .child(row_text(auto_title, auto_sub.into()))
+                .child(toggle("auto-update", s.auto_update).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.auto_update = !s.auto_update, cx)))))
+                .into_any_element(),
+        );
         out.push(
             card()
                 .mb(px(3.))
@@ -2241,11 +2340,41 @@ impl Home {
                 .child(wbtn("rerun-setup", "Start tour", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_tour(cx))))
                 .into_any_element(),
         );
+        let u = self.voxa.read(cx).update_view().clone();
+        let status = if u.status.is_empty() { "Voxa checks for updates once a day.".to_string() } else { u.status.clone() };
+        let mut buttons = div().flex().gap(px(8.));
+        if u.can_restart {
+            let label = u.version.as_ref().map_or("Restart and update".to_string(), |v| format!("Restart and update to {v}"));
+            buttons = buttons.child(wbtn("restart-update", label, true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_command(Command::InstallUpdateNow, cx)))));
+        }
+        if u.gave_up {
+            let url = u.download_url.clone().unwrap_or_default();
+            let label = u.version.as_ref().map_or("Download".to_string(), |v| format!("Download Voxa {v}"));
+            buttons = buttons.child(wbtn("download-update", label, true).on_click(move |_, _, _| {
+                if url.starts_with("https://github.com/blackscythe123/voxa/releases/download/") {
+                    crate::os::open(std::ffi::OsStr::new(&url));
+                }
+            }));
+        }
+        // The button keeps its place (and focus) while checking; only its words change.
+        buttons = buttons
+            .child(wbtn("check-updates", if u.checking { "Checking..." } else { "Check for updates" }, false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.voxa.update(cx, |v, cx| v.update_command(Command::CheckForUpdates, cx))
+            })))
+            .child(wbtn("whats-new", "What's new", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_command(Command::OpenReleaseNotes, cx)))));
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon('\u{E895}', 18.).w(px(20.)))
+                .child(row_text(&format!("Voxa {}", env!("CARGO_PKG_VERSION")), status))
+                .child(buttons)
+                .into_any_element(),
+        );
         out.push(
             card()
                 .mb(px(3.))
                 .child(icon('\u{E946}', 18.).w(px(20.)))
-                .child(row_text(&format!("Voxa {}", env!("CARGO_PKG_VERSION")), "Your words go to ChatGPT only while you dictate. Everything else stays on this PC.".into()))
+                .child(row_text("Your data", "Your words go to ChatGPT only while you dictate. Everything else stays on this PC.".into()))
                 .child(wbtn("open-logs", "Open data folder", false).on_click(cx.listener(|_, _: &ClickEvent, _, _| {
                     crate::os::open(crate::data_dir().as_os_str());
                 })))

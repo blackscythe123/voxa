@@ -114,6 +114,25 @@ impl Backend {
         self.live.readiness()
     }
 
+    /// The updater's state (the tray process runs the updater).
+    pub fn update_view(&self) -> &link::UpdateView {
+        &self.live.update
+    }
+
+    /// Ask the tray process to check, install, open the notes or close a bar.
+    pub fn update_command(&mut self, cmd: Command, cx: &mut Context<Self>) {
+        if cmd == Command::CheckForUpdates {
+            self.live.update.checking = true;
+            self.live.update.status = "Checking for updates...".into();
+        }
+        if cmd == Command::DismissUpdateNote {
+            self.live.update.updated_to = None;
+            self.live.update.mac_available = None;
+        }
+        link::send(&cmd);
+        cx.notify();
+    }
+
     pub fn is_live(&self, id: u64) -> bool {
         self.live.live_ids.contains(&id)
     }
