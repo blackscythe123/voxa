@@ -30,77 +30,42 @@ pub struct UpdateOffer {
 pub struct UpdateCheck {
     pub offer: Option<UpdateOffer>,
     pub serial: u64,
-    /// The feed's newest version ("" when it offers nothing to this device).
-    pub latest: String,
     pub paused: bool,
 }
 
-/// Mirrors `voxa_update::UpdateError`.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+/// What went wrong, as the app needs it (`voxa_update::UpdateError` folded into the five things
+/// the screens say). The full typed error is logged by the core.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 pub enum UpdateFailure {
-    #[error("offline")]
+    /// No network, a timeout, a 404 or another HTTP answer, or a host outside the allow list:
+    /// "Couldn't check", try again later.
+    #[error("couldn't check")]
     Offline,
-    #[error("http {status}")]
-    Http { status: u16 },
-    #[error("refused host")]
-    RefusedHost,
-    #[error("bad envelope")]
-    BadEnvelope,
-    #[error("bad signature")]
-    BadSignature,
-    #[error("unknown key")]
-    UnknownKey,
-    #[error("wrong channel")]
-    WrongChannel,
-    #[error("replay")]
-    Replay,
-    #[error("bad manifest")]
-    BadManifest,
-    #[error("not newer")]
-    NotNewer,
-    #[error("too large")]
-    TooLarge,
-    #[error("hash mismatch")]
-    HashMismatch,
-    #[error("disk full")]
-    DiskFull,
-    #[error("io")]
-    Io,
-}
-
-impl UpdateFailure {
-    /// The feed couldn't be confirmed as Voxa's (the "refused" copy, not "couldn't check").
-    pub fn refused(&self) -> bool {
-        matches!(self, Self::BadSignature | Self::UnknownKey | Self::WrongChannel | Self::Replay | Self::BadManifest)
-    }
+    /// The feed couldn't be confirmed as Voxa's (signature, key, channel, replay, bad fields).
+    #[error("refused")]
+    Refused,
+    /// The download was too long, truncated or had the wrong SHA-256: deleted, retried next day.
+    #[error("bad file")]
+    BadFile,
+    /// Not enough space.
+    #[error("no space")]
+    NoSpace,
+    /// Anything else (file system).
+    #[error("failed")]
+    Failed,
 }
 
 impl From<UpdateError> for UpdateFailure {
     fn from(e: UpdateError) -> Self {
+        crate::diag::log(|| format!("update: {e}"));
         match e {
-            UpdateError::Offline => Self::Offline,
-            UpdateError::Http(status) => Self::Http { status },
-            UpdateError::RefusedHost => Self::RefusedHost,
-            UpdateError::BadEnvelope => Self::BadEnvelope,
-            UpdateError::BadSignature => Self::BadSignature,
-            UpdateError::UnknownKey => Self::UnknownKey,
-            UpdateError::WrongChannel => Self::WrongChannel,
-            UpdateError::Replay => Self::Replay,
-            UpdateError::BadManifest => Self::BadManifest,
-            UpdateError::NotNewer => Self::NotNewer,
-            UpdateError::TooLarge => Self::TooLarge,
-            UpdateError::HashMismatch => Self::HashMismatch,
-            UpdateError::DiskFull => Self::DiskFull,
-            UpdateError::Io(_) => Self::Io,
+            UpdateError::Offline | UpdateError::Http(_) | UpdateError::RefusedHost | UpdateError::BadEnvelope => Self::Offline,
+            e if e.is_refusal() => Self::Refused,
+            UpdateError::NotNewer | UpdateError::TooLarge | UpdateError::HashMismatch => Self::BadFile,
+            UpdateError::DiskFull => Self::NoSpace,
+            _ => Self::Failed,
         }
     }
-}
-
-/// Whether a failure is a refusal (Settings shows the "couldn't confirm it came from Voxa" copy
-/// after a manual check).
-#[uniffi::export]
-pub fn update_failure_refused(failure: UpdateFailure) -> bool {
-    failure.refused()
 }
 
 impl From<voxa_update::Offer> for UpdateOffer {
@@ -144,7 +109,6 @@ fn check_with(origin: Origin, keys: &[(u8, [u8; 32])], abis: &[String], version_
     let m = client.check(keys, Channel::Android, highest_serial)?;
     let offer = policy::offer_android(&m, version_code, abis);
     Ok(UpdateCheck {
-        latest: offer.as_ref().map(|o| o.version.clone()).unwrap_or_default(),
         offer: offer.map(Into::into),
         serial: policy::next_serial(highest_serial, m.serial),
         paused: m.paused,
@@ -156,25 +120,33 @@ fn version_name(code: u64) -> String {
     format!("{}.{}.{}", code / 10000, code / 100 % 100, code % 100)
 }
 
-/// Check the published Android feed. `abis`: `Build.SUPPORTED_ABIS`, best first; the universal
-/// APK is the fallback. `version_code`: `BuildConfig.VERSION_CODE`. `highest_serial`: the
-/// highest serial verified before (0 the first time).
+/// Check the Android feed. `abis`: `Build.SUPPORTED_ABIS`, best first; the universal APK is the
+/// fallback. `version_code`: `BuildConfig.VERSION_CODE`. `highest_serial`: the highest serial
+/// verified before (0 the first time).
+///
+/// `test_feed` and `test_key` are for debug builds only: Kotlin passes them behind
+/// BuildConfig.DEBUG (so R8 drops that path from release) to read a LOCAL test feed signed with a
+/// TEST key. A test feed on plain http must be loopback or the emulator's host alias. With both
+/// None (always, in release) this is the published feed and the compiled keys.
 #[uniffi::export]
-pub fn update_check(abis: Vec<String>, version_code: u64, highest_serial: u64) -> Result<UpdateCheck, UpdateFailure> {
-    check_with(Origin::github(Channel::Android), &keys::KEYS, &abis, version_code, highest_serial)
+pub fn update_check(abis: Vec<String>, version_code: u64, highest_serial: u64, test_feed: Option<String>, test_key: Option<String>) -> Result<UpdateCheck, UpdateFailure> {
+    match (test_feed, test_key) {
+        (Some(url), Some(key)) => check_with(Origin::test(&url).ok_or(UpdateFailure::Offline)?, &[(1, test_key_bytes(&key)?)], &abis, version_code, highest_serial),
+        _ => check_with(Origin::github(Channel::Android), &keys::KEYS, &abis, version_code, highest_serial),
+    }
 }
 
-/// Download a verified offer into `dir` (filesDir/updates) on the published origin. Returns the
-/// staged file's path. Older staged files are deleted once it is in place.
+/// Download a verified offer into `dir` (filesDir/updates). Returns the staged file's path. Older
+/// staged files are deleted once it is in place. `test_feed`: as for [`update_check`].
 #[uniffi::export]
-pub fn update_download(offer: UpdateOffer, dir: String) -> Result<String, UpdateFailure> {
-    download_with(Origin::github(Channel::Android), &offer, &dir)
-}
-
-fn download_with(origin: Origin, offer: &UpdateOffer, dir: &str) -> Result<String, UpdateFailure> {
+pub fn update_download(offer: UpdateOffer, dir: String, test_feed: Option<String>) -> Result<String, UpdateFailure> {
+    let origin = match test_feed {
+        Some(url) => Origin::test(&url).ok_or(UpdateFailure::Offline)?,
+        None => Origin::github(Channel::Android),
+    };
     let client = Client::new(origin, &version_name(offer.version_code), PLATFORM)?;
-    let dir = std::path::Path::new(dir);
-    let path = client.download(&offer.into(), dir)?;
+    let dir = std::path::Path::new(&dir);
+    let path = client.download(&(&offer).into(), dir)?;
     voxa_update::stage::clean_except(dir, Some(&path));
     Ok(path.to_string_lossy().into_owned())
 }
@@ -185,41 +157,18 @@ pub fn update_verify_file(path: String, offer: UpdateOffer) -> Result<(), Update
     Ok(voxa_update::stage::verify_file(std::path::Path::new(&path), &(&offer).into())?)
 }
 
-/// Debug builds only (Kotlin calls this behind BuildConfig.DEBUG, so R8 drops it from release):
-/// a LOCAL test feed signed with a TEST key. `feed_url` must be loopback or the emulator's host
-/// alias when it is plain http.
-#[uniffi::export]
-pub fn update_check_test(feed_url: String, key_hex: String, abis: Vec<String>, version_code: u64, highest_serial: u64) -> Result<UpdateCheck, UpdateFailure> {
-    let origin = Origin::test(&feed_url).ok_or(UpdateFailure::RefusedHost)?;
-    check_with(origin, &[(1, test_key(&key_hex)?)], &abis, version_code, highest_serial)
-}
-
-/// Debug builds only: [`update_download`] from the LOCAL test feed's origin.
-#[uniffi::export]
-pub fn update_download_test(feed_url: String, offer: UpdateOffer, dir: String) -> Result<String, UpdateFailure> {
-    let origin = Origin::test(&feed_url).ok_or(UpdateFailure::RefusedHost)?;
-    download_with(origin, &offer, &dir)
-}
-
-fn test_key(hex: &str) -> Result<[u8; 32], UpdateFailure> {
-    voxa_update::hex_decode(hex.trim()).and_then(|v| v.try_into().ok()).ok_or(UpdateFailure::UnknownKey)
-}
-
-/// True while the compiled update keys are placeholders (no update can ever verify).
-#[uniffi::export]
-pub fn update_keys_are_placeholders() -> bool {
-    keys::placeholders()
+fn test_key_bytes(hex: &str) -> Result<[u8; 32], UpdateFailure> {
+    voxa_update::hex_decode(hex.trim()).and_then(|v| v.try_into().ok()).ok_or(UpdateFailure::Refused)
 }
 
 /// Verify a feed's bytes with one given key (instrumented tests: signature vectors through FFI).
 #[uniffi::export]
 pub fn update_verify_feed_bytes(feed: Vec<u8>, key_hex: String, abis: Vec<String>, version_code: u64, highest_serial: u64) -> Result<UpdateCheck, UpdateFailure> {
-    let key = test_key(&key_hex)?;
+    let key = test_key_bytes(&key_hex)?;
     let origin = Origin::github(Channel::Android);
     let m = voxa_update::verify_feed(&feed, &[(1, key), (2, key)], Channel::Android, highest_serial, &origin)?;
     let offer = policy::offer_android(&m, version_code, &abis);
     Ok(UpdateCheck {
-        latest: offer.as_ref().map(|o| o.version.clone()).unwrap_or_default(),
         offer: offer.map(Into::into),
         serial: policy::next_serial(highest_serial, m.serial),
         paused: m.paused,
@@ -237,16 +186,20 @@ mod tests {
     }
 
     #[test]
-    fn every_update_error_maps_to_a_failure() {
-        assert_eq!(UpdateFailure::from(UpdateError::Http(404)), UpdateFailure::Http { status: 404 });
-        assert!(UpdateFailure::from(UpdateError::BadSignature).refused());
-        assert!(!UpdateFailure::from(UpdateError::Offline).refused());
-        assert_eq!(UpdateFailure::from(UpdateError::Io("x".into())), UpdateFailure::Io);
+    fn every_update_error_maps_to_what_the_app_says() {
+        assert_eq!(UpdateFailure::from(UpdateError::Http(404)), UpdateFailure::Offline);
+        assert_eq!(UpdateFailure::from(UpdateError::RefusedHost), UpdateFailure::Offline);
+        for e in [UpdateError::BadSignature, UpdateError::UnknownKey, UpdateError::WrongChannel, UpdateError::Replay, UpdateError::BadManifest] {
+            assert_eq!(UpdateFailure::from(e), UpdateFailure::Refused);
+        }
+        assert_eq!(UpdateFailure::from(UpdateError::HashMismatch), UpdateFailure::BadFile);
+        assert_eq!(UpdateFailure::from(UpdateError::DiskFull), UpdateFailure::NoSpace);
+        assert_eq!(UpdateFailure::from(UpdateError::Io("x".into())), UpdateFailure::Failed);
     }
 
     #[test]
     fn a_test_feed_on_a_public_plain_host_is_refused() {
         let url = format!("{}://example.com/android.json", "http");
-        assert_eq!(update_check_test(url, "00".repeat(32), vec![], 10000, 0).unwrap_err(), UpdateFailure::RefusedHost);
+        assert_eq!(update_check(vec![], 10000, 0, Some(url), Some("00".repeat(32))).unwrap_err(), UpdateFailure::Offline);
     }
 }
