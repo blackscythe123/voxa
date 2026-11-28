@@ -133,6 +133,8 @@ pub(crate) struct Voxa {
     hotkey_paused_at: Option<Instant>,
     /// Draw nothing in the strip (while a rebuilt strip paints its first frame unseen).
     strip_blank: bool,
+    /// The strip window now in use (replaced when it is rebuilt).
+    strip_window: Option<gpui::AnyWindowHandle>,
     job_secs: HashMap<JobId, f32>,
     /// Last state published to the window process (live.json), to write only on change.
     published: Option<link::Live>,
@@ -301,6 +303,22 @@ impl Voxa {
                             os::cache_app_icon(fg, os::icon_owner(fg));
                             os::cache_site_icon(&target.app);
                             os::log(&format!("hotkey in {}", os::describe(fg)));
+                            // The strip's graphics may be gone (sleep, charger, display change):
+                            // build a fresh one now, hidden and without taking focus; it replaces
+                            // the old one as this dictation's strip.
+                            if os::take_woke() {
+                                let me = cx.entity();
+                                let old = v.strip_window;
+                                cx.spawn(async move |_, cx| {
+                                    match rebuild_strip(&me, old, cx).await {
+                                        Some(h) => {
+                                            let _ = me.update(cx, |v, _| v.strip_window = Some(h));
+                                        }
+                                        None => os::log("FAIL rebuilding the strip"),
+                                    }
+                                })
+                                .detach();
+                            }
                             // The mic was missing or refused (at startup, or one failed start):
                             // look again now, so plugging it in or allowing it works without a restart.
                             if matches!(v.flow.readiness().mic, Mic::Missing | Mic::Denied) && !fake_mode() {
@@ -388,6 +406,7 @@ impl Voxa {
             job_synced: HashMap::new(),
             hotkey_paused_at: None,
             strip_blank: false,
+            strip_window: None,
             job_secs: HashMap::new(),
             published: None,
             hotkey_result: None,
@@ -1405,11 +1424,12 @@ fn strip_options(origin: gpui::Point<gpui::Pixels>) -> WindowOptions {
     }
 }
 
-/// A fresh strip window for the same Voxa, replacing one whose graphics were lost in sleep.
-/// Never takes focus and never shows on screen: the window is created hidden, given the old
-/// strip's exact place, then shown without activation for one blank (transparent) frame so it
-/// has painted, and hidden again. Returns the new window.
-async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: gpui::AnyWindowHandle, cx: &mut gpui::AsyncApp) -> Option<gpui::AnyWindowHandle> {
+/// A fresh strip window for the same Voxa, replacing one whose graphics were lost (sleep, a
+/// charger change on a two-GPU laptop, a display change). Never takes focus: the window is
+/// created hidden, given the old strip's exact place, and shown without activation. Runs at a
+/// shortcut press, so it normally shows straight away with the new dictation; if nothing needs the
+/// strip by then, it paints one blank frame unseen and hides. Returns the new window.
+async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHandle>, cx: &mut gpui::AsyncApp) -> Option<gpui::AnyWindowHandle> {
     let rect = os::strip_rect();
     let target = cx.update(|cx| strip_origin(cx)).ok()?;
     let v = voxa.clone();
@@ -1426,31 +1446,38 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: gpui::AnyWindowHandle, cx
         })
     });
     let Ok(Ok(new)) = opened else {
-        // Keep using the old strip (and never leave it blank).
+        // Keep using the old strip.
         os::STRIP.store(old_strip, std::sync::atomic::Ordering::Relaxed);
         return None;
     };
-    let _ = voxa.update(cx, |v, cx| {
-        v.strip_blank = true;
-        cx.notify();
-    });
     if let Some((x, y, w, h)) = rect {
         os::move_strip(x, y, w, h);
     }
-    os::strip_visible(true);
-    cx.background_executor().timer(Duration::from_millis(500)).await;
-    let busy = voxa
-        .update(cx, |v, cx| {
-            v.strip_blank = false;
+    let wanted = voxa.update(cx, |v, _| !matches!(v.flow.state(), State::Idle)).unwrap_or(false);
+    if wanted {
+        os::strip_visible(true);
+    } else {
+        // Paint once, unseen, so it isn't blank when it's shown later.
+        let _ = voxa.update(cx, |v, cx| {
+            v.strip_blank = true;
             cx.notify();
-            !matches!(v.flow.state(), State::Idle)
-        })
-        .unwrap_or(false);
-    // A dictation started meanwhile keeps its (now drawn) strip.
-    if !busy {
-        os::strip_visible(false);
+        });
+        os::strip_visible(true);
+        cx.background_executor().timer(Duration::from_millis(500)).await;
+        let busy = voxa
+            .update(cx, |v, cx| {
+                v.strip_blank = false;
+                cx.notify();
+                !matches!(v.flow.state(), State::Idle)
+            })
+            .unwrap_or(false);
+        if !busy {
+            os::strip_visible(false);
+        }
     }
-    let _ = old.update(cx, |_, window, _| window.remove_window());
+    if let Some(old) = old {
+        let _ = old.update(cx, |_, window, _| window.remove_window());
+    }
     os::log("strip rebuilt");
     Some(new.into())
 }
@@ -1494,29 +1521,11 @@ fn main() {
         }
         // GPUI shows (and activates) the window once; give focus back and hide until the hotkey.
         os::give_focus_back(prev as _);
-        // After sleep, build the strip again (its graphics can be lost).
+        // Remember the strip window: it is rebuilt at a shortcut press after sleep, a power change
+        // or a display change (see os::take_woke).
         if let Ok(first) = &opened {
-            let mut current: gpui::AnyWindowHandle = (*first).into();
-            if let Ok(voxa) = first.entity(cx) {
-                cx.spawn(async move |cx| loop {
-                    cx.background_executor().timer(Duration::from_secs(1)).await;
-                    if !os::take_woke() {
-                        continue;
-                    }
-                    // Let the graphics driver settle, and never swap the strip while it's in use.
-                    cx.background_executor().timer(Duration::from_secs(2)).await;
-                    // Never swap the strip while it's in use.
-                    while os::strip_is_visible() {
-                        cx.background_executor().timer(Duration::from_millis(500)).await;
-                    }
-                    let _ = os::take_woke();
-                    match rebuild_strip(&voxa, current, cx).await {
-                        Some(h) => current = h,
-                        None => os::log("FAIL rebuilding the strip"),
-                    }
-                })
-                .detach();
-            }
+            let handle: gpui::AnyWindowHandle = (*first).into();
+            let _ = first.update(cx, |v, _, _| v.strip_window = Some(handle));
         }
         // Hide only after the first frame is painted, or the strip comes back blank later.
         let demo = std::env::var_os("VOXA_DEMO_RECORD").is_some() && fake_mode();

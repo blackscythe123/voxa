@@ -90,14 +90,24 @@ unsafe extern "system" fn no_activate_proc(
         return MA_NOACTIVATE as LRESULT;
     }
     // Woken from sleep or standby: the strip's graphics may be gone (it stayed invisible after
-    // Modern Standby), so main.rs rebuilds the window. Not on display changes: full-screen games
-    // change the display mode constantly, and rebuilding then pulled them out of focus.
+    // Modern Standby; a charger plugged in or out on a laptop with two graphics chips), so the
+    // strip is rebuilt. These messages only set a flag: the rebuild happens at the user's next
+    // shortcut press, never on its own (full-screen games change the display mode constantly).
     const WM_POWERBROADCAST: u32 = 0x0218;
+    const WM_DISPLAYCHANGE: u32 = 0x007E;
     const PBT_APMRESUMESUSPEND: usize = 0x0007;
+    const PBT_APMPOWERSTATUSCHANGE: usize = 0x000A;
     const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
-    if msg == WM_POWERBROADCAST && matches!(wparam, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC) {
-        WOKE.store(true, std::sync::atomic::Ordering::Relaxed);
-        log("strip needs rebuilding: woke from sleep");
+    let why = match (msg, wparam) {
+        (WM_POWERBROADCAST, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC) => Some("woke from sleep"),
+        (WM_POWERBROADCAST, PBT_APMPOWERSTATUSCHANGE) => Some("power source changed"),
+        (WM_DISPLAYCHANGE, _) => Some("display changed"),
+        _ => None,
+    };
+    if let Some(why) = why {
+        if !WOKE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            log(&format!("strip will be rebuilt at the next shortcut: {why}"));
+        }
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
@@ -324,11 +334,6 @@ pub fn take_woke() -> bool {
     WOKE.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Is the strip on screen right now?
-pub fn strip_is_visible() -> bool {
-    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
-    !h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) != 0 }
-}
 
 /// The strip's outer rectangle in physical pixels (x, y, width, height), frame included.
 pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {

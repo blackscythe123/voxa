@@ -208,9 +208,6 @@ pub static STRIP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsiz
 pub fn take_woke() -> bool {
     false
 }
-pub fn strip_is_visible() -> bool {
-    false
-}
 pub fn move_strip(_x: i32, _y: i32, _w: i32, _h: i32) {}
 pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
     None
