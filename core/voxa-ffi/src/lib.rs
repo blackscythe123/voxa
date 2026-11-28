@@ -13,7 +13,6 @@
 //!
 //! Never logs or returns cookie or token values.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -22,6 +21,7 @@ use voxa_chatgpt::{ChatGpt, Session as GptSession};
 use voxa_core::TranscribeError;
 use voxa_store::{History, Status, take};
 
+mod claims;
 mod diag;
 mod flow;
 mod nudge;
@@ -124,12 +124,9 @@ pub struct VoxaCore {
     /// Goes up on every new session and sign-out: work that started with an older session
     /// never writes anything back.
     session_gen: AtomicU64,
-    /// History entries being sent right now (background send, History's "Send now"), so one
-    /// dictation is never uploaded twice at once.
-    sending: Mutex<HashSet<u64>>,
 }
 
-/// Holds an entry in [`VoxaCore::sending`] until dropped.
+/// Holds an entry's send claim (see [`claims`]) until dropped.
 pub(crate) struct SendClaim<'a> {
     core: &'a VoxaCore,
     id: u64,
@@ -137,7 +134,7 @@ pub(crate) struct SendClaim<'a> {
 
 impl Drop for SendClaim<'_> {
     fn drop(&mut self) {
-        self.core.sending.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
+        claims::release(&self.core.dir, self.id);
     }
 }
 
@@ -154,12 +151,48 @@ impl VoxaCore {
         voxa_store::Settings::load(&self.dir)
     }
 
-    /// Claim an entry for sending; None when it is already being sent.
+    /// Claim an entry for sending; None when it is already being sent (by the keyboard, History's
+    /// "Send now" or the background send).
     pub(crate) fn claim(&self, id: u64) -> Option<SendClaim<'_>> {
-        let fresh = self.sending.lock().unwrap_or_else(|e| e.into_inner()).insert(id);
-        // Built only when claimed: a dropped claim removes the id again (and `then_some` would
-        // build and drop one while the lock is still held).
-        if fresh { Some(SendClaim { core: self, id }) } else { None }
+        // Built only when claimed: a dropped claim releases the entry.
+        if claims::try_claim(&self.dir, id) { Some(SendClaim { core: self, id }) } else { None }
+    }
+
+    /// Upload a prepared recording: in parts when it is longer than one upload may carry, the
+    /// text joined. Each part is uploaded once (see `ChatGpt::transcribe`).
+    fn upload(&self, session: &GptSession, p: &voxa_store::audio::Prepared) -> Result<String, TranscribeError> {
+        let mut texts: Vec<String> = Vec::new();
+        for part in p.parts() {
+            let wav = p.wav(part).ok_or(TranscribeError::Server(0))?;
+            let t = self.gpt().transcribe(session, wav, "recording.wav", "audio/wav")?;
+            if !t.trim().is_empty() {
+                texts.push(t.trim().to_string());
+            }
+        }
+        Ok(texts.join(" "))
+    }
+
+    /// Write how an upload ended into an entry still waiting for it. An entry deleted, or sent
+    /// another way meanwhile, is left as it is.
+    fn record_result(&self, entry_id: u64, result: &Result<String, TranscribeFailure>) {
+        let (status, text) = match result {
+            Ok(t) if t.trim().is_empty() => (Status::Failed(TranscribeError::Server(204).reason().into()), String::new()),
+            Ok(t) => (Status::Ready, t.clone()),
+            Err(e) => {
+                let e = TranscribeError::from(*e);
+                if e.needs_sign_in() {
+                    (Status::Waiting(notices::WAITING_FOR_SIGN_IN.into()), String::new())
+                } else if e == TranscribeError::Offline {
+                    (Status::Waiting(notices::WAITING_FOR_NETWORK.into()), String::new())
+                } else {
+                    (Status::Failed(e.reason().into()), String::new())
+                }
+            }
+        };
+        History::edit(&self.dir, move |h| {
+            let Some(now) = h.get(entry_id).filter(|e| e.status.is_unsent()).cloned() else { return (false, ()) };
+            (h.upsert(voxa_store::Entry { status, text, ..now }), ())
+        });
     }
 }
 
@@ -170,7 +203,7 @@ impl VoxaCore {
     pub fn new(data_dir: String) -> Arc<Self> {
         let dir = PathBuf::from(data_dir);
         let _ = std::fs::create_dir_all(&dir);
-        Arc::new(Self { dir, gpt: OnceLock::new(), session: Mutex::new(None), session_gen: AtomicU64::new(0), sending: Mutex::new(HashSet::new()) })
+        Arc::new(Self { dir, gpt: OnceLock::new(), session: Mutex::new(None), session_gen: AtomicU64::new(0) })
     }
 
     // ── session ──────────────────────────────────────────────────────────────
@@ -266,41 +299,60 @@ impl VoxaCore {
     // ── transcription ────────────────────────────────────────────────────────
 
     /// Turn a recording (16 kHz mono PCM16 file) into finished text for `app`: the silence check,
-    /// long-pause trimming, upload with up to three tries, Whisper's silence inventions dropped,
-    /// then filler removal and the word list. Blocking network call. Empty text means no speech.
+    /// long-pause trimming, upload (in parts for a take over 10 minutes; a connection that never
+    /// opened is tried again, audio is never sent twice), Whisper's silence inventions dropped,
+    /// then filler removal and the word list. Blocking network call. Empty text means the device
+    /// found no speech; a reply without a transcript is an error, never empty text.
     pub fn transcribe_recording(&self, pcm_path: String, app: String) -> Result<String, TranscribeFailure> {
         let Some(session) = self.session() else {
             diag::log(|| "transcribe: signed out, not sent".into());
             return Err(TranscribeFailure::SignedOut);
         };
+        let _reading = claims::reading(Path::new(&pcm_path));
         let pcm_bytes = std::fs::metadata(&pcm_path).map(|m| m.len()).unwrap_or(0);
         let Some(p) = voxa_store::audio::prepare_pcm(Path::new(&pcm_path)) else {
             diag::log(|| format!("transcribe: recording unreadable ({pcm_bytes} bytes)"));
             return Err(TranscribeFailure::Server { status: 0 });
         };
-        diag::log(|| format!("transcribe: recording {pcm_bytes} bytes, {:.1} s, peak rms {:.4}, upload {} bytes", p.secs, p.peak, p.wav.len()));
+        let parts = p.parts().len();
+        let peak = p.peak;
+        diag::log(|| format!("transcribe: recording {pcm_bytes} bytes, {:.1} s, peak rms {:.4}, upload {} bytes in {parts} part(s)", p.secs, p.peak, p.upload_bytes()));
         if p.is_silent() {
             diag::log(|| "transcribe: silent take, not sent".into());
             return Ok(String::new());
         }
-        let mut tries = 0;
         let t = std::time::Instant::now();
-        let result = take::with_retries(|| {
-            tries += 1;
-            self.gpt().transcribe(&session, p.wav.clone(), "recording.wav", "audio/wav")
-        });
+        let result = self.upload(&session, &p);
+        drop(p);
         diag::log(|| match &result {
-            Ok(text) => format!("transcribe: ok (HTTP 2xx) in {} ms, {tries} tries, text {}", t.elapsed().as_millis(), diag::text(text)),
-            Err(e) => format!("transcribe: failed {e:?} in {} ms, {tries} tries", t.elapsed().as_millis()),
+            Ok(text) => format!("transcribe: ok (HTTP 2xx) in {} ms, text {}", t.elapsed().as_millis(), diag::text(text)),
+            Err(e) => format!("transcribe: failed {e:?} in {} ms", t.elapsed().as_millis()),
         });
         let text = result?;
-        if take::invented_for_silence(&text, p.peak) {
+        if take::invented_for_silence(&text, peak) {
             diag::log(|| "transcribe: dropped Whisper's silence phrase".into());
             return Ok(String::new());
         }
         let out = voxa_store::finish_text(text, &self.dir, &app);
         diag::log(|| format!("transcribe: finished text {}", diag::text(&out)));
         Ok(out)
+    }
+
+    /// The keyboard's upload of a take ([`FlowEffect::Transcribe`]): [`Self::transcribe_recording`],
+    /// then the result is written into the take's History entry (`entry_id`, 0 for an incognito
+    /// take) here, so it is kept even if the keyboard went away meanwhile (a keyboard switch
+    /// mid-upload). The flow claimed the entry when it asked for this upload; the claim ends
+    /// here. `canned`: debug builds only, the text to use instead of calling ChatGPT.
+    pub fn transcribe_take(&self, entry_id: u64, pcm_path: String, app: String, canned: Option<String>) -> Result<String, TranscribeFailure> {
+        let result = match canned {
+            Some(t) => Ok(self.finish_text(t, app)),
+            None => self.transcribe_recording(pcm_path, app),
+        };
+        if entry_id != 0 {
+            self.record_result(entry_id, &result);
+            claims::release(&self.dir, entry_id);
+        }
+        result
     }
 
     /// History's "Send now" (waiting or failed) or "Write it out again". The result stays in
@@ -314,11 +366,15 @@ impl VoxaCore {
         };
         let entry = History::edit(&self.dir, |h| (false, h.get(entry_id).cloned()))?;
         let audio = entry.audio.clone()?.to_string_lossy().to_string();
-        let updated = match self.transcribe_recording(audio, entry.app.clone()) {
+        let updated = match self.transcribe_recording(audio, entry.app.clone()).map_err(TranscribeError::from) {
             Ok(t) if !t.trim().is_empty() => voxa_store::Entry { text: t, status: Status::Ready, ..entry },
-            Ok(_) => voxa_store::Entry { status: Status::Failed("No speech in the recording".into()), ..entry },
-            Err(e) if TranscribeError::from(e).needs_sign_in() => voxa_store::Entry { status: Status::Waiting("Sign in to send".into()), ..entry },
-            Err(_) => voxa_store::Entry { status: Status::Failed("Couldn't reach ChatGPT".into()), ..entry },
+            Ok(_) => voxa_store::Entry { status: Status::Failed(TranscribeError::Server(204).reason().into()), ..entry },
+            // A written entry ("Write it out again") keeps its words when the new try fails.
+            Err(_) if !entry.status.is_unsent() => entry,
+            Err(e) if e.needs_sign_in() => voxa_store::Entry { status: Status::Waiting(notices::WAITING_FOR_SIGN_IN.into()), ..entry },
+            // Still offline: it keeps waiting, and the background send picks it up.
+            Err(TranscribeError::Offline) => voxa_store::Entry { status: Status::Waiting(notices::WAITING_FOR_NETWORK.into()), ..entry },
+            Err(e) => voxa_store::Entry { status: Status::Failed(e.reason().into()), ..entry },
         };
         let u = updated.clone();
         // Deleted while it was being sent: leave it deleted.
@@ -326,9 +382,10 @@ impl VoxaCore {
         Some(updated.into())
     }
 
-    /// Whether an entry is being sent right now (background send or "Send now").
+    /// Whether an entry is being sent right now (the keyboard, History's "Send now" or the
+    /// background send).
     pub fn is_sending(&self, entry_id: u64) -> bool {
-        self.sending.lock().unwrap_or_else(|e| e.into_inner()).contains(&entry_id)
+        claims::is_claimed(&self.dir, entry_id)
     }
 
     /// One saved dictation, without pruning History (a read only; for notification buttons).
@@ -364,11 +421,15 @@ impl VoxaCore {
             haptics: settings.haptics,
             ..self.store_settings()
         };
-        s.save(&self.dir);
+        if let Err(e) = s.save(&self.dir) {
+            diag::log(|| format!("settings not saved: {:?}", e.kind()));
+        }
         let mut w = voxa_store::Words::load(&self.dir);
         if w.spoken_formatting != settings.spoken_formatting {
             w.spoken_formatting = settings.spoken_formatting;
-            w.save(&self.dir);
+            if let Err(e) = w.save(&self.dir) {
+                diag::log(|| format!("words not saved: {:?}", e.kind()));
+            }
         }
         History::edit(&self.dir, |h| (h.prune(s.keep_days, now_ms()) > 0, ()));
     }
@@ -378,15 +439,18 @@ impl VoxaCore {
     }
 
     pub fn set_words(&self, words: Words) {
-        voxa_store::Words::from(words).save(&self.dir);
+        if let Err(e) = voxa_store::Words::from(words).save(&self.dir) {
+            diag::log(|| format!("words not saved: {:?}", e.kind()));
+        }
     }
 
     /// Saved dictations matching `query` (text or app; empty for all), newest first, after dropping
     /// written-out ones older than the keep setting.
     pub fn history(&self, query: String) -> Vec<HistoryEntry> {
-        let keep = self.store_settings().keep_days;
+        // Settings that can't be read decide nothing: no pruning by a default keep setting.
+        let keep = voxa_store::Settings::load_checked(&self.dir).map(|s| s.keep_days);
         History::edit(&self.dir, |h| {
-            let pruned = h.prune(keep, now_ms()) > 0;
+            let pruned = keep.is_some_and(|keep| h.prune(keep, now_ms()) > 0);
             (pruned, h.search(&query).into_iter().cloned().map(HistoryEntry::from).collect())
         })
     }

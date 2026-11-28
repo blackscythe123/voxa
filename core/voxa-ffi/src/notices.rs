@@ -114,15 +114,33 @@ impl VoxaCore {
         self.waiting(WAITING_FOR_SIGN_IN).len() as u32
     }
 
-    /// Send one dictation that waits for the network (the Android background job). Unlike
-    /// `resend`, being offline or unreachable keeps it waiting, and an entry deleted meanwhile
-    /// stays deleted. `canned`: debug builds only, the text to use instead of calling ChatGPT.
+    /// History entries waiting for a sign-in, oldest first: sent by the background send once
+    /// the session is good again (also takes from earlier runs, and ones the user dismissed).
+    pub fn waiting_for_sign_in_ids(&self) -> Vec<u64> {
+        self.waiting(WAITING_FOR_SIGN_IN)
+    }
+
+    /// Bytes of recordings for these entries: the background send asks for an unmetered network
+    /// when this is large, so a long take isn't sent again and again over mobile data.
+    pub fn audio_bytes_of(&self, entry_ids: Vec<u64>) -> u64 {
+        History::edit(&self.dir, |h| {
+            let n = entry_ids.iter().filter_map(|id| h.get(*id)?.audio.as_ref().and_then(|a| std::fs::metadata(a).ok()).map(|m| m.len())).sum();
+            (false, n)
+        })
+    }
+
+    /// Send one dictation that waits for the network or a sign-in (the Android background job).
+    /// Being offline always keeps it waiting (also on the user's Retry: a flaky connection never
+    /// turns a waiting take into a failed one); unreachable keeps it waiting unless `give_up`. An
+    /// entry deleted meanwhile stays deleted. `canned`: debug builds only, the text to use
+    /// instead of calling ChatGPT.
     pub fn send_waiting(&self, entry_id: u64, give_up: bool, canned: Option<String>) -> SendOutcome {
         let Some(_claim) = self.claim(entry_id) else {
             diag::log(|| format!("background send {entry_id}: already being sent"));
             return SendOutcome::Busy;
         };
-        let eligible = |s: &Status| matches!(s, Status::Waiting(r) if r == WAITING_FOR_NETWORK) || (give_up && matches!(s, Status::Failed(_)));
+        let eligible =
+            |s: &Status| matches!(s, Status::Waiting(r) if r == WAITING_FOR_NETWORK || r == WAITING_FOR_SIGN_IN) || (give_up && matches!(s, Status::Failed(_)));
         let Some(entry) = History::edit(&self.dir, |h| (false, h.get(entry_id).filter(|e| eligible(&e.status)).cloned())) else {
             return SendOutcome::Gone;
         };
@@ -132,20 +150,31 @@ impl VoxaCore {
             None => self.transcribe_recording(audio.to_string_lossy().to_string(), entry.app.clone()).map_err(TranscribeError::from),
         };
         diag::log(|| format!("background send {entry_id}: {}", match &result { Ok(t) if t.trim().is_empty() => "no speech".to_string(), Ok(_) => "ok".into(), Err(e) => format!("{e:?}") }));
-        let (status, text, outcome) = match result {
-            Ok(t) if t.trim().is_empty() => (Status::Failed("No speech in the recording".into()), String::new(), SendOutcome::NoSpeech),
-            Ok(t) => (Status::Ready, t, SendOutcome::Sent { app: entry.app.clone() }),
-            Err(e) if e.needs_sign_in() => (Status::Waiting(WAITING_FOR_SIGN_IN.into()), String::new(), SendOutcome::NeedsSignIn),
-            Err(TranscribeError::Offline) if !give_up => return SendOutcome::Offline,
-            Err(e) if give_up => (Status::Failed("Couldn't reach ChatGPT".into()), String::new(), SendOutcome::Unreachable { blocked: e == TranscribeError::Blocked }),
-            Err(e) => return SendOutcome::Unreachable { blocked: e == TranscribeError::Blocked },
-        };
+        let (outcome, write) = background_result(result, give_up, &entry.app);
+        let Some((status, text)) = write else { return outcome };
         History::edit(&self.dir, move |h| {
             // Deleted or sent another way meanwhile: leave it.
             let Some(now) = h.get(entry_id).filter(|e| eligible(&e.status)).cloned() else { return (false, ()) };
             (h.upsert(voxa_store::Entry { status, text, ..now }), ())
         });
         outcome
+    }
+}
+
+/// How one background send ended, and what to write into the entry (None: leave it as it is).
+/// Being offline always keeps a take waiting, even on the user's Retry (`give_up`): a flaky
+/// connection never turns waiting takes into failed ones.
+pub(crate) fn background_result(result: Result<String, TranscribeError>, give_up: bool, app: &str) -> (SendOutcome, Option<(Status, String)>) {
+    match result {
+        Ok(t) if t.trim().is_empty() => (SendOutcome::NoSpeech, Some((Status::Failed(TranscribeError::Server(204).reason().into()), String::new()))),
+        Ok(t) => (SendOutcome::Sent { app: app.to_string() }, Some((Status::Ready, t))),
+        Err(e) if e.needs_sign_in() => (SendOutcome::NeedsSignIn, Some((Status::Waiting(WAITING_FOR_SIGN_IN.into()), String::new()))),
+        Err(TranscribeError::Offline) => (SendOutcome::Offline, None),
+        Err(e) if give_up => {
+            let blocked = e == TranscribeError::Blocked;
+            (SendOutcome::Unreachable { blocked }, Some((Status::Failed(e.reason().into()), String::new())))
+        }
+        Err(e) => (SendOutcome::Unreachable { blocked: e == TranscribeError::Blocked }, None),
     }
 }
 
@@ -180,5 +209,16 @@ mod tests {
         // Sent: a late second run finds nothing to send.
         assert_eq!(core.send_waiting(42, false, Some("hello".into())), SendOutcome::Gone);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The user's Retry on a flaky connection: offline keeps every take waiting (to be sent
+    /// automatically), and only a real failure becomes "not sent".
+    #[test]
+    fn a_retry_while_offline_never_marks_a_waiting_take_failed() {
+        assert_eq!(background_result(Err(TranscribeError::Offline), true, "Notes"), (SendOutcome::Offline, None));
+        let (o, w) = background_result(Err(TranscribeError::Server(503)), true, "Notes");
+        assert_eq!(o, SendOutcome::Unreachable { blocked: false });
+        assert_eq!(w, Some((Status::Failed("ChatGPT had a problem. Try again later".into()), String::new())));
+        assert_eq!(background_result(Err(TranscribeError::Timeout), false, "Notes"), (SendOutcome::Unreachable { blocked: false }, None));
     }
 }
