@@ -292,6 +292,7 @@ UpdateSafetyTest.
 | N12 the update notification was public on the lock screen | Android UpdateNotificationTest::a4_has_the_title_and_the_public_lock_screen_text (VISIBILITY_PRIVATE) | emulator |
 | N15/N16 k.pem left on failure; no empty-secret check on desktop | lint:release-feed-guard | automated |
 | N20 greeting ledger written with a bare fs::write | desktop/app/src/greet.rs tests::the_greeting_ledger_is_written_atomically | automated |
+| N4 ignored manual tests read the real desktop session | core/voxa-chatgpt lib.rs manual_gate_tests::manual_tests_never_read_the_real_session_without_the_env_flag (VOXA_MANUAL_REAL_SESSION=1) | automated |
 
 ## Open items found by this audit
 
