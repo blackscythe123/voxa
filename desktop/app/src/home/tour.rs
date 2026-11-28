@@ -217,7 +217,7 @@ impl Home {
             Step::SignIn => {
                 let signing = self.voxa.read(cx).signing_in;
                 extra.push(if signing {
-                    div().text_size(px(13.)).text_color(rgb(MUTED)).child("Finish in the ChatGPT window...").into_any_element()
+                    div().text_size(px(13.)).text_color(rgb(p().muted)).child("Finish in the ChatGPT window...").into_any_element()
                 } else {
                     wbtn("tour-signin", "Sign in to ChatGPT", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.sign_in(cx)))).into_any_element()
                 });
@@ -226,7 +226,7 @@ impl Home {
                 let levels: Vec<f32> = self.voxa.read(cx).levels.iter().copied().collect();
                 let tick = levels.len().saturating_sub(1);
                 extra.push(div().h(px(40.)).flex().items_center().child(crate::ink_line_faded(levels, tick, false)).into_any_element());
-                extra.push(div().text_size(px(12.)).text_color(rgb(MUTED)).child(self.voxa.read(cx).mic_name.clone()).into_any_element());
+                extra.push(div().text_size(px(12.)).text_color(rgb(p().muted)).child(self.voxa.read(cx).mic_name.clone()).into_any_element());
                 if waited >= 6 && !advancing {
                     extra.push(
                         div()
@@ -241,7 +241,7 @@ impl Home {
                 }
             }
             Step::Shortcut if waited >= 8 => {
-                extra.push(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Nothing yet? Another app may use this shortcut. You can change it in Settings later.").into_any_element());
+                extra.push(div().text_size(px(12.)).text_color(rgb(p().muted)).child("Nothing yet? Another app may use this shortcut. You can change it in Settings later.").into_any_element());
             }
             Step::Done => {
                 let on = self.tour.as_ref().map(|t| t.autostart).unwrap_or(true);
@@ -272,15 +272,15 @@ impl Home {
             Step::Done => Some("Finish"),
             _ => None,
         };
-        let progress = div().flex().gap(px(3.)).children((0..ORDER.len()).map(|i| div().flex_1().h(px(3.)).rounded(px(2.)).bg(rgb(if i <= n { INK } else { 0xE7E1DA }))));
+        let progress = div().flex().gap(px(3.)).children((0..ORDER.len()).map(|i| div().flex_1().h(px(3.)).rounded(px(2.)).bg(rgb(if i <= n { p().accent } else { p().track_strong }))));
         let footer = div()
             .mt(px(14.))
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(div().flex_1().text_size(px(12.)).text_color(rgb(MUTED)).child(format!("{} of {}", n + 1, ORDER.len())))
+            .child(div().flex_1().text_size(px(12.)).text_color(rgb(p().muted)).child(format!("{} of {}", n + 1, ORDER.len())))
             .when(step != Step::Done, |d| {
-                d.child(div().id("tour-skip").text_size(px(13.)).text_color(rgb(MUTED)).cursor_pointer().hover(|s| s.text_color(rgb(INK))).child("Skip tour").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.tour_finish(true, cx))))
+                d.child(div().id("tour-skip").text_size(px(13.)).text_color(rgb(p().muted)).cursor_pointer().hover(|s| s.text_color(rgb(p().accent))).child("Skip tour").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.tour_finish(true, cx))))
             })
             .children(next_label.map(|l| {
                 wbtn("tour-next", l, l != "Skip").on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -292,20 +292,20 @@ impl Home {
             .w(px(360.))
             .p(px(18.))
             .rounded(px(10.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(p().card))
             .border_1()
-            .border_color(rgba(0x0000001A))
+            .border_color(rgba(p().line_a))
             .shadow_lg()
             .font_family("Segoe UI")
             .child(progress)
-            .child(div().mt(px(14.)).flex().items_center().gap(px(8.)).when(advancing, |d| d.child(icon(I_CHECK, 14.).text_color(rgb(0x0F7B0F)))).child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).child(title)))
-            .child(div().mt(px(6.)).text_size(px(14.)).line_height(px(20.)).text_color(rgb(0x3D3D3D)).child(body))
+            .child(div().mt(px(14.)).flex().items_center().gap(px(8.)).when(advancing, |d| d.child(icon(I_CHECK, 14.).text_color(rgb(p().good)))).child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).child(title)))
+            .child(div().mt(px(6.)).text_size(px(14.)).line_height(px(20.)).text_color(rgb(p().body)).child(body))
             .when(!extra.is_empty(), |d| d.child(div().mt(px(12.)).flex().flex_col().gap(px(8.)).children(extra)))
-            .when(waiting, |d| d.child(div().mt(px(10.)).flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(rgb(INK)).child(icon('\u{E916}', 11.)).child("Waiting for you")))
+            .when(waiting, |d| d.child(div().mt(px(10.)).flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(rgb(p().accent)).child(icon('\u{E916}', 11.)).child("Waiting for you")))
             .child(footer);
 
         // Dim everything but the target; the target stays clickable.
-        let dim = rgba(0x1A12_0C8C);
+        let dim = rgba(p().scrim_a);
         let block = |x: f32, y: f32, w: f32, h: f32| div().absolute().left(px(x)).top(px(y)).w(px(w.max(0.))).h(px(h.max(0.))).bg(dim).occlude();
         let mut layer = div().absolute().top_0().left_0().w(px(vw)).h(px(vh));
         let (card_x, card_y);
@@ -319,7 +319,7 @@ impl Home {
                     .child(block(0., y + h, vw, vh - y - h))
                     .child(block(0., y, x, h))
                     .child(block(x + w, y, vw - x - w, h))
-                    .child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).rounded(px(8.)).border_2().border_color(rgb(INK)));
+                    .child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).rounded(px(8.)).border_2().border_color(rgb(p().accent)));
                 // To the right if it fits (the menu), else below, else above; never over the target.
                 let (cw, ch) = (360., 290.);
                 if x + w + 16. + cw <= vw - 16. && w < 400. {

@@ -19,7 +19,12 @@ use wry::{WebContext, WebViewBuilder};
 const LOGIN_URL: &str = "https://chatgpt.com/auth/login";
 const SESSION_COOKIE: &str = "__Secure-next-auth.session-token";
 
+/// Voxa's data folder, or VOXA_DATA: a test copy of the app (which passes its environment on to
+/// this window) must save its sign-in to its own folder, never over the real one.
 fn data_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("VOXA_DATA") {
+        return d.into();
+    }
     let root = if cfg!(target_os = "macos") {
         PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join("Library").join("Application Support")
     } else {

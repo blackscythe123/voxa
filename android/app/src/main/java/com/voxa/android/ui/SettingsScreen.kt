@@ -91,6 +91,8 @@ fun SettingsScreen(activity: MainActivity) {
             }
         }
 
+        BirthdayCard(activity)
+
         VCard(Modifier.padding(bottom = 16.dp), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
             OptionRow(R.drawable.ic_keyboard, "Voxa keyboard", onClick = { if (!enabled) activity.openKeyboardSettings() else activity.showKeyboardPicker() }) {
                 OptionValue(

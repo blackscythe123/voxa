@@ -1,0 +1,48 @@
+# What `python tools/lint/run.py --self-test` must find in fixtures/bad: count, rule, path.
+# Exact counts: a check that stops catching a "Bad" line, or starts flagging a "Good" one, fails.
+# The fixture files mark each line Bad or Good; keep this list in step when you add a case.
+
+# 1. contrast
+7 contrast desktop/app/src/theme.rs                                  # muted AAA x2, brand sepia, dark accent x3, literal badge
+8 contrast android/app/src/main/java/com/voxa/android/ui/Theme.kt    # light muted AAA x3, text40 icons x2, dark dangerText x3
+3 contrast android/app/src/main/java/com/voxa/android/ime/KbColors.kt
+4 contrast android/app/src/main/java/com/voxa/android/ime/KeyboardLook.kt
+
+# 2. copy (EmojiPanel.kt is exempt and must stay at 0)
+1 copy-emoji desktop/app/src/ui.rs
+2 copy-dash desktop/app/src/ui.rs
+1 copy-case desktop/app/src/ui.rs
+1 copy-occasion desktop/app/src/ui.rs
+1 copy-emoji android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+1 copy-dash android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+1 copy-case android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+1 copy-occasion android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+
+# 3. privacy
+3 privacy-log desktop/app/src/ui.rs
+2 privacy-log android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+1 privacy-notify core/voxa-core/src/notices.rs
+1 privacy-notify android/app/src/main/java/com/voxa/android/notify/Notifier.kt
+
+# 4. focus
+3 focus-steal desktop/app/src/ui.rs
+1 focus-notify desktop/app/src/ui.rs
+
+# 5. android (the APK is a sparse file just over budget, made by the self-test)
+1 android-size APK
+3 android-deps android/app/build.gradle.kts
+2 android-workmanager android/app/build.gradle.kts
+1 android-workmanager android/app/src/main/java/com/voxa/android/notify/Notifier.kt
+
+# 6. isolation
+1 isolation-env desktop/app/src/ui.rs
+1 isolation-env desktop/signin/src/main.rs
+1 isolation-test-hook desktop/app/src/ui.rs
+
+# 7. release
+1 release-latest docs/release-android.md
+
+# 8. robustness
+1 robust-case-slice desktop/app/src/ui.rs
+2 robust-unwrap core/voxa-demo/src/lib.rs
+2 robust-atomic-write desktop/app/src/ui.rs                         # direct settings.json write, fixed temp name

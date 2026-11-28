@@ -229,11 +229,58 @@ pub struct Settings {
     pub keep_on_clipboard: bool,
     /// Days to keep recordings (the text stays); 0 keeps them as long as the dictation.
     pub keep_audio_days: u32,
+    /// Light, dark, or whatever the system uses (the default).
+    pub appearance: Appearance,
+}
+
+/// The "Appearance" choice in Settings. Stored as "system", "light" or "dark"; anything else
+/// (a newer or damaged value) reads as System, so the rest of the settings still load.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Appearance {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    pub const ALL: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
+    pub fn label(self) -> &'static str {
+        match self {
+            Appearance::System => "Use system setting",
+            Appearance::Light => "Light",
+            Appearance::Dark => "Dark",
+        }
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Appearance::System => "system",
+            Appearance::Light => "light",
+            Appearance::Dark => "dark",
+        }
+    }
+}
+
+impl Serialize for Appearance {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.key())
+    }
+}
+
+impl<'de> Deserialize<'de> for Appearance {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Ok(match v.as_str() {
+            Some("light") => Appearance::Light,
+            Some("dark") => Appearance::Dark,
+            _ => Appearance::System,
+        })
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0 }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0, appearance: Appearance::System }
     }
 }
 
@@ -723,6 +770,26 @@ mod tests {
         // Older files without the new fields still load.
         std::fs::write(dir.join("settings.json"), r#"{"remove_fillers": true}"#).unwrap();
         assert_eq!(Settings::load(&dir).keep_days, 30);
+        assert_eq!(Settings::load(&dir).appearance, Appearance::System, "old files follow the system");
+    }
+
+    #[test]
+    fn appearance_round_trips_and_unknown_values_follow_the_system() {
+        let dir = std::env::temp_dir().join(format!("voxa-appearance-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for a in Appearance::ALL {
+            let s = Settings { appearance: a, ..Settings::default() };
+            s.save(&dir);
+            assert_eq!(Settings::load(&dir).appearance, a);
+        }
+        let json = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(json.contains(r#""appearance": "dark""#), "{json}");
+        std::fs::write(dir.join("settings.json"), r#"{"keep_days": 7, "appearance": "sepia"}"#).unwrap();
+        let s = Settings::try_load(&dir).unwrap().unwrap();
+        assert_eq!((s.keep_days, s.appearance), (7, Appearance::System), "an unknown value keeps the other settings");
+        std::fs::write(dir.join("settings.json"), r#"{"appearance": 3}"#).unwrap();
+        assert_eq!(Settings::try_load(&dir).unwrap().unwrap().appearance, Appearance::System);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
