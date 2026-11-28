@@ -11,7 +11,7 @@ const LEDGER_FILE: &str = "greeting.txt";
 
 /// Only with a separate VOXA_DATA folder (tests).
 fn test_env(name: &str) -> Option<String> {
-    std::env::var_os("VOXA_DATA")?;
+    crate::test_hooks().then_some(())?;
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 

@@ -126,6 +126,7 @@ $t = "$env:TEMP\voxa-notify-test"; New-Item -ItemType Directory -Force "$t\data"
 '{"cookie_header":"x=1","user_agent":"test"}' | Set-Content "$t\data\session.json"
 '{"onboarded":true,"imported_old_voxa":true}' | Set-Content "$t\data\settings.json"
 $env:VOXA_DATA = "$t\data"
+$env:VOXA_TEST = "1"                              # test hooks: also needed in a release build
 $env:VOXA_TEST_SESSION = "valid,expired,expired"   # answers of the next session checks
 $env:VOXA_TEST_RECHECK_SECS = "15"                 # instead of 10 minutes
 $env:VOXA_TEST_CONFIRM_SECS = "3"                  # instead of 2 minutes

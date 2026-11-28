@@ -67,12 +67,23 @@ const RECHECK: Duration = Duration::from_secs(600);
 /// false "signed out" is worse than a late one.
 const CONFIRM_EXPIRY: Duration = Duration::from_secs(120);
 
+/// Whether the VOXA_TEST_* hooks are on: only for a test copy with its own data folder
+/// (VOXA_DATA), and only in a debug build or with VOXA_TEST=1 as well, so a release build run
+/// with a data folder can never be steered by stray environment variables.
+pub(crate) fn test_hooks() -> bool {
+    test_hooks_from(std::env::var_os("VOXA_DATA").is_some(), cfg!(debug_assertions), std::env::var("VOXA_TEST").ok().as_deref())
+}
+
+fn test_hooks_from(own_data: bool, debug: bool, flag: Option<&str>) -> bool {
+    own_data && (debug || flag == Some("1"))
+}
+
 /// Test only (with a separate VOXA_DATA folder): VOXA_TEST_SESSION=valid,expired,expired makes
 /// the next session checks answer that, in order, without asking ChatGPT, and
 /// VOXA_TEST_CONFIRM_SECS shortens the confirmation wait. Used to test the sign-in toast.
 fn test_session_answer() -> Option<Session> {
     static SEQ: std::sync::Mutex<Option<VecDeque<String>>> = std::sync::Mutex::new(None);
-    std::env::var_os("VOXA_DATA")?;
+    test_hooks().then_some(())?;
     let mut g = SEQ.lock().unwrap_or_else(|e| e.into_inner());
     let q = g.get_or_insert_with(|| std::env::var("VOXA_TEST_SESSION").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
     match q.pop_front()?.as_str() {
@@ -84,11 +95,11 @@ fn test_session_answer() -> Option<Session> {
 
 /// Test only (VOXA_TEST_RECHECK_SECS, with VOXA_DATA): check the session more often than every 10 minutes.
 fn recheck_every() -> Duration {
-    std::env::var("VOXA_TEST_RECHECK_SECS").ok().filter(|_| std::env::var_os("VOXA_DATA").is_some()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(RECHECK)
+    std::env::var("VOXA_TEST_RECHECK_SECS").ok().filter(|_| test_hooks()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(RECHECK)
 }
 
 fn confirm_after() -> Duration {
-    std::env::var("VOXA_TEST_CONFIRM_SECS").ok().filter(|_| std::env::var_os("VOXA_DATA").is_some()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(CONFIRM_EXPIRY)
+    std::env::var("VOXA_TEST_CONFIRM_SECS").ok().filter(|_| test_hooks()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(CONFIRM_EXPIRY)
 }
 
 fn fake_mode() -> bool {
@@ -1900,7 +1911,7 @@ fn run_window(tour: bool, splash: bool) {
 /// folder): a flow of its own, moved into that state with its effects thrown away, so no
 /// microphone opens and nothing is sent or pasted. The strip only draws it.
 fn strip_preview() -> Option<Flow> {
-    std::env::var_os("VOXA_DATA")?;
+    test_hooks().then_some(())?;
     let kind = std::env::var("VOXA_TEST_STRIP").ok()?;
     let session = if kind == "signed-out" { Session::Expired } else { Session::Valid };
     let mut f = Flow::new(Readiness { session, network: Network::Up, mic: Mic::Granted });
@@ -2135,7 +2146,7 @@ fn main() {
             // Test only (VOXA_TEST_DICTATE=<seconds>, and only with a separate VOXA_DATA folder):
             // start a real take without a key press, then CANCEL it, so nothing is ever sent or
             // pasted. Used to test the recording path (full disk, mic trouble) unattended.
-            let test_secs = std::env::var("VOXA_TEST_DICTATE").ok().and_then(|s| s.parse::<u64>().ok()).filter(|_| std::env::var_os("VOXA_DATA").is_some());
+            let test_secs = std::env::var("VOXA_TEST_DICTATE").ok().and_then(|s| s.parse::<u64>().ok()).filter(|_| test_hooks());
             if let (Some(secs), Ok(handle)) = (test_secs, opened.as_ref()) {
                 cx.background_executor().timer(Duration::from_millis(1500)).await;
                 let fg = os::foreground();
@@ -2159,7 +2170,7 @@ fn main() {
                 .ok()
                 .and_then(|s| s.split(',').map(|x| x.trim().parse::<f32>().ok()).collect::<Option<Vec<f32>>>())
                 .map(|v| if v.len() == 1 { vec![v[0]; 3] } else { v })
-                .filter(|v| v.len() == 3 && std::env::var_os("VOXA_DATA").is_some());
+                .filter(|v| v.len() == 3 && test_hooks());
             if let (Some(secs), Ok(handle)) = (pause_secs, opened.as_ref()) {
                 let wait = |i: usize| Duration::from_secs_f32(secs[i].max(0.0));
                 let report = |v: &Voxa, at: &str| {
@@ -2217,6 +2228,19 @@ fn main() {
         })
         .detach();
     });
+}
+
+#[cfg(test)]
+mod test_hook_tests {
+    #[test]
+    fn test_hooks_need_a_test_folder_and_a_debug_build_or_voxa_test() {
+        use super::test_hooks_from as on;
+        assert!(!on(false, true, Some("1")), "never without a separate data folder");
+        assert!(!on(true, false, None), "a release build with only VOXA_DATA takes no test hooks");
+        assert!(!on(true, false, Some("yes")));
+        assert!(on(true, false, Some("1")));
+        assert!(on(true, true, None));
+    }
 }
 
 #[cfg(test)]

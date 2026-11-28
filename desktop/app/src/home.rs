@@ -799,7 +799,7 @@ impl Home {
         }
         // Warn before a recording fails: under 500 MB free on the disk Voxa saves to.
         // Test only (with a separate VOXA_DATA folder): VOXA_TEST_DISK_FREE=<bytes> pretends the disk is that full.
-        let test_free = std::env::var("VOXA_TEST_DISK_FREE").ok().and_then(|v| v.parse::<u64>().ok()).filter(|_| std::env::var_os("VOXA_DATA").is_some());
+        let test_free = std::env::var("VOXA_TEST_DISK_FREE").ok().and_then(|v| v.parse::<u64>().ok()).filter(|_| crate::test_hooks());
         if let Some(free) = test_free.or_else(|| crate::os::disk_free_bytes(&crate::data_dir())).filter(|f| *f < 500_000_000) {
             if !self.dismissed.contains(&"disk") {
                 let ours = self.voxa.read(cx).history.audio_bytes() as f64 / 1e6;

@@ -5,7 +5,8 @@ real user's data, and test hooks only work in a test copy.
                        APPDATA / LOCALAPPDATA variables, `dirs::*_dir()`, `app_data_root()`) must also
                        check VOXA_DATA, unless it is on ALLOWED. The old app's folder (electron_dir) is
                        only reached through app_data_root(), so it is covered too.
-  isolation-test-hook  every read of a VOXA_TEST_* variable sits in a function that checks VOXA_DATA.
+  isolation-test-hook  every read of a VOXA_TEST_* variable sits in a function that checks VOXA_DATA
+                       (directly, or through test_hooks()).
 """
 
 from __future__ import annotations
@@ -22,7 +23,8 @@ REAL_DIRS = re.compile(
     r"|\bdirs(?:_next)?::(?:home|data|data_local|config|cache|document|desktop)_dir\s*\("
     r"|\b(app_data_root)\s*\(")
 TEST_HOOK = re.compile(r"env::var(?:_os)?\(\s*\"(VOXA_TEST_\w+)\"\s*\)")
-GUARD = re.compile(r"\"VOXA_DATA\"")
+# A VOXA_DATA check, or test_hooks() (VOXA_DATA plus a debug build or VOXA_TEST=1).
+GUARD = re.compile(r"\"VOXA_DATA\"|(?<!fn )\btest_hooks\(\)")
 
 # (file, function): why it may reach a real folder without checking VOXA_DATA.
 ALLOWED = {
