@@ -59,14 +59,25 @@ pub fn init() -> bool {
 /// The name and icon Windows shows on Voxa's toasts.
 fn register() -> std::io::Result<()> {
     let icon = crate::data_dir().join("notify-icon.png");
-    if !icon.exists() {
-        std::fs::write(&icon, include_bytes!("../assets/icon.png"))?;
+    if refresh_icon(&icon, include_bytes!("../assets/icon.png"))? {
+        crate::os::log("notification icon written");
     }
     let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
     let (key, _) = hkcu.create_subkey(format!(r"Software\Classes\AppUserModelId\{}", aumid()))?;
     key.set_value("DisplayName", &if aumid() == "Voxa.Desktop" { "Voxa" } else { "Voxa (test)" })?;
     key.set_value("IconUri", &icon.to_string_lossy().to_string())?;
     Ok(())
+}
+
+/// The toast icon file holds exactly `want`: rewritten (whole or not at all) when it is missing or
+/// differs, so a new app icon reaches the toasts after an update; left alone when it matches.
+/// True when it was written.
+fn refresh_icon(path: &std::path::Path, want: &[u8]) -> std::io::Result<bool> {
+    if std::fs::read(path).is_ok_and(|have| have.len() == want.len() && have == want) {
+        return Ok(false);
+    }
+    crate::store::write_atomic(path, want)?;
+    Ok(true)
 }
 
 fn esc(s: &str) -> String {
@@ -167,6 +178,30 @@ pub fn ask_permission() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::refresh_icon;
+
+    /// After the 1.0.0 icon change toasts kept the old picture: the file was written only when missing.
+    #[test]
+    fn an_old_toast_icon_is_replaced_and_a_current_one_is_left_alone() {
+        let dir = std::env::temp_dir().join(format!("voxa-icon-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("notify-icon.png");
+        let new_icon = b"new icon bytes".as_slice();
+        assert!(refresh_icon(&path, new_icon).unwrap(), "a missing icon is written");
+        assert_eq!(std::fs::read(&path).unwrap(), new_icon);
+        std::fs::write(&path, b"old icon").unwrap();
+        assert!(refresh_icon(&path, new_icon).unwrap(), "an old icon is replaced");
+        assert_eq!(std::fs::read(&path).unwrap(), new_icon);
+        std::fs::write(&path, b"new icon byteZ").unwrap();
+        assert!(refresh_icon(&path, new_icon).unwrap(), "same length, different bytes: replaced");
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(!refresh_icon(&path, new_icon).unwrap(), "an identical icon is left alone");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// "RefCell already borrowed" at every start: toast calls never run on the UI thread, where
     /// COM's modal loop re-entered GPUI. Every WinRT toast call goes through off_ui.
     #[test]
