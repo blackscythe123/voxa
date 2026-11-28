@@ -11,7 +11,21 @@ static START: OnceLock<Instant> = OnceLock::new();
 pub fn log_path() -> std::path::PathBuf {
     match std::env::var_os("VOXA_LOG") {
         Some(p) => p.into(),
+        // `cargo test` (the pre-push hook) never writes into the owner's real log.
+        None if cfg!(test) => std::env::temp_dir().join("voxa-desktop-cargo-test.log"),
         None => crate::data_dir().join("voxa-desktop.log"),
+    }
+}
+
+#[cfg(test)]
+mod log_path_tests {
+    #[test]
+    fn cargo_test_never_writes_the_real_desktop_log() {
+        if std::env::var_os("VOXA_LOG").is_none() {
+            let p = super::log_path();
+            assert!(p.starts_with(std::env::temp_dir()), "{p:?}");
+            assert!(!p.starts_with(crate::data_dir()) || crate::data_dir().starts_with(std::env::temp_dir()));
+        }
     }
 }
 
