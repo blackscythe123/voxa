@@ -33,8 +33,9 @@ fn save_session(dir: &std::path::Path, bytes: &[u8]) -> bool {
     true
 }
 
+/// Voxa's data folder, or VOXA_DATA: a test copy of the app (which passes its environment on to
+/// this window) must save its sign-in to its own folder, never over the real one.
 fn data_dir() -> PathBuf {
-    // A test copy of Voxa (VOXA_DATA) must never replace the real app's sign-in.
     if let Some(d) = std::env::var_os("VOXA_DATA") {
         return d.into();
     }

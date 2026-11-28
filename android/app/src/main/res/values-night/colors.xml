@@ -3,4 +3,6 @@
     <!-- The v6 dark palette: neutral near-black base, sepia lightened for contrast. -->
     <color name="base">#121212</color>
     <color name="accent">#D9946D</color>
+    <!-- The system splash, under the written splash: the icon's tile colour in dark. -->
+    <color name="splash">#211B17</color>
 </resources>
