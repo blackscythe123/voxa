@@ -104,7 +104,7 @@ fn fuzz(seed: u64, steps: usize, stale_deliveries: bool) -> Result<(), String> {
     let mut readiness = ready();
     let mut trace: Vec<String> = Vec::new();
 
-    let mut apply = |f: &mut Flow, ev: Event, in_flight: &mut BTreeSet<JobId>, pastes: &mut BTreeSet<JobId>, trace: &mut Vec<String>, cancelled: &BTreeSet<JobId>| -> Result<(), String> {
+    let apply = |f: &mut Flow, ev: Event, in_flight: &mut BTreeSet<JobId>, pastes: &mut BTreeSet<JobId>, trace: &mut Vec<String>, cancelled: &BTreeSet<JobId>| -> Result<(), String> {
         trace.push(format!("{ev:?}"));
         let fx = f.handle(ev);
         for e in &fx {
