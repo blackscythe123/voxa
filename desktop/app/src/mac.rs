@@ -295,17 +295,44 @@ fn set_pasteboard_text(text: Option<&str>) -> bool {
     }
 }
 
+/// How many kinds of data the pasteboard holds, and its change count.
+fn pasteboard_state() -> (usize, i64) {
+    unsafe {
+        let pb: id = msg_send![class!(NSPasteboard), generalPasteboard];
+        let types: id = msg_send![pb, types];
+        let n: usize = if types.is_null() { 0 } else { msg_send![types, count] };
+        let count: i64 = msg_send![pb, changeCount];
+        (n, count)
+    }
+}
+
+/// Tell clipboard managers (nspasteboard.org) not to keep what Voxa put there only to paste.
+fn mark_transient() {
+    unsafe {
+        let pb: id = msg_send![class!(NSPasteboard), generalPasteboard];
+        let _: bool = msg_send![pb, setString: ns("") forType: ns("org.nspasteboard.TransientType")];
+    }
+}
+
 /// Paste `text` into the app in front with Cmd+V. With `keep`, the text stays on the clipboard;
-/// without, the user's previous clipboard text is put back.
-pub fn paste_here(text: &str, keep: bool) -> bool {
+/// without, the user's previous clipboard text is put back, unless it held more than text (an
+/// image, files: left as the dictation rather than wiped) or something new was copied meanwhile.
+pub fn paste_here(text: &str, keep: bool) -> crate::rules::PasteResult {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     let pool = unsafe { NSAutoreleasePool::new(nil) };
     let before = pasteboard_text();
+    let (kinds, _) = pasteboard_state();
+    // Text comes as a couple of kinds (plain, UTF-8); more means an image, files or rich text.
+    let restorable = before.is_some() && kinds <= 3 || kinds == 0;
     if !set_pasteboard_text(Some(text)) {
         log("FAIL could not write the clipboard");
-        return false;
+        return crate::rules::PasteResult::Failed;
     }
+    if !keep {
+        mark_transient();
+    }
+    let (_, ours) = pasteboard_state();
     let sent = (|| {
         let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
         const V: u16 = 9; // kVK_ANSI_V
@@ -319,15 +346,26 @@ pub fn paste_here(text: &str, keep: bool) -> bool {
     })()
     .is_some();
     log(&format!("sent Cmd+V ({sent}) to {}", describe(foreground())));
-    if !keep {
+    if !keep && restorable {
         std::thread::sleep(Duration::from_millis(250));
-        let restored = set_pasteboard_text(before.as_deref());
-        log(&format!("clipboard restored={restored}"));
+        if pasteboard_state().1 == ours {
+            let restored = set_pasteboard_text(before.as_deref());
+            log(&format!("clipboard restored={restored}"));
+        } else {
+            log("clipboard changed meanwhile: left as it is");
+        }
     }
     unsafe {
         let _: () = msg_send![pool, drain];
     }
-    sent
+    if sent { crate::rules::PasteResult::Pasted } else { crate::rules::PasteResult::Failed }
+}
+
+/// macOS has no command signal yet: the commands folder is read on the slower fallback tick.
+pub fn commands_signal() {}
+
+pub fn commands_signalled() -> bool {
+    false
 }
 
 /// Pasting into other apps needs the Accessibility permission. Asks for it (once) if missing.
