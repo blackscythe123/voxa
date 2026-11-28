@@ -37,7 +37,29 @@ pub struct Entry {
     pub via: Option<String>,
 }
 
+/// History's word for a take that came back with nothing said in it.
+pub const NO_SPEECH: &str = "No speech in the recording";
+/// History's word for a take whose upload failed (the sign-in is fine).
+pub const NOT_REACHED: &str = "Couldn't reach ChatGPT";
+/// A take that was being recorded or written out when Voxa last stopped (written at the start
+/// of a take, so a forced end, crash or power cut never loses it).
+pub const RECORDING: &str = "Recording";
+pub const WRITING: &str = "Writing it out";
+/// What such a take becomes at the next start: kept, ready for Send now.
+pub const NOT_SENT: &str = "Not sent";
+pub const WAITING_NETWORK: &str = "Sends when you're back online";
+pub const WAITING_SIGN_IN: &str = "Sign in to send";
+
 impl Entry {
+    /// Not written out yet, and worth sending: its recording is the only copy.
+    pub fn unsent(&self) -> bool {
+        match &self.status {
+            Status::Waiting(_) => true,
+            Status::Failed(r) => r != NO_SPEECH,
+            Status::Pasted | Status::Ready => false,
+        }
+    }
+
     pub fn words(&self) -> usize {
         self.text.split_whitespace().count()
     }
@@ -46,13 +68,28 @@ impl Entry {
     }
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Write a whole file or nothing: to a temporary file of its own (process id and a counter, so
+/// two writers never share one), flushed to disk, then renamed over the real one. A crash, power
+/// cut or second process never leaves half a file.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(tmp, path)
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!("{name}.{}-{}.tmp", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Read a JSON file: Ok(None) when it doesn't exist, Err when it exists but can't be read or
@@ -76,21 +113,29 @@ pub struct History {
     pub entries: Vec<Entry>,
     /// history.json exists but couldn't be read: don't save over it until it can be (then merge).
     unreadable: bool,
+    /// history.json was damaged and set aside at this start: what it listed is unknown, so no
+    /// recording may be treated as having no entry.
+    damaged: bool,
 }
 
 impl History {
+    /// What History listed at start is known for sure (read cleanly, or there was none yet).
+    pub fn read_cleanly(&self) -> bool {
+        !self.unreadable && !self.damaged
+    }
+
     pub fn load(dir: &Path) -> Self {
         let path = dir.join("history.json");
         match read_json::<Vec<Entry>>(&path) {
-            Ok(entries) => Self { path, entries: entries.unwrap_or_default(), unreadable: false },
+            Ok(entries) => Self { path, entries: entries.unwrap_or_default(), unreadable: false, damaged: false },
             Err(e) if e.contains("is damaged") => {
                 // The broken file is kept aside; start fresh rather than lose new dictations.
                 crate::os::log(&format!("FAIL {e}"));
-                Self { path, entries: Vec::new(), unreadable: false }
+                Self { path, entries: Vec::new(), unreadable: false, damaged: true }
             }
             Err(e) => {
                 crate::os::log(&format!("FAIL {e}: not saving history until it can be read"));
-                Self { path, entries: Vec::new(), unreadable: true }
+                Self { path, entries: Vec::new(), unreadable: true, damaged: false }
             }
         }
     }
@@ -145,14 +190,23 @@ impl History {
         before != self.entries.len()
     }
 
+    /// Where "older than `days`" starts. Bounded by the newest dictation: a clock that is wrong
+    /// for a moment (dead CMOS battery, a VM resumed, dual boot) never deletes recent History.
+    fn cutoff(&self, days: u32, now_ms: u64) -> u64 {
+        let span = days as u64 * 86_400_000;
+        let newest = self.entries.iter().map(|e| e.id).max().unwrap_or(0);
+        now_ms.saturating_sub(span).min(newest.saturating_sub(span))
+    }
+
     /// Drop entries (and their audio) older than `keep_days`. 0 keeps everything. Dictations still
-    /// waiting to be sent (or that failed) are kept whatever their age: their audio is the only copy.
+    /// waiting to be sent (or that failed) are kept whatever their age: their audio is the only
+    /// copy. A take with no speech in it is not worth keeping and goes like any other.
     pub fn prune(&mut self, keep_days: u32, now_ms: u64) -> usize {
         if keep_days == 0 {
             return 0;
         }
-        let cutoff = now_ms.saturating_sub(keep_days as u64 * 86_400_000);
-        let (old, keep): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| e.id < cutoff && !matches!(e.status, Status::Waiting(_) | Status::Failed(_)));
+        let cutoff = self.cutoff(keep_days, now_ms);
+        let (old, keep): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| e.id < cutoff && !e.unsent());
         self.entries = keep;
         for e in &old {
             if let Some(a) = &e.audio {
@@ -181,7 +235,7 @@ impl History {
         if days == 0 {
             return 0;
         }
-        let cutoff = now_ms.saturating_sub(days as u64 * 86_400_000);
+        let cutoff = self.cutoff(days, now_ms);
         let mut freed = 0;
         for e in self.entries.iter_mut().filter(|e| e.id < cutoff && matches!(e.status, Status::Pasted | Status::Ready)) {
             if let Some(a) = e.audio.take() {
@@ -303,6 +357,14 @@ impl Settings {
         if let Ok(bytes) = serde_json::to_vec_pretty(self) {
             let _ = write_atomic(&dir.join("settings.json"), &bytes);
         }
+    }
+    /// Change one setting: read the file again, change it, save it. Refuses when the file exists
+    /// but can't be read, so defaults never replace the user's settings (both processes).
+    pub fn update(dir: &Path, f: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
+        let mut s = Self::try_load(dir)?.unwrap_or_default();
+        f(&mut s);
+        s.save(dir);
+        Ok(s)
     }
     pub const KEEP_CHOICES: [u32; 4] = [7, 30, 90, 0];
     pub const AUDIO_CHOICES: [u32; 3] = [30, 90, 0];
@@ -601,12 +663,97 @@ mod load_tests {
         let old = vec![Entry { id: 1, app: "A".into(), text: "old".into(), secs: 1.0, status: Status::Pasted, audio: None, started_in: None, via: None }];
         std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
         // Pretend the file couldn't be read at startup (locked): Voxa starts empty and unreadable.
-        let mut h = History { path: path.clone(), entries: Vec::new(), unreadable: true };
+        let mut h = History { path: path.clone(), entries: Vec::new(), unreadable: true, damaged: false };
         h.entries.push(Entry { id: 2, app: "B".into(), text: "new".into(), secs: 1.0, status: Status::Pasted, audio: None, started_in: None, via: None });
         // Now readable again: saving merges instead of overwriting.
         h.save();
         let on_disk: Vec<Entry> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(on_disk.iter().map(|e| e.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    /// Two writers never share a temporary file, and none is left behind.
+    #[test]
+    fn atomic_writes_use_their_own_temp_and_leave_none() {
+        let d = tmp("atomic");
+        let path = d.join("history.json");
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let p = path.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..20 {
+                        write_atomic(&p, format!("[{i}]").repeat(200).as_bytes()).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.chars().all(|c| "[]01234567".contains(c)) && body.len() % 600 == 0, "a torn or mixed file");
+        let left: Vec<_> = std::fs::read_dir(&d).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect();
+        assert!(left.is_empty(), "temporary files left: {left:?}");
+    }
+
+    /// Hunt 4: a settings file that can't be read is never overwritten with defaults.
+    #[test]
+    fn unreadable_settings_are_never_saved_over() {
+        let d = tmp("update");
+        let damaged = b"{ \"keep_days\": 0, broken";
+        std::fs::write(d.join("settings.json"), damaged).unwrap();
+        let r = Settings::update(&d, |s| s.hotkey = "Ctrl+Shift+K".into());
+        assert!(r.is_err(), "a change on top of an unreadable file is refused");
+        assert_eq!(std::fs::read(d.join("settings.json")).unwrap(), damaged, "the user's file is untouched");
+        // Readable again: the change lands on the user's own settings, not on defaults.
+        std::fs::write(d.join("settings.json"), br#"{ "keep_days": 0 }"#).unwrap();
+        let s = Settings::update(&d, |s| s.hotkey = "Ctrl+Shift+K".into()).unwrap();
+        assert_eq!((s.keep_days, s.hotkey.as_str()), (0, "Ctrl+Shift+K"), "Forever stays Forever");
+        // No file yet (first run): defaults are right.
+        let fresh = tmp("update-fresh");
+        assert_eq!(Settings::update(&fresh, |_| {}).unwrap(), Settings::default());
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    use super::*;
+
+    fn entry(dir: &Path, id: u64, status: Status) -> Entry {
+        let a = dir.join(format!("{id}.wav"));
+        std::fs::write(&a, b"RIFF").unwrap();
+        Entry { id, app: "A".into(), text: "kept".into(), secs: 1.0, status, audio: Some(a), started_in: None, via: None }
+    }
+
+    #[test]
+    fn a_clock_jump_at_startup_does_not_wipe_history() {
+        let day = 86_400_000u64;
+        let real_now = 20_000 * day;
+        let dir = std::env::temp_dir().join(format!("voxa-hunt-clock-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mk = |id: u64| entry(&dir, id, Status::Pasted);
+        let mut h = History { unreadable: false, damaged: false, path: dir.join("h.json"), entries: vec![mk(real_now - 3 * day), mk(real_now - day), mk(real_now - 60_000)] };
+        // The PC boots one year ahead for a moment (keep_days = 30, the default).
+        let removed = h.prune(30, real_now + 365 * day);
+        assert_eq!(removed, 0, "yesterday's dictations deleted because the clock jumped ({} of 3 left)", h.entries.len());
+        assert_eq!(h.prune_audio(30, real_now + 365 * day), 0, "and their recordings");
+        assert!(h.entries.iter().all(|e| e.audio.as_ref().is_some_and(|a| a.exists())));
+    }
+
+    /// Hunt 17/20: a take with no speech is labelled so, isn't kept forever and isn't resent.
+    #[test]
+    fn no_speech_takes_are_not_unsent_and_are_pruned() {
+        let day = 86_400_000u64;
+        let dir = std::env::temp_dir().join(format!("voxa-hunt-nospeech-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut h = History {
+            unreadable: false, damaged: false,
+            path: dir.join("h.json"),
+            entries: vec![entry(&dir, day, Status::Failed(NO_SPEECH.into())), entry(&dir, 2 * day, Status::Failed(NOT_REACHED.into())), entry(&dir, 99 * day, Status::Pasted)],
+        };
+        assert!(!h.entries[0].unsent());
+        assert!(h.entries[1].unsent());
+        assert_eq!(h.prune(30, 100 * day), 1);
+        assert_eq!(h.entries.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2 * day, 99 * day], "the failed upload is kept");
     }
 }
 
@@ -691,7 +838,7 @@ mod tests {
             std::fs::write(&a, vec![0u8; 1000]).unwrap();
             Entry { id, app: "A".into(), text: format!("t{id}"), secs: 1.0, status, audio: Some(a), started_in: None, via: None }
         };
-        let mut h = History { unreadable: false, path: dir.join("h.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("x".into())), mk(99 * day, Status::Pasted)] };
+        let mut h = History { unreadable: false, damaged: false, path: dir.join("h.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("x".into())), mk(99 * day, Status::Pasted)] };
         assert_eq!(h.prune_audio(30, now), 1000);
         assert_eq!(h.entries.len(), 3, "every dictation's text stays");
         assert!(h.entries[0].audio.is_none(), "old pasted recording deleted");
@@ -705,7 +852,7 @@ mod tests {
         let day = 86_400_000u64;
         let now = 100 * day;
         let mk = |id: u64, status: Status| Entry { id, app: "A".into(), text: "t".into(), secs: 1.0, status, audio: None, started_in: None, via: None };
-        let mut h = History { unreadable: false, path: std::env::temp_dir().join("voxa-prune-test.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("Sign in to send".into())), mk(3 * day, Status::Failed("x".into())), mk(99 * day, Status::Pasted)] };
+        let mut h = History { unreadable: false, damaged: false, path: std::env::temp_dir().join("voxa-prune-test.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("Sign in to send".into())), mk(3 * day, Status::Failed("x".into())), mk(99 * day, Status::Pasted)] };
         assert_eq!(h.prune(30, now), 1);
         let left: Vec<u64> = h.entries.iter().map(|e| e.id).collect();
         assert_eq!(left, vec![2 * day, 3 * day, 99 * day]);

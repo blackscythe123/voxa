@@ -37,7 +37,7 @@ ATOMIC_WRITERS = {
     ("desktop/app/src/link.rs", "write_atomic"),
     ("core/voxa-chatgpt/src/lib.rs", "write_unique_then_rename"),
     ("core/voxa-nudge/src/engine.rs", "save"),
-    ("desktop/signin/src/main.rs", "main"),
+    ("desktop/signin/src/main.rs", "save_session"),
 }
 # (file, function): a direct write of a store-like file that is fine, with the reason.
 ALLOWED_WRITES = {

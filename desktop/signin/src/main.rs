@@ -19,6 +19,20 @@ use wry::{WebContext, WebViewBuilder};
 const LOGIN_URL: &str = "https://chatgpt.com/auth/login";
 const SESSION_COOKIE: &str = "__Secure-next-auth.session-token";
 
+/// Save the captured session where Voxa reads it. A sign-in after a deliberate sign-out also
+/// clears the signed-out marker, whichever way the window was opened (Settings, toast, strip),
+/// so Voxa keeps saving the sign-in ChatGPT re-issues as it's used.
+fn save_session(dir: &std::path::Path, bytes: &[u8]) -> bool {
+    // Its own temporary name: the main app may be saving a refreshed sign-in at the same moment.
+    let tmp = dir.join(format!("session.json.signin-{}.tmp", std::process::id()));
+    if std::fs::write(&tmp, bytes).is_err() || std::fs::rename(&tmp, dir.join("session.json")).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return false;
+    }
+    let _ = std::fs::remove_file(dir.join("signed-out"));
+    true
+}
+
 /// Voxa's data folder, or VOXA_DATA: a test copy of the app (which passes its environment on to
 /// this window) must save its sign-in to its own folder, never over the real one.
 fn data_dir() -> PathBuf {
@@ -78,11 +92,7 @@ fn main() {
                             "user_agent": ua,
                             "captured_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
                         });
-                        // Its own temporary name: the main app may be saving a refreshed sign-in at the same moment.
-                        let tmp = dir.join(format!("session.json.signin-{}.tmp", std::process::id()));
-                        if std::fs::write(&tmp, serde_json::to_vec_pretty(&saved).unwrap()).is_ok()
-                            && std::fs::rename(&tmp, dir.join("session.json")).is_ok()
-                        {
+                        if save_session(&dir, &serde_json::to_vec_pretty(&saved).unwrap()) {
                             std::process::exit(0);
                         }
                     }
@@ -91,4 +101,19 @@ fn main() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Hunt 15: signing in from the strip after a sign-out clears the signed-out marker.
+    #[test]
+    fn a_saved_sign_in_clears_the_signed_out_marker() {
+        let d = std::env::temp_dir().join(format!("voxa-signin-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("signed-out"), b"").unwrap();
+        assert!(super::save_session(&d, b"{}"));
+        assert!(d.join("session.json").exists());
+        assert!(!d.join("signed-out").exists(), "the marker would block every refreshed sign-in from being kept");
+    }
 }

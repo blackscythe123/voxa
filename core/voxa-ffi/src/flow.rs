@@ -490,7 +490,7 @@ impl VoxaFlow {
     /// Whether a history entry belongs to a dictation the flow is still working on.
     pub fn is_live(&self, entry_id: u64) -> bool {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        g.meta.iter().any(|(job, m)| m.entry == entry_id && g.flow.is_in_progress(*job))
+        g.meta.iter().any(|(job, m)| m.entry == entry_id && g.flow.in_progress(*job))
     }
 }
 

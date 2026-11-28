@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::error::TranscribeError;
 use crate::job::{Job, JobId, JobState, Target};
-use crate::readiness::{Blocker, Network, Readiness, Session};
+use crate::readiness::{Blocker, Mic, Network, Readiness, Session};
 
 /// What the strip (desktop) or keyboard bar (Android) shows. One state at a time.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,8 +77,18 @@ pub enum Event {
     Transcribed { job: JobId, result: Result<String, TranscribeError> },
     Delivered { job: JobId, result: Delivery },
     Readiness(Readiness),
-    /// Send a waiting or failed dictation again now (History's "Send now").
+    /// Send a waiting or failed dictation again now (History's "Send now"). While the strip is
+    /// busy with another take it goes out in the background instead of doing nothing.
     Retry { job: JobId },
+    /// Write a finished dictation out again from its recording (History's "Write it out
+    /// again"). Always in the background, never pasted; if it fails, the old text stays.
+    Rewrite { job: JobId },
+    /// The user corrected a dictation's text in History. One not pasted yet pastes the
+    /// corrected text.
+    Edit { job: JobId, text: String },
+    /// The shell's answer to a `Transcribe` whose recording has nothing usable (the mic gave no
+    /// sound, or the file couldn't be written). Acts on that job only, never on another take.
+    MicTrouble { job: JobId, mic: Mic },
     /// The app in front changed while the strip asks where to paste.
     Focus { target: Target },
     /// The shell did not run, or gave up on, an upload it was asked for (`Effect::Transcribe`)
@@ -169,6 +179,9 @@ impl Flow {
             Event::Delivered { job, result } => self.on_delivered(job, result, &mut fx),
             Event::Readiness(r) => self.on_readiness(r, &mut fx),
             Event::Retry { job } => self.on_retry(job, &mut fx),
+            Event::Rewrite { job } => self.on_rewrite(job, &mut fx),
+            Event::Edit { job, text } => self.on_edit(job, text, &mut fx),
+            Event::MicTrouble { job, mic } => self.on_mic_trouble(job, mic, &mut fx),
             Event::Focus { target } => self.on_focus(target, &mut fx),
             Event::UploadSkipped { job } => self.on_upload_skipped(job, &mut fx),
         }
@@ -185,8 +198,9 @@ impl Flow {
     fn on_hotkey(&mut self, target: Target, fx: &mut Vec<Effect>) {
         match self.state.clone() {
             State::Recording { .. } => self.on_stop(fx),
-            // Busy finishing the previous dictation: ignore rather than start a second one.
-            State::Transcribing { .. } | State::Delivering { .. } => {}
+            // Pasting takes a moment: ignore. A long upload never blocks a new take: it goes on
+            // in the background and its text waits in History.
+            State::Delivering { .. } => {}
             _ => {
                 if let Some(b) = self.readiness.blocker() {
                     self.state = State::Blocked(b);
@@ -303,14 +317,78 @@ impl Flow {
         }
     }
 
-    /// History's "Send now": only for a dictation that is waiting or failed, and never over one
-    /// the user is recording or that is being written out.
+    /// History's "Send now": only for a dictation that is waiting or failed. Never over one the
+    /// user is recording or that is being written out: then it goes out in the background.
     fn on_retry(&mut self, job: JobId, fx: &mut Vec<Effect>) {
         let retryable = matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::WaitingForNetwork | JobState::Failed(_)));
         let busy = matches!(self.state, State::Recording { .. } | State::Transcribing { .. } | State::Delivering { .. });
-        if retryable && !busy {
+        if !retryable {
+            return;
+        }
+        if busy {
+            self.send_in_background(job, fx);
+        } else {
             self.retry(job, fx);
         }
+    }
+
+    /// "Write it out again" for a dictation that already has text. Never the one on the strip.
+    fn on_rewrite(&mut self, job: JobId, fx: &mut Vec<Effect>) {
+        let finished = matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Ready(_) | JobState::Delivered(_)));
+        if finished && self.strip_job() != Some(job) {
+            self.send_in_background(job, fx);
+        }
+    }
+
+    fn on_edit(&mut self, job: JobId, text: String, fx: &mut Vec<Effect>) {
+        let next = match self.jobs.get(&job).map(|j| &j.state) {
+            Some(JobState::Ready(_)) => JobState::Ready(text),
+            Some(JobState::Delivered(_)) => JobState::Delivered(text),
+            _ => return,
+        };
+        self.set_job(job, next, fx);
+    }
+
+    /// The recording of `job` has nothing usable. Only that job changes, and the strip only when
+    /// it shows that job.
+    fn on_mic_trouble(&mut self, job: JobId, mic: Mic, fx: &mut Vec<Effect>) {
+        self.uploading.remove(&job);
+        if !matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Transcribing)) {
+            return;
+        }
+        let back = self.kept.remove(&job).unwrap_or(JobState::Discarded);
+        self.set_job(job, back, fx);
+        if self.strip_job() == Some(job) {
+            self.readiness.mic = mic;
+            self.state = State::Blocked(self.readiness.blocker().unwrap_or(Blocker::MicStopped));
+            fx.push(Effect::ShowStrip);
+        }
+    }
+
+    /// Upload a job without putting it on the strip; if that fails, what it was is kept.
+    fn send_in_background(&mut self, job: JobId, fx: &mut Vec<Effect>) {
+        if let Some(before) = self.jobs.get(&job).map(|j| j.state.clone()) {
+            self.kept.insert(job, before);
+        }
+        self.set_job(job, JobState::Transcribing, fx);
+        self.transcribe(job, fx);
+    }
+
+    /// The job the strip shows now, if any.
+    fn strip_job(&self) -> Option<JobId> {
+        match &self.state {
+            State::Recording { job, .. } | State::Transcribing { job } | State::Delivering { job } | State::Delivered { job } => Some(*job),
+            State::NeedsYou(p) => Some(p.job()),
+            State::Idle | State::Blocked(_) => None,
+        }
+    }
+
+    /// Whether a job is still being worked on: recording, being written out or uploaded, or on
+    /// the strip. A finished one (ready, failed, no speech, dismissed) is not, so it can be
+    /// deleted like any other dictation.
+    pub fn in_progress(&self, job: JobId) -> bool {
+        let Some(j) = self.jobs.get(&job) else { return false };
+        matches!(j.state, JobState::Recording | JobState::Transcribing) || self.uploading.contains(&job) || self.strip_job() == Some(job)
     }
 
     fn retry(&mut self, job: JobId, fx: &mut Vec<Effect>) {
@@ -336,20 +414,6 @@ impl Flow {
     /// Whether the shell is still uploading this job.
     pub fn is_uploading(&self, job: JobId) -> bool {
         self.uploading.contains(&job)
-    }
-
-    /// Whether a job is still being worked on: recording, being written out or uploaded, or the
-    /// one the strip shows. Anything else (no speech, a dismissed ready or failed take, a
-    /// finished one) waits for the user and may be deleted from History.
-    pub fn is_in_progress(&self, job: JobId) -> bool {
-        let on_screen = match &self.state {
-            State::Recording { job: j, .. } | State::Transcribing { job: j } | State::Delivering { job: j } | State::Delivered { job: j } => *j == job,
-            State::NeedsYou(p) => p.job() == job,
-            State::Idle | State::Blocked(_) => false,
-        };
-        on_screen
-            || self.uploading.contains(&job)
-            || matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Recording | JobState::Transcribing))
     }
 
     fn on_upload_skipped(&mut self, job: JobId, fx: &mut Vec<Effect>) {
@@ -378,22 +442,20 @@ impl Flow {
 
     fn on_transcribed(&mut self, job: JobId, result: Result<String, TranscribeError>, fx: &mut Vec<Effect>) {
         self.uploading.remove(&job);
-        // A cancelled job stays cancelled; a superseded one only updates its record. A cancelled
-        // retry of a kept take is the exception: text that came back is kept (as ready, never
-        // pasted), so the recording is never uploaded again for words already written out.
         match self.jobs.get(&job).map(|j| &j.state) {
             Some(JobState::Transcribing) => {}
-            Some(JobState::Failed(_) | JobState::WaitingForNetwork) => {
-                if let Ok(text) = result {
-                    if !text.trim().is_empty() {
-                        self.set_job(job, JobState::Ready(text), fx);
-                    }
+            // A retry the user cancelled, whose upload still came back with the text: keep the
+            // text (never pasted), so the recording isn't uploaded again for nothing.
+            Some(JobState::WaitingForNetwork | JobState::Failed(_)) => {
+                if let Some(text) = result.ok().filter(|t| !t.trim().is_empty()) {
+                    self.set_job(job, JobState::Ready(text), fx);
                 }
                 return;
             }
+            // A cancelled job stays cancelled; a finished one keeps its text.
             _ => return,
         }
-        self.kept.remove(&job);
+        let kept = self.kept.remove(&job);
         let current = matches!(self.state, State::Transcribing { job: j } if j == job);
         match result {
             Ok(text) if text.trim().is_empty() => {
@@ -410,6 +472,10 @@ impl Flow {
                     self.state = State::Delivering { job };
                     fx.push(Effect::Paste { job, target, text });
                 }
+            }
+            // Writing a finished dictation out again failed: it keeps the text it had.
+            Err(_) if matches!(kept, Some(JobState::Ready(_) | JobState::Delivered(_))) => {
+                self.set_job(job, kept.unwrap_or(JobState::Discarded), fx);
             }
             Err(e) => {
                 if e.needs_sign_in() {
@@ -460,9 +526,9 @@ impl Flow {
         let was = self.readiness;
         self.readiness = r;
 
-        // Signed back in: resend every dictation that was waiting for it. The one on screen goes
-        // back into the original app; the others are written out in the background. Then carry
-        // on: the same check may also say the network is back.
+        // Signed back in: resend the dictation that was waiting for it, into the original app.
+        // Others that waited for the sign-in go out in the background. Never return early: the
+        // same check can also say the network is back.
         if was.session != Session::Valid && r.session == Session::Valid {
             match self.state.clone() {
                 State::NeedsYou(Problem::SignInToSend { job }) => self.retry(job, fx),
@@ -479,8 +545,7 @@ impl Flow {
                 .map(|j| j.id)
                 .collect();
             for job in waiting {
-                self.set_job(job, JobState::Transcribing, fx);
-                self.transcribe(job, fx);
+                self.send_in_background(job, fx);
             }
         }
 
@@ -498,8 +563,7 @@ impl Flow {
                 if matches!(self.state, State::NeedsYou(Problem::WaitingForNetwork { job: j }) if j == job) {
                     self.retry(job, fx);
                 } else {
-                    self.set_job(job, JobState::Transcribing, fx);
-                    self.transcribe(job, fx);
+                    self.send_in_background(job, fx);
                 }
             }
         }

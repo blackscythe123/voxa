@@ -118,7 +118,7 @@ fn h4_a_transcribe_the_shell_never_answers_wedges_the_job_until_restart() {
 /// H5. A take that came back with no speech, and a Ready take the user dismissed, will never be
 /// worked on again without the user asking. The shell's "live" check counted every state but
 /// Delivered and Discarded, so History hid their delete button and "Delete all" kept their text.
-/// The core now says what is in progress (`is_in_progress`); the shells use it.
+/// The core now says what is in progress (`in_progress`); the shells use it.
 #[test]
 fn h5_finished_jobs_are_not_in_progress() {
     let mut f = Flow::new(ready());
@@ -129,8 +129,8 @@ fn h5_finished_jobs_are_not_in_progress() {
     f.handle(Event::Stop);
     f.handle(Event::Transcribed { job: b, result: Ok("private words".into()) });
     f.handle(Event::Delivered { job: b, result: Delivery::TargetChanged(Target { app: "Slack".into(), window: 9 }) });
-    assert!(f.is_in_progress(b), "still asking where to paste");
+    assert!(f.in_progress(b), "still asking where to paste");
     f.handle(Event::Dismiss);
-    assert!(!f.is_in_progress(a), "no-speech take counted as in progress: {:?}", f.job(a).unwrap().state);
-    assert!(!f.is_in_progress(b), "dismissed Ready take counted as in progress, so Delete all keeps its text");
+    assert!(!f.in_progress(a), "no-speech take counted as in progress: {:?}", f.job(a).unwrap().state);
+    assert!(!f.in_progress(b), "dismissed Ready take counted as in progress, so Delete all keeps its text");
 }

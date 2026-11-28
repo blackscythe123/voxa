@@ -10,6 +10,7 @@ fn chars(t: &str) -> String {
 pub fn event(e: &Event) -> String {
     match e {
         Event::Transcribed { job, result: Ok(t) } => format!("Transcribed {{ job: {job:?}, result: Ok({}) }}", chars(t)),
+        Event::Edit { job, text } => format!("Edit {{ job: {job:?}, text: {} }}", chars(text)),
         other => format!("{other:?}"),
     }
 }
@@ -50,6 +51,7 @@ mod tests {
         let job = JobId(3);
         let lines = [
             event(&Event::Transcribed { job, result: Ok(secret.into()) }),
+            event(&Event::Edit { job, text: secret.into() }),
             effects(&[Effect::Paste { job, target: Target { app: "Notes".into(), window: 1 }, text: secret.into() }, Effect::PasteHere { job, text: secret.into() }]),
             job_state(&JobState::Ready(secret.into())),
             job_state(&JobState::Delivered(secret.into())),
