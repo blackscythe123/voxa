@@ -235,9 +235,26 @@ pub fn esc_wanted(state: &State) -> bool {
     matches!(state, State::Recording { paused: false, .. })
 }
 
+/// Start with Windows (macOS: open at login) is the real user's setting: a test copy never changes it.
+pub fn changes_login_item(test_copy: bool) -> bool {
+    !test_copy
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Finishing the tour in a test copy switched the real Start with Windows on.
+    #[test]
+    fn a_test_copy_never_changes_the_real_login_item() {
+        assert!(!changes_login_item(true));
+        assert!(changes_login_item(false));
+        let remote = include_str!("remote.rs");
+        let f = remote.find("pub fn set_autostart").expect("set_autostart");
+        let guard = remote[f..].find("changes_login_item").expect("set_autostart checks for a test copy");
+        let write = remote[f..].find("os::set_start_with_windows").expect("writes the login item");
+        assert!(guard < write, "the test copy check comes before the write");
+    }
 
     /// Mic dead after a reconnect or sleep: restarted once, never while paused or right at the start.
     #[test]
