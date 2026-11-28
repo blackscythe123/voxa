@@ -43,7 +43,9 @@ data class VxColors(
     val dark: Boolean,
 ) {
     val text72 get() = text.copy(alpha = 0.72f)
-    val text56 get() = text.copy(alpha = 0.56f)
+    /** Secondary text. 56 % in dark (5.3:1 or more); 62 % in light, where 56 % gave only 4.2:1 on
+     *  white and 4.0:1 on #F3F3F1 (62 %: 5.2:1 and 4.95:1, WCAG AA). */
+    val text56 get() = text.copy(alpha = if (dark) 0.56f else 0.62f)
     val text40 get() = text.copy(alpha = 0.40f)
     val text16 get() = text.copy(alpha = 0.16f)
     val hair get() = text.copy(alpha = if (dark) 0.10f else 0.06f)
