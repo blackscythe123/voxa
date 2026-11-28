@@ -1,0 +1,47 @@
+# Fixture for release-feed-guard, release-android-signing, release-android-ci and release-latest.
+# Every Bad line is caught; Good lines must stay quiet.
+# release-feed-guard, Bad: no tag ref check, no forward-only version check, no trap for k.pem,
+# no empty-secret check. release-android-signing, Bad: it signs whatever certificate the APK carries.
+# release-android-ci, Bad: started by hand only (no tag trigger), and the cases marked below.
+name: android-release
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    # Bad: reads the keystore secrets without the protected environment.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}            # Good: a secret as an env value
+          STORE_PW: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+        run: |
+          set -x
+          printf '%s' "$KS_B64" | base64 --decode > "$RUNNER_TEMP/r.jks"
+          echo "password is $STORE_PW"
+          echo "STORE_PW=$STORE_PW" >> "$GITHUB_ENV"
+          [ -n "$KS_B64" ] || { echo "KS_B64 is empty"; exit 1; }
+      # Above, Bad x4: set -x, decoded without umask, a secret echoed, a secret copied into GITHUB_ENV.
+      # Good: the printf is piped into base64, and the empty check echoes no secret.
+      - name: Build
+        run: ./gradlew assembleRelease -Pvoxa.devRelease=true -Pk=${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+      # Above, Bad x2: a dev flag, and a secret expanded inline into the script.
+      - name: Delete the keystore
+        run: rm -f "$RUNNER_TEMP/r.jks"
+      # Above, Bad: not `if: always()`, so a failed build leaves the keystore. No size check anywhere (Bad).
+      - name: Release
+        run: gh release create "$TAG" dist/*.apk --title "Voxa for Android" --latest=false
+      # Above, Bad (release-latest): not a prerelease.
+  feed:
+    # Bad: the keystore and K1 in one job.
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Sign the feed
+        env:
+          KS: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          VOXA_UPDATE_KEY: ${{ secrets.VOXA_UPDATE_KEY }}
+        run: |
+          printf '%s' "$VOXA_UPDATE_KEY" > k.pem
+          openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig
+          rm -f k.pem

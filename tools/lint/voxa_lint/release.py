@@ -4,6 +4,8 @@
   release-latest  every `gh release create` / `gh release edit` for Android (an APK, or a tag or title
                   that says android) in the docs, scripts or workflows passes --latest=false. The
                   `update-feed` release (both signed feeds) passes --latest=false or --prerelease.
+                  The tag-built releases (desktop.yml, android-release.yml) are created with both
+                  --prerelease and --latest=false: the owner promotes them after the hardware gate.
   release-version-sync
                   one version everywhere: the workspace version (Cargo.toml) is the voxa.iss default
                   AppVersion and the Android versionName, Android's versionCode follows
@@ -113,6 +115,13 @@ def check_latest(ctx: Ctx) -> list[Violation]:
                 out.append(Violation("release-latest", rel, line, "the tagged desktop release is created without --prerelease --latest=false. "
                                      "Rule: a new version stays a prerelease until the owner promotes it after the real-hardware gate, "
                                      "so the public download links never jump early (docs/release-runbook.md B10)", key=cmd.strip()[:120]))
+                continue
+            if rel.endswith("workflows/android-release.yml") and "create" in cmd \
+                    and not (re.search(r"--prerelease\b", cmd) and re.search(r"--latest(=|\s+)false\b", cmd)):
+                line = text.count("\n", 0, m.start()) + 1
+                out.append(Violation("release-latest", rel, line, "the tagged Android release is created without --prerelease "
+                                     "--latest=false. Rule: it stays a prerelease until the owner promotes it after the real-hardware "
+                                     "gate, and Android is never the latest release (docs/release-runbook.md B10)", key=cmd.strip()[:120]))
                 continue
             if ANDROID.search(cmd) and not re.search(r"--latest(=|\s+)false\b", cmd):
                 line = text.count("\n", 0, m.start()) + 1

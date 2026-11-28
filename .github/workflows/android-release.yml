@@ -1,0 +1,331 @@
+# The Android release, built in CI (owner decision 2026-11-28; docs/release-runbook.md B5 to B7).
+# Push a tag android-vX.Y.Z on the commit to release; three jobs follow:
+#
+#   build    (environment "release", your approval)  builds the arm64 and the universal APK with
+#            the permanent release key, checks the tag against versionName/versionCode, the signer
+#            (in Gradle's verifyReleaseSigner and again here) and the 6.0 MB budget.
+#   release  creates the GitHub release android-vX.Y.Z as a prerelease that is never "latest";
+#            you promote it after the real-hardware gate (Android is never "latest" in any case).
+#   feed     (environment "release", your second approval)  signs android.json with K1 and
+#            uploads it to the update-feed prerelease. Phones are offered the update from here on.
+#
+# The release key and K1 are never in the same job: build has only the keystore, feed only K1.
+# A re-run (Actions, "Re-run jobs", or `gh workflow run android-release.yml --ref android-vX.Y.Z`)
+# must run from the tag ref; the release environment admits only v* and android-v* refs. A re-run
+# replaces the APKs only while the release is still a prerelease. `force` publishes an older
+# version on purpose (a deliberate rollback).
+#
+# The local fallback (owner's PC, only if CI is unavailable) is android/release.ps1.
+#
+# The feed lists one entry per ABI APK in the release (android-arm64-v8a is required;
+# android-armeabi-v7a and android-x86_64 when present) and the universal APK as the fallback for
+# every other phone. The app picks by Build.SUPPORTED_ABIS, then the universal one.
+name: android-release
+
+on:
+  push:
+    tags: ["android-v*"]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish the feed even if it already offers a newer version (a deliberate rollback)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never cancel a release half way (a release without its feed, or a feed without its release).
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The NDK app/build.gradle.kts pins (ndkVersionPinned) and the cargo-ndk the owner builds with.
+  NDK_VERSION: "28.0.13004108"
+  CARGO_NDK_VERSION: "4.1.2"
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: release
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the tag, the ref and the version
+        id: tag
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^android-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the tag must look like android-v1.0.0, got $TAG"; exit 1; }
+          # The release environment only admits tag refs: a branch named like a tag is refused too.
+          [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "::error::run this workflow from the tag ref: gh workflow run android-release.yml --ref $TAG (got $GITHUB_REF)"; exit 1; }
+          V="${TAG#android-v}"
+          IFS=. read -r MA MI PA <<< "$V"
+          CODE=$((MA * 10000 + MI * 100 + PA))
+          name="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          [ "$name" = "$V" ] || { echo "::error::versionName in android/app/build.gradle.kts is $name, the tag says $V"; exit 1; }
+          [ "$code" = "$CODE" ] || { echo "::error::versionCode in android/app/build.gradle.kts is $code, the tag $TAG needs $CODE (major*10000 + minor*100 + patch)"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "V=$V" >> "$GITHUB_ENV"
+
+      - name: Guardrails (a tag is a release, docs/guardrails.md)
+        run: |
+          set -euo pipefail
+          python3 tools/lint/run.py --self-test
+          python3 tools/lint/run.py --release
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle.kts
+            android/app/build.gradle.kts
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Android NDK ${{ env.NDK_VERSION }}
+        run: |
+          set -euo pipefail
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$SDKM" --licenses > /dev/null
+          "$SDKM" --install "ndk;$NDK_VERSION" > /dev/null
+          [ -d "$ANDROID_HOME/ndk/$NDK_VERSION" ] || { echo "::error::NDK $NDK_VERSION did not install"; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # arm64 for the per-ABI APK; 32-bit ARM and x86_64 for the universal one (-Puniversal).
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+          cache-bin: true
+
+      - name: cargo-ndk ${{ env.CARGO_NDK_VERSION }}
+        run: |
+          set -euo pipefail
+          if ! cargo ndk --version 2>/dev/null | grep -qx "cargo-ndk $CARGO_NDK_VERSION"; then
+            cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+          fi
+          cargo ndk --version
+
+      - name: Release keystore (decoded to the runner's temp folder, deleted at the end)
+        env:
+          KS_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          VOXA_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          VOXA_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          for n in KS_B64 VOXA_RELEASE_STORE_PASSWORD VOXA_RELEASE_KEY_ALIAS; do
+            [ -n "${!n:-}" ] || { echo "::error::$n is empty: set the ANDROID_RELEASE_* secrets in the release environment (docs/update-keys.md)"; exit 1; }
+          done
+          umask 077
+          KS="$RUNNER_TEMP/voxa-release.jks"
+          printf '%s' "$KS_B64" | base64 --decode > "$KS"
+          # Fail in seconds, not after the build: the keystore's certificate is the pinned one.
+          PINNED="$(sed 's/#.*//' android/signing/release-cert.sha256 | tr -d ' \r' | tr 'A-F' 'a-f' | grep -E '^[0-9a-f]{64}$' | head -n 1 || true)"
+          [ -n "$PINNED" ] || { echo "::error::android/signing/release-cert.sha256 is empty"; exit 1; }
+          got="$(keytool -list -v -keystore "$KS" -alias "$VOXA_RELEASE_KEY_ALIAS" -storepass:env VOXA_RELEASE_STORE_PASSWORD \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ': \r' | tr 'A-F' 'a-f' | head -n 1)"
+          [ "$got" = "$PINNED" ] || { echo "::error::the keystore's certificate is ${got:-unreadable}, not the pinned release certificate $PINNED"; exit 1; }
+          echo "VOXA_RELEASE_STORE_FILE=$KS" >> "$GITHUB_ENV"
+
+      - name: Build the arm64 and the universal APK (verifyReleaseSigner re-signs v1, v2, v3 and checks the pinned certificate)
+        working-directory: android
+        env:
+          VOXA_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          VOXA_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          VOXA_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          mkdir -p ../dist
+          # The same two builds as android/release.ps1. Copy the arm64 APK out before the universal
+          # build, which writes into the same folder.
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk "../dist/Voxa-Android-$V-arm64-v8a.apk"
+          ./gradlew --no-daemon assembleRelease -Puniversal
+          cp app/build/outputs/apk/release/app-release.apk "../dist/Voxa-Android-$V-universal.apk"
+          ls -l ../dist
+
+      - name: Second signer check (apksigner, pinned certificate, v1 v2 v3, version)
+        run: |
+          set -euo pipefail
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | grep -v rc | sort -V | tail -n 1)"
+          PINNED="$(sed 's/#.*//' android/signing/release-cert.sha256 | tr -d ' \r' | tr 'A-F' 'a-f' | grep -E '^[0-9a-f]{64}$' | head -n 1)"
+          CODE="$(sed -n 's/^[[:space:]]*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          for abi in arm64-v8a universal; do
+            f="dist/Voxa-Android-$V-$abi.apk"
+            [ -f "$f" ] || { echo "::error::$f was not built"; exit 1; }
+            out="$("$BT/apksigner" verify --verbose --min-sdk-version 21 --print-certs "$f")"
+            for s in v1 v2 v3; do
+              grep -Eq "Verified using $s scheme[^:]*: true" <<< "$out" || { echo "::error::$f is not signed with the $s scheme"; exit 1; }
+            done
+            certs="$(grep -oE 'certificate SHA-256 digest: [0-9a-fA-F]{64}' <<< "$out" | sed 's/.*: //' | tr 'A-F' 'a-f' | sort -u)"
+            [ -n "$certs" ] || { echo "::error::could not read the signing certificate of $f"; exit 1; }
+            while read -r c; do
+              if grep -qix "$c" android/signing/forbidden-signers.txt; then echo "::error::$f is signed by a test-build key ($c)"; exit 1; fi
+              [ "$c" = "$PINNED" ] || { echo "::error::$f is signed by $c, not the pinned release certificate $PINNED"; exit 1; }
+            done <<< "$certs"
+            # The whole dump first: `| head` could kill aapt2 with SIGPIPE under pipefail.
+            dump="$("$BT/aapt2" dump badging "$f")"
+            badging="$(grep -m 1 '^package:' <<< "$dump")"
+            grep -q "name='com.voxa.android'" <<< "$badging" || { echo "::error::$f is not com.voxa.android: $badging"; exit 1; }
+            grep -q "versionCode='$CODE'" <<< "$badging" || { echo "::error::$f does not carry versionCode $CODE: $badging"; exit 1; }
+            grep -q "versionName='$V'" <<< "$badging" || { echo "::error::$f does not carry versionName $V: $badging"; exit 1; }
+            echo "$f: signed by the release certificate $PINNED (v1, v2, v3), versionCode $CODE, $(stat -c%s "$f") bytes"
+          done
+
+      - name: Size budgets (arm64 at most 6.0 MB, universal under the 15 MiB feed cap)
+        run: |
+          set -euo pipefail
+          python3 tools/lint/run.py --release --require-apk --apk "dist/Voxa-Android-$V-arm64-v8a.apk"
+          u="$(stat -c%s "dist/Voxa-Android-$V-universal.apk")"
+          [ "$u" -le $((15 * 1024 * 1024)) ] || { echo "::error::the universal APK is $u bytes, over the 15 MiB the client accepts (MAX_APK_BYTES)"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Delete the release keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/voxa-release.jks"
+
+  # The GitHub release, without any secret. Always a prerelease that is never "latest": the owner
+  # promotes it after the real-hardware gate (docs/release-runbook.md B10).
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      V: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apks
+          path: dist
+      - name: Publish the release (prerelease, never latest)
+        run: |
+          set -euo pipefail
+          files=("dist/Voxa-Android-$V-arm64-v8a.apk" "dist/Voxa-Android-$V-universal.apk")
+          if pre="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease 2>/dev/null)"; then
+            # A re-run. A promoted release keeps the APKs that passed the hardware gate: cut a new version instead.
+            [ "$pre" = "true" ] || { echo "::error::$TAG is already promoted; its APKs are never replaced. Publish a new version."; exit 1; }
+            gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Voxa for Android $V" --generate-notes --prerelease --latest=false
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease,assets --jq '{isPrerelease, assets: [.assets[].name]}'
+
+  # Signs android.json with K1 and replaces it on the fixed "update-feed" prerelease. The only job
+  # here that can read VOXA_UPDATE_KEY (environment "release", your second approval). It re-reads
+  # the APKs from the published release, so the feed describes exactly the bytes phones download.
+  feed:
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download the APKs from the release
+        run: |
+          set -euo pipefail
+          V="${TAG#android-v}"
+          mkdir -p dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "Voxa-Android-$V-*.apk" -D dist
+          ls -l dist
+
+      - name: Build the android payload
+        run: |
+          set -euo pipefail
+          V="${TAG#android-v}"
+          R="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | grep -v rc | sort -V | tail -n 1)"
+          IFS=. read -r MA MI PA <<< "$V"
+          CODE=$((MA * 10000 + MI * 100 + PA))
+          arm="dist/Voxa-Android-$V-arm64-v8a.apk"
+          [ -f "$arm" ] || { echo "the release has no $arm (required)"; exit 1; }
+          # The versionCode inside the APK must match the tag's scheme (major*10000 + minor*100 + patch).
+          got="$("$BT/aapt2" dump badging "$arm" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n 1)"
+          [ "$got" = "$CODE" ] || { echo "versionCode in the APK is $got, the tag says $CODE"; exit 1; }
+          # Voxa is signed with one permanent release key (no rotation): every APK must carry
+          # exactly the pinned release certificate, and never a test-build key.
+          # apksigner prints "Signer #1 certificate SHA-256 digest:" or, newer, "V3.0 Signer: certificate SHA-256 digest:".
+          PINNED="$(sed 's/#.*//' android/signing/release-cert.sha256 | tr -d ' \r' | tr 'A-F' 'a-f' | grep -E '^[0-9a-f]{64}$' | head -n 1 || true)"
+          [ -n "$PINNED" ] || { echo "android/signing/release-cert.sha256 is empty: commit the release certificate first (docs/update-keys.md)"; exit 1; }
+          for f in dist/Voxa-Android-"$V"-*.apk; do
+            certs="$("$BT/apksigner" verify --print-certs "$f" | grep 'certificate SHA-256 digest: ' | sed 's/.*SHA-256 digest: //' | tr 'A-F' 'a-f' | sort -u)"
+            [ -n "$certs" ] || { echo "could not read the signing certificate of $f"; exit 1; }
+            while read -r c; do
+              if grep -qix "$c" android/signing/forbidden-signers.txt; then echo "$f is signed by a test-build key ($c)"; exit 1; fi
+              [ "$c" = "$PINNED" ] || { echo "$f is signed by $c, not the pinned release certificate $PINNED"; exit 1; }
+            done <<< "$certs"
+          done
+          SIGNER="$PINNED"
+          assets='{}'
+          for pair in "arm64-v8a:android-arm64-v8a" "armeabi-v7a:android-armeabi-v7a" "x86_64:android-x86_64" "universal:android-universal"; do
+            abi="${pair%%:*}"; key="${pair#*:}"
+            f="dist/Voxa-Android-$V-$abi.apk"
+            [ -f "$f" ] || continue
+            assets="$(jq -c --arg k "$key" --arg u "$R/Voxa-Android-$V-$abi.apk" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" \
+              --argjson z "$(stat -c%s "$f")" '. + {($k): {url: $u, sha256: $s, size: $z}}' <<< "$assets")"
+          done
+          jq -n --arg v "$V" --argjson c "$CODE" --argjson s "$(date +%s)" --arg n "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            --arg g "$SIGNER" --argjson a "$assets" \
+            '{schema:1,channel:"android",serial:$s,version:$v,version_code:$c,notes_url:$n,paused:false,signer_sha256:$g,assets:$a}' \
+            | tr -d '\n' > payload.json
+          cat payload.json; echo
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: The feed only moves forward
+        # Refuses a lower versionCode than the published feed (an old tag's run must never
+        # unpublish a newer release) and a serial that doesn't go up, unless `force` is set.
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- guard-forward --channel android --payload payload.json ${{ inputs.force && '--force' || '' }}
+
+      - name: Sign the feed
+        env:
+          VOXA_UPDATE_KEY: ${{ secrets.VOXA_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$VOXA_UPDATE_KEY" ] || { echo "VOXA_UPDATE_KEY is not set in the release environment"; exit 1; }
+          umask 077
+          # The key file never outlives this step, even when openssl fails.
+          trap 'rm -f k.pem' EXIT
+          printf '%s' "$VOXA_UPDATE_KEY" > k.pem
+          openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig
+          jq -n --arg p "$(base64 -w0 payload.json)" --arg s "$(base64 -w0 payload.sig)" '{key_id:1,payload:$p,sig:$s}' > android.json
+
+      - name: Verify with the shipped verifier
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- verify android.json --channel android
+
+      - name: Publish the feed
+        # Last, so the feed never points at assets that are not uploaded yet. update-feed is a
+        # prerelease that is never "latest"; only the feed file is replaced.
+        run: gh release upload update-feed android.json --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Fetch it back through the client policy
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- fetch-check --channel android

@@ -47,6 +47,7 @@
 1 release-latest docs/release-android.md
 1 release-latest docs/update-feed.md
 1 release-latest .github/workflows/desktop.yml        # tagged desktop release not a prerelease
+1 release-latest .github/workflows/android-release.yml    # tagged Android release not a prerelease
 1 release-version-sync desktop/windows/voxa.iss
 2 release-version-sync .github/workflows/desktop.yml                # no /DAppVersion, no tag check
 1 release-version-sync android/app/build.gradle.kts                # versionCode off the scheme
@@ -92,9 +93,10 @@
 3 release-android-signing android/app/build.gradle.kts              # --lineage, no releaseKeyIsDebug, no verifyReleaseSigner
 1 release-android-signing android/signing/forbidden-signers.txt     # the test-build signer is not forbidden (no file)
 1 release-android-signing android/signing/release-cert.sha256       # --release: no pinned release certificate
-1 release-android-signing .github/workflows/android-feed.yml        # publishes any signer
-4 release-feed-guard .github/workflows/android-feed.yml             # no ref check, no guard-forward, no trap, no empty-secret check
+1 release-android-signing .github/workflows/android-release.yml     # publishes any signer
+4 release-feed-guard .github/workflows/android-release.yml          # no ref check, no guard-forward, no trap, no empty-secret check
 1 release-feed-guard .github/workflows/feed-pause.yml               # no kill switch workflow
 1 release-readme-links README.md                                    # Voxa-Android-1.0.0.apk is never uploaded; the installer link is fine
 1 release-runbook docs/release-runbook.md
 1 release-runbook README.md
+11 release-android-ci .github/workflows/android-release.yml        # no tag trigger, secrets outside the environment, set -x, echo, GITHUB_ENV, inline, dev flag, no always() delete, no umask, no size check, keystore and K1 in one job
