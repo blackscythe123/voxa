@@ -88,11 +88,20 @@ class VoxaKeyboard : InputMethodService() {
         super.onCreate()
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
-        recorder = Recorder(this, onLevel = { panel?.bars?.level(it) }, onInterrupted = { onMicInterrupted() })
+        recorder = Recorder(this, onLevel = { panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
         app.historyChanged()
         scope.launch {
             combine(app.session, app.online) { _, _ -> }.collect { pushReadiness() }
         }
+    }
+
+    /** Debug builds only (see [VoxaApp.debugLevels]): a speech-like level, read once per take. */
+    private var debugLevels = false
+    private var levelTick = 0
+    private fun syntheticLevel(): Float {
+        levelTick++
+        val syllable = kotlin.math.sin(levelTick * 0.55).toFloat().coerceAtLeast(0f)
+        return (0.25f + 0.7f * syllable * (0.6f + 0.4f * kotlin.math.sin(levelTick * 0.13).toFloat())).coerceIn(0f, 1f)
     }
 
     override fun onDestroy() {
@@ -114,7 +123,7 @@ class VoxaKeyboard : InputMethodService() {
         panel = p
         ViewCompat.setOnApplyWindowInsetsListener(p) { v, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            v.setPadding(0, 0, 0, nav.bottom)
+            (v as KeyboardPanel).bottomInset(nav.bottom)
             insets
         }
         wire(p)
@@ -152,6 +161,7 @@ class VoxaKeyboard : InputMethodService() {
         val s = app.core.settings()
         haptics = s.haptics
         holdToTalk = s.holdToTalk
+        debugLevels = app.debugLevels
         pushReadiness()
         app.checkSession()
         render()
@@ -273,7 +283,14 @@ class VoxaKeyboard : InputMethodService() {
         scope.launch {
             val event = withContext(Dispatchers.IO) {
                 try {
-                    FlowEvent.Transcribed(job, app.core.transcribeRecording(effect.pcmPath, effect.app))
+                    val canned = app.debugTranscript
+                    if (canned != null) {
+                        // Debug builds only: the rest of the flow (paste, History, the success state) runs for real.
+                        Diag.log("debug", "canned transcript used instead of ChatGPT")
+                        FlowEvent.Transcribed(job, app.core.finishText(canned, effect.app))
+                    } else {
+                        FlowEvent.Transcribed(job, app.core.transcribeRecording(effect.pcmPath, effect.app))
+                    }
                 } catch (e: TranscribeFailure) {
                     FlowEvent.TranscribeFailed(job, e)
                 }

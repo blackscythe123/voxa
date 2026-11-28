@@ -101,7 +101,7 @@ fun SetupScreen(activity: MainActivity) {
                     1 -> MicArt(mic)
                     2 -> KeyboardArt()
                     else -> Box(Modifier.padding(24.dp)) {
-                        VTextField(practice, { practice = it }, "Tap here, then tap the mic", singleLine = false, minHeight = 120.dp)
+                        VTextField(practice, { practice = it }, "Tap here, then tap the mic", singleLine = false, minHeight = 120.dp, rest = c.base)
                     }
                 }
             }
@@ -133,8 +133,13 @@ fun SetupScreen(activity: MainActivity) {
                 !selected -> PrimaryButton("Switch keyboard", icon = R.drawable.ic_keyboard) { activity.showKeyboardPicker() }
                 else -> PrimaryButton("Finish", onClick = next)
             }
-            Spacer(Modifier.height(8.dp))
-            TextAction(if (step == STEPS - 1) "Skip for now" else "Not now", c.text56) { next() }
+            // A way past the step, unless the button already is one.
+            if (!done && !(step == STEPS - 1 && selected)) {
+                Spacer(Modifier.height(8.dp))
+                TextAction(if (step == STEPS - 1) "Skip for now" else "Not now", c.text56) { next() }
+            } else {
+                Spacer(Modifier.height(48.dp))
+            }
         }
     }
 }
@@ -148,7 +153,7 @@ private fun SignInArt(name: String?, signedIn: Boolean) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(if (signedIn) name ?: "Signed in" else "ChatGPT", style = Type.SBold, color = c.text, maxLines = 1)
-            Text(if (signedIn) "Signed in" else "Your own account", style = Type.XS, color = c.text56)
+            Text(if (signedIn) "ChatGPT account" else "Your own account", style = Type.XS, color = c.text56)
         }
         CheckMark(signedIn)
     }

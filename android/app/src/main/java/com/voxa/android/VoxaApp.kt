@@ -88,8 +88,24 @@ class VoxaApp : Application() {
         mic = if (micGranted()) MicState.GRANTED else MicState.DENIED,
     )
 
+    /** Debug builds only: the session counts as good without asking ChatGPT (screenshots, tests). */
+    val debugReady get() = BuildConfig.DEBUG && getSharedPreferences("debug", MODE_PRIVATE).getBoolean("ready", false)
+
+    /** Debug builds only: the level bars move to a made-up voice (emulator mics hear silence). */
+    val debugLevels get() = BuildConfig.DEBUG && getSharedPreferences("debug", MODE_PRIVATE).getBoolean("levels", false)
+
+    /** Debug builds only: what "transcription" returns instead of calling ChatGPT, or null. */
+    val debugTranscript: String? get() = if (BuildConfig.DEBUG) getSharedPreferences("debug", MODE_PRIVATE).getString("transcript", null) else null
+
     /** Ask ChatGPT whether the session is good, at most every 10 minutes unless [force]. */
     fun checkSession(force: Boolean = false) {
+        if (debugReady) {
+            session.value = SessionState.VALID
+            blocked.value = false
+            online.value = true
+            if (account.value == null) account.value = core.cachedAccount()
+            return
+        }
         val now = System.currentTimeMillis()
         if (!force && now - lastCheckMs < 10 * 60_000) return
         lastCheckMs = now
@@ -144,21 +160,21 @@ class VoxaApp : Application() {
         val validated = { n: Network? ->
             cm.getNetworkCapabilities(n)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
         }
-        online.value = validated(cm.activeNetwork)
+        online.value = validated(cm.activeNetwork) || debugReady
         cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                 val up = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 scope.launch {
                     val was = online.value
                     if (was != up) Diag.log("network", if (up) "online (validated)" else "connected, not validated")
-                    online.value = up
+                    online.value = up || debugReady
                     if (up && !was) checkSession(force = session.value != SessionState.VALID)
                 }
             }
 
             override fun onLost(network: Network) {
                 Diag.log("network", "lost")
-                scope.launch { online.value = false }
+                scope.launch { online.value = debugReady }
             }
         })
     }

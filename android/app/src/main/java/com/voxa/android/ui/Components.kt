@@ -90,7 +90,7 @@ fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean 
     Row(
         modifier.fillMaxWidth().height(56.dp)
             .then(if (enabled && !c.dark) Modifier.shadow(10.dp, shape, ambientColor = c.accent.copy(alpha = 0.2f), spotColor = c.accent.copy(alpha = 0.45f)) else Modifier)
-            .clip(shape).background(c.accent).alpha(if (enabled) 1f else 0.4f)
+            .alpha(if (enabled) 1f else 0.4f).clip(shape).background(c.accent)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -107,8 +107,8 @@ fun SecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolea
     val c = vx
     val shape = RoundedCornerShape(16.dp)
     Row(
-        modifier.fillMaxWidth().height(56.dp).clip(shape).background(c.accent5).border(1.dp, c.accent12, shape)
-            .alpha(if (enabled) 1f else 0.4f).clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        modifier.fillMaxWidth().height(56.dp).alpha(if (enabled) 1f else 0.4f).clip(shape).background(c.accent5).border(1.dp, c.accent12, shape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
@@ -313,6 +313,8 @@ fun VTextField(
     singleLine: Boolean = true,
     minHeight: Dp = 56.dp,
     style: TextStyle = Type.M,
+    /** The field's colour at rest (the surface by default; the base on a surface background). */
+    rest: Color? = null,
 ) {
     val c = vx
     var focused by remember { mutableStateOf(false) }
@@ -327,7 +329,7 @@ fun VTextField(
             Box(
                 Modifier.fillMaxWidth().then(if (singleLine) Modifier.height(minHeight) else Modifier.heightIn(min = minHeight))
                     .then(if (focused) Modifier.border(2.dp, c.accent, shape) else Modifier)
-                    .clip(shape).background(if (focused) c.base else c.surface).padding(16.dp),
+                    .clip(shape).background(if (focused) c.base else rest ?: c.surface).padding(16.dp),
                 contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart,
             ) {
                 if (value.isEmpty()) Text(placeholder, style = style, color = c.text56)

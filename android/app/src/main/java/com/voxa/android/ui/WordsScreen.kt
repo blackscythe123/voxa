@@ -211,10 +211,10 @@ private fun PairEditor(fix: Boolean, initial: WordPair?, onSave: (WordPair) -> U
         )
         Spacer(Modifier.height(24.dp))
         FieldLabel(if (fix) "Voxa heard" else "When you say")
-        VTextField(from, { from = it }, if (fix) "clawed code" else "my address")
+        VTextField(from, { from = it }, if (fix) "What ChatGPT writes" else "A short phrase")
         Spacer(Modifier.height(16.dp))
         FieldLabel(if (fix) "Write instead" else "Voxa types")
-        VTextField(to, { to = it }, if (fix) "Claude Code" else "12 Park Road, Chennai", singleLine = fix, minHeight = if (fix) 56.dp else 96.dp)
+        VTextField(to, { to = it }, if (fix) "What it should be" else "The text Voxa types", singleLine = fix, minHeight = if (fix) 56.dp else 96.dp)
         Spacer(Modifier.height(24.dp))
         PrimaryButton("Save", enabled = from.isNotBlank() && to.isNotBlank()) { onSave(WordPair(from.trim(), to.trim())) }
         if (onDelete != null) {

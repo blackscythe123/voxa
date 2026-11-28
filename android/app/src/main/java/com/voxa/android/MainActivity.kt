@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,11 +76,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         openRequest = intent.getStringExtra(EXTRA_OPEN)
+        stack.add(if (voxa.core.settings().onboarded) Route.Tabbed(Tab.Home) else Route.Setup)
         debugSeams(intent)
         for (key in listOf(Settings.Secure.ENABLED_INPUT_METHODS, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
-        stack.add(if (voxa.core.settings().onboarded) Route.Tabbed(Tab.Home) else Route.Setup)
         // The launch animation: cold start only, and never when the user turned animations off.
         val animationsOff = Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         val freeze = if (BuildConfig.DEBUG && intent.hasExtra("debug_launch_at")) intent.getFloatExtra("debug_launch_at", 0.5f) else null
@@ -103,11 +104,23 @@ class MainActivity : ComponentActivity() {
             Diag.log("debug", "dummy session stored for testing")
             voxa.signedIn("voxa-debug=1", android.webkit.WebSettings.getDefaultUserAgent(this))
         }
+        // --ez debug_ready true|false: treat the session as good (no ChatGPT check).
+        // --es debug_transcript "text": the keyboard pastes this instead of transcribing ("" to stop).
+        val prefs = getSharedPreferences("debug", MODE_PRIVATE)
+        if (intent.hasExtra("debug_ready")) {
+            prefs.edit().putBoolean("ready", intent.getBooleanExtra("debug_ready", false)).apply()
+            voxa.checkSession(force = true)
+        }
+        if (intent.hasExtra("debug_levels")) prefs.edit().putBoolean("levels", intent.getBooleanExtra("debug_levels", false)).apply()
+        if (intent.hasExtra("debug_transcript")) {
+            val t = intent.getStringExtra("debug_transcript").orEmpty()
+            prefs.edit().apply { if (t.isEmpty()) remove("transcript") else putString("transcript", t) }.apply()
+        }
         intent.getStringExtra("debug_route")?.let { r ->
             stack.clear()
             stack.add(
                 when {
-                    r == "setup" -> Route.Setup
+                    r == "setup" -> Route.Setup.also { getSharedPreferences("ui", MODE_PRIVATE).edit().putInt("setup_step", 0).apply() }
                     r.startsWith("detail:") -> Route.Detail(r.removePrefix("detail:").toULong())
                     else -> Route.Tabbed(Tab.entries.firstOrNull { it.name.equals(r, true) } ?: Tab.Home)
                 },
@@ -215,7 +228,8 @@ class MainActivity : ComponentActivity() {
         val c = vx
         Box(Modifier.fillMaxSize().background(c.base)) {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxWidth().statusBarsPadding()) {
+                // Each place starts fresh (a second dictation must not inherit the first one's player).
+                Box(Modifier.weight(1f).fillMaxWidth().statusBarsPadding()) { key(route) {
                     when (route) {
                         is Route.Tabbed -> when (route.tab) {
                             Tab.Home -> HomeScreen(this@MainActivity)
@@ -227,7 +241,7 @@ class MainActivity : ComponentActivity() {
                         Route.SignIn -> SignInScreen(onDone = { back() }, onClose = { back() })
                         Route.Setup -> SetupScreen(this@MainActivity)
                     }
-                }
+                } }
                 if (route is Route.Tabbed) TabBar(route.tab) { go(Route.Tabbed(it)) }
             }
             if (launching) LaunchOverlay(freeze) { launching = false }
