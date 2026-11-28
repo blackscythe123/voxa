@@ -36,7 +36,8 @@ Source: "{#Bin}\voxa-signin.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Bin}\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Voxa"; Filename: "{app}\Voxa.exe"
+; The ID lets Voxa post Windows notifications (it matches SetCurrentProcessExplicitAppUserModelID).
+Name: "{autoprograms}\Voxa"; Filename: "{app}\Voxa.exe"; AppUserModelID: "Voxa.Desktop"
 Name: "{autodesktop}\Voxa"; Filename: "{app}\Voxa.exe"; Tasks: desktopicon
 
 [Tasks]
@@ -48,6 +49,9 @@ Name: "removeold"; Description: "Remove the old Voxa after updating (Windows ask
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "com.Voxa.app"; Flags: deletevalue
 ; Keep "start with Windows" if it was on, pointing at the installed copy.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Voxa Next"; ValueData: """{app}\Voxa.exe"" --background"; Check: AutostartWasOn; Flags: uninsdeletevalue
+
+; Voxa registers its notification name and icon here at start; removed on uninstall.
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Voxa.Desktop"; Flags: uninsdeletekey dontcreatekey
 
 [Run]
 Filename: "{app}\Voxa.exe"; Description: "Open Voxa"; Flags: nowait postinstall skipifsilent

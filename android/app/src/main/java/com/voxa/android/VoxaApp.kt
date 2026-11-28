@@ -13,9 +13,13 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import com.voxa.android.data.SessionVault
 import com.voxa.android.diag.Diag
+import com.voxa.android.notify.Notifier
+import com.voxa.android.notify.VoxaJobs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -24,7 +28,9 @@ import uniffi.voxa_ffi.LogSink
 import uniffi.voxa_ffi.MicState
 import uniffi.voxa_ffi.NetworkState
 import uniffi.voxa_ffi.ReadinessInfo
+import uniffi.voxa_ffi.SessionCheck
 import uniffi.voxa_ffi.SessionState
+import uniffi.voxa_ffi.VoxaFlow
 import uniffi.voxa_ffi.VoxaCore
 import uniffi.voxa_ffi.coreVersion
 import uniffi.voxa_ffi.setLogSink
@@ -68,7 +74,22 @@ class VoxaApp : Application() {
         holdToTalkOnByDefault()
         watchNetwork()
         checkSession(force = true)
+        // Notifications (docs/notifications.md): channels, the 12 h session check, and the
+        // background send of dictations recorded offline, checked whenever History changes.
+        Notifier.createChannels(this)
+        VoxaJobs.schedulePeriodic(this)
+        scope.launch {
+            historyVersion.collectLatest {
+                delay(1500)
+                withContext(Dispatchers.IO) { VoxaJobs.scheduleSendIfWaiting(this@VoxaApp) }
+            }
+        }
     }
+
+    /** The live keyboard's flow, so background work never sends a dictation the keyboard owns. */
+    @Volatile var keyboardFlow: VoxaFlow? = null
+
+    fun keyboardOwns(entryId: ULong): Boolean = runCatching { keyboardFlow?.isLive(entryId) == true }.getOrDefault(false)
 
     /** On a phone, hold to talk has always been on (hold the mic, let go to stop); the shared
      *  settings default it off (the desktop's hotkey mode). Turn it on once, then the user decides. */
@@ -97,6 +118,43 @@ class VoxaApp : Application() {
     /** Debug builds only: what "transcription" returns instead of calling ChatGPT, or null. */
     val debugTranscript: String? get() = if (BuildConfig.DEBUG) getSharedPreferences("debug", MODE_PRIVATE).getString("transcript", null) else null
 
+    /** Debug builds only: what session checks answer instead of asking ChatGPT ("valid" or "expired"). */
+    val debugCheck: SessionState? get() = if (!BuildConfig.DEBUG) null else when (getSharedPreferences("debug", MODE_PRIVATE).getString("check", null)) {
+        "valid" -> SessionState.VALID
+        "expired" -> SessionState.EXPIRED
+        else -> null
+    }
+
+    /** A check that may lead to "You're signed out": ChatGPT's session call said so for a session
+     *  we had (not "nothing saved"), and it wasn't Cloudflare. Never a failed transcription. */
+    fun definiteExpiry(r: SessionCheck) = r.session == SessionState.EXPIRED && !r.blocked && (core.hasSession() || debugCheck != null)
+
+    /** Check the session now and wait for the answer (network; for the background jobs too). */
+    /** ChatGPT re-issues the sign-in (90 days from now) as it's used: save it, or the saved sign-in
+     *  expires 90 days after the original sign-in however much Voxa is used. Logs no values. */
+    suspend fun keepRefreshedCookies() {
+        val header = core.takeRefreshedCookies() ?: return
+        vault.load()?.let { old -> withContext(Dispatchers.IO) { vault.save(SessionVault.Saved(header, old.userAgent)) } }
+        Diag.log("signin", "sign-in refreshed by ChatGPT: saved")
+    }
+
+    suspend fun checkSessionNow(): SessionCheck {
+        lastCheckMs = System.currentTimeMillis()
+        val fake = debugCheck
+        val r = if (fake != null) SessionCheck(fake, NetworkState.UP, core.cachedAccount(), false) else withContext(Dispatchers.IO) { core.checkSession() }
+        keepRefreshedCookies()
+        withContext(Dispatchers.Main) {
+            Log.i(TAG, "session check: ${r.session}, network ${r.network}, blocked ${r.blocked}")
+            Diag.log("readiness", "session ${r.session}, network ${r.network}, blocked ${r.blocked}${if (fake != null) " (debug answer)" else ""}")
+            session.value = r.session
+            blocked.value = r.blocked
+            if (r.network == NetworkState.DOWN) online.value = false
+            if (r.account != null) account.value = r.account
+            if (r.session == SessionState.EXPIRED) account.value = null
+        }
+        return r
+    }
+
     /** Ask ChatGPT whether the session is good, at most every 10 minutes unless [force]. */
     fun checkSession(force: Boolean = false) {
         if (debugReady) {
@@ -110,20 +168,9 @@ class VoxaApp : Application() {
         if (!force && now - lastCheckMs < 10 * 60_000) return
         lastCheckMs = now
         scope.launch {
-            val r = withContext(Dispatchers.IO) { core.checkSession() }
-            // ChatGPT re-issues the sign-in (90 days from now) as it's used: save it, or the saved
-            // sign-in expires 90 days after the original sign-in however much Voxa is used.
-            core.takeRefreshedCookies()?.let { header ->
-                vault.load()?.let { old -> withContext(Dispatchers.IO) { vault.save(SessionVault.Saved(header, old.userAgent)) } }
-                Diag.log("signin", "sign-in refreshed by ChatGPT: saved")
-            }
-            Log.i(TAG, "session check: ${r.session}, network ${r.network}, blocked ${r.blocked}")
-            Diag.log("readiness", "session ${r.session}, network ${r.network}, blocked ${r.blocked}")
-            session.value = r.session
-            blocked.value = r.blocked
-            if (r.network == NetworkState.DOWN) online.value = false
-            if (r.account != null) account.value = r.account
-            if (r.session == SessionState.EXPIRED) account.value = null
+            val r = checkSessionNow()
+            // Known good, now definitely signed out: say so only if a check 2 minutes later agrees.
+            if (Notifier.afterCheck(this@VoxaApp, r, definiteExpiry(r))) VoxaJobs.scheduleConfirm(this@VoxaApp, Notifier.confirmDelayMs(this@VoxaApp))
         }
     }
 
@@ -138,6 +185,7 @@ class VoxaApp : Application() {
 
     fun signOut() {
         Diag.log("signin", "signed out")
+        Notifier.signedOutOnPurpose(this)
         vault.clear()
         core.signOut()
         CookieManager.getInstance().removeAllCookies(null)

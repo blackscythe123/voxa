@@ -404,6 +404,13 @@ impl VoxaFlow {
         })
     }
 
+    /// The History entry a dictation is kept as, or None for an incognito take (never kept,
+    /// never notified about).
+    pub fn entry_for_job(&self, job: u64) -> Option<u64> {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        g.meta.get(&JobId(job)).filter(|m| !m.private).map(|m| m.entry)
+    }
+
     /// Whether a history entry belongs to a dictation the flow is still handling.
     pub fn is_live(&self, entry_id: u64) -> bool {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());

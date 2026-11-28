@@ -7932,6 +7932,7 @@ dependencies = [
 name = "voxa-desktop"
 version = "0.4.7"
 dependencies = [
+ "block",
  "chrono",
  "cocoa 0.26.0",
  "core-foundation 0.10.0",
