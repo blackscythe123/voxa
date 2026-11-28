@@ -1,0 +1,1118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxa for Android: v7 home greeting, doodles and the written splash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+  /* v6 tokens, with the v7 contrast fixes from section 3 applied (muted text 62 %, goodText, warnText). */
+  :root {
+    --base: #FFFFFF; --surface: #F3F3F1; --card: #FFFFFF;
+    --text: 20, 20, 20;
+    --t72: rgba(var(--text), .72); --t62: rgba(var(--text), .62); --t48: rgba(var(--text), .48);
+    --accent: #8F4C2C; --on-accent: #FFFFFF;
+    --accent-5: rgba(143, 76, 44, .06); --accent-12: rgba(143, 76, 44, .12);
+    --good: #1F9D55; --good-text: #17743F; --warn-text: #9A5B00; --danger-text: #B3241B;
+    --ink: #8F4C2C; --wash: rgba(143, 76, 44, .12); --line: rgba(143, 76, 44, .55);
+    --shadow: 0 8px 24px rgba(60, 40, 25, .08), 0 1px 2px rgba(60, 40, 25, .06);
+    --s-xl: 32px; --s-l: 20px; --s-m: 16px; --s-s: 13px;
+  }
+  .dark {
+    --base: #121212; --surface: #232321; --card: #1C1C1B;
+    --text: 242, 242, 240;
+    --t72: rgba(var(--text), .72); --t62: rgba(var(--text), .62); --t48: rgba(var(--text), .48);
+    --accent: #D9946D; --on-accent: #24140C;
+    --accent-5: rgba(217, 148, 109, .12); --accent-12: rgba(217, 148, 109, .22);
+    --good: #45C27C; --good-text: #45C27C; --warn-text: #E3A44A; --danger-text: #F07A70;
+    --ink: #D9946D; --wash: rgba(217, 148, 109, .16); --line: rgba(217, 148, 109, .5);
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #E9E9E6; font-family: "Manrope", system-ui, sans-serif; color: #141414; -webkit-font-smoothing: antialiased; }
+  .sheet { max-width: 1680px; margin: 0 auto; padding: 48px 32px 96px; }
+  .intro { max-width: 720px; margin-bottom: 40px; }
+  .intro h1 { font-size: 32px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .intro p, .note { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: rgba(20,20,20,.72); line-height: 1.55; }
+  h2.part { font-size: 24px; font-weight: 700; letter-spacing: -0.015em; margin: 72px 0 8px; padding-top: 32px; border-top: 1px solid rgba(20,20,20,.1); }
+  .lede { max-width: 760px; font-size: 16px; font-weight: 500; color: rgba(20,20,20,.72); line-height: 1.55; margin: 0 0 32px; }
+  .row { display: flex; flex-wrap: wrap; gap: 32px; margin-bottom: 56px; align-items: flex-start; }
+  .shot { width: 375px; }
+  .shot h3 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+  .shot p { font-size: 13px; font-weight: 500; color: rgba(20,20,20,.62); margin: 0 0 16px; line-height: 1.45; min-height: 57px; }
+  .tools { display: flex; gap: 12px; margin: 0 0 24px; }
+  .tools button { font: 700 13px Manrope, sans-serif; height: 40px; padding: 0 16px; border-radius: 12px; border: 1px solid rgba(143,76,44,.25); background: #fff; color: #8F4C2C; cursor: pointer; }
+  .tools button:focus-visible { outline: 2px solid #8F4C2C; outline-offset: 2px; }
+
+  /* Phone */
+  .phone { width: 375px; height: 812px; border-radius: 40px; background: var(--base); color: rgb(var(--text)); overflow: hidden; position: relative;
+           box-shadow: 0 0 0 10px #161616, 0 32px 64px rgba(0,0,0,.18); display: flex; flex-direction: column; }
+  .sb { height: 44px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 24px; font-size: var(--s-s); font-weight: 700; }
+  .sb i { display: inline-block; width: 16px; height: 10px; border-radius: 3px; background: rgb(var(--text)); margin-left: 4px; opacity: .85; }
+  .body { flex: 1; overflow: hidden; padding: 0 24px; display: flex; flex-direction: column; position: relative; }
+  .tabs { height: 80px; flex: none; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid rgba(var(--text), .06); background: var(--base); }
+  .tabs a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--t62); }
+  .tabs a.on { color: rgb(var(--text)); font-weight: 700; }
+  .tabs a.on svg { color: var(--accent); }
+  svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="%23384656"/><circle cx="20" cy="16" r="7" fill="%23d9c3b0"/><path d="M6 40c2-9 8-13 14-13s12 4 14 13z" fill="%23222b35"/></svg>') center/cover; flex: none; }
+  .card { background: var(--card); border-radius: 24px; box-shadow: var(--shadow); }
+  .dark .card { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+
+  /* Home header: the doodle band, then the greeting. */
+  .hdr { position: relative; height: 112px; margin: 0 -8px; flex: none; }
+  .hdr .avatar { position: absolute; top: 4px; right: 8px; }
+  .doodle { width: 343px; height: 112px; display: block; overflow: visible; }
+  .doodle .s { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .doodle .h { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-linecap: round; }
+  .doodle .w { fill: var(--wash); stroke: none; }
+  .doodle .dot { fill: var(--ink); stroke: none; }
+  .doodle .k { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-linecap: round; opacity: .7; }
+  .greet { font-size: 40px; line-height: 44px; font-weight: 700; letter-spacing: -0.03em; margin: 8px 0 0; }
+  .greet span { display: block; white-space: nowrap; }
+  .greet.one { white-space: nowrap; } .greet.one span { display: inline; }
+  .greet.fit { font-size: 32px; line-height: 38px; }
+  .shot p .when { color: rgba(20,20,20,.62); white-space: nowrap; }
+
+  /* The notice: only when something is wrong. */
+  .notice { margin-top: 16px; min-height: 48px; border-radius: 16px; background: var(--surface); display: flex; align-items: center; gap: 12px; padding: 0 12px 0 16px; font-size: var(--s-s); font-weight: 700; }
+  .notice .ic { width: 20px; height: 20px; flex: none; }
+  .notice .msg { flex: 1; }
+  .notice .msg small { display: block; font-weight: 500; color: var(--t72); font-size: 12px; margin-top: 2px; }
+  .notice .go { color: var(--accent); display: flex; align-items: center; gap: 4px; padding: 8px 4px 8px 8px; }
+  .notice .go svg { width: 16px; height: 16px; stroke-width: 2.2; }
+  .notice.warn .ic { color: var(--warn-text); } .notice.bad .ic { color: var(--danger-text); } .notice.calm .ic { color: var(--t62); }
+
+  .stats { padding: 24px; margin: 24px 0 16px; }
+  .stats .big { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stats .lbl { font-size: var(--s-s); font-weight: 500; color: var(--t62); margin-top: 8px; }
+  .stats .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(var(--text), .06); }
+  .stats .pair b { display: block; font-size: var(--s-l); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stats .pair span { font-size: var(--s-s); font-weight: 500; color: var(--t62); }
+  .sect { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
+  .sect b { font-size: var(--s-m); font-weight: 700; } .sect a { font-size: var(--s-s); font-weight: 700; color: var(--accent); }
+  .item { display: flex; gap: 12px; padding: 12px 0; }
+  .item .t { flex: 1; min-width: 0; }
+  .item .top { display: flex; justify-content: space-between; font-size: var(--s-s); }
+  .item .top b { font-weight: 700; } .item .top span { font-weight: 500; color: var(--t62); }
+  .item .x { font-size: var(--s-m); font-weight: 500; color: var(--t72); line-height: 1.4; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; background: #25D366; }
+  .app svg { width: 22px; height: 22px; fill: #fff; }
+  .fabmic { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); height: 56px; padding: 0 24px; border-radius: 28px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--s-m); box-shadow: 0 12px 28px rgba(143,76,44,.35), inset 0 1px 0 rgba(255,255,255,.2); white-space: nowrap; }
+  .dark .fabmic { box-shadow: 0 12px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.2); }
+
+  /* Doodle catalogue (small, all variants) */
+  .cat { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 40px; }
+  .cat figure { margin: 0; background: #fff; border-radius: 16px; padding: 16px 12px 12px; }
+  .cat figure.dark { background: #121212; }
+  .cat .doodle { width: 100%; height: auto; }
+  .cat figcaption { font-size: 13px; font-weight: 700; margin-top: 8px; color: #141414; }
+  .cat figcaption span { display: block; font-weight: 500; color: rgba(20,20,20,.62); }
+
+  /* Settings (birthday) */
+  .body.set { padding: 0 16px; }
+  .stitle { font-size: 32px; line-height: 40px; font-weight: 700; letter-spacing: -0.02em; margin: 16px 8px 8px; }
+  .sgroup { font-size: var(--s-s); font-weight: 700; color: var(--accent); margin: 16px 8px 4px; }
+  .srow { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 8px; }
+  .srow .sic { color: var(--t72); }
+  .srow .st { flex: 1; min-width: 0; } .srow .st b { display: block; font-size: var(--s-m); font-weight: 700; } .srow .st small { display: block; font-size: var(--s-s); font-weight: 500; color: var(--t72); margin-top: 2px; line-height: 1.35; }
+  .slink { font-size: var(--s-s); font-weight: 700; color: var(--accent); padding: 12px 4px 12px 8px; }
+  .phone .sfoot { font-size: 12px; font-weight: 500; color: var(--t72); margin: 0 8px 0 48px; line-height: 1.45; min-height: 0; }
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.32); }
+  .bsheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--card); border-radius: 28px 28px 0 0; padding: 24px 24px 32px; color: rgb(var(--text)); }
+  .bsheet .sh { display: block; font-size: var(--s-l); font-weight: 700; }
+  .bsheet small { display: block; font-size: var(--s-s); font-weight: 500; color: var(--t72); margin-top: 4px; }
+  .wheels { position: relative; display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin: 16px 0 24px; isolation: isolate; }
+  .wheel { display: flex; flex-direction: column; align-items: center; }
+  .wheel span { height: 40px; display: grid; place-items: center; font-size: var(--s-m); font-weight: 500; color: var(--t62); }
+  .wheel span.on { color: rgb(var(--text)); font-weight: 700; font-size: var(--s-l); }
+  .wheels .band { position: absolute; left: 0; right: 0; top: 80px; height: 40px; border-radius: 12px; background: var(--accent-12); z-index: -1; }
+  .sbtns { display: flex; justify-content: flex-end; gap: 8px; }
+  .btn-t, .btn-f { height: 48px; padding: 0 24px; border-radius: 24px; display: inline-grid; place-items: center; font-weight: 700; font-size: var(--s-m); }
+  .btn-t { color: var(--accent); } .btn-f { background: var(--accent); color: var(--on-accent); }
+
+  /* Notice sheet */
+  .notices { display: grid; grid-template-columns: repeat(4, 343px); gap: 24px; margin-bottom: 24px; }
+  .notices > div { background: #fff; border-radius: 16px; padding: 16px; }
+  .notices > div > b { display: block; font-size: 13px; margin-bottom: 0; }
+  .notices .notice { margin-top: 12px; }
+
+  /* Splash */
+  .splash { flex: 1; display: grid; place-items: center; position: relative; background: #FFFFFF; }
+  .dark .splash, .splash.dk { background: #211B17; }
+  .splash .stage { position: absolute; left: 0; right: 0; top: 316px; height: 220px; }
+  .splash svg.word { position: absolute; left: 47px; top: 0; width: 280px; height: 140px; overflow: visible; }
+  .splash .desc { position: absolute; left: 0; right: 0; top: 148px; text-align: center; font-size: 16px; font-weight: 500; letter-spacing: 0; color: rgba(20,20,20,.72); }
+  .splash.dk .desc { color: rgba(242,237,232,.74); }
+  .board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin: 8px 0 32px; }
+  .board figure { margin: 0; }
+  .board .fr { height: 150px; border-radius: 16px; background: #fff; position: relative; overflow: hidden; }
+  .board .fr .stage { position: absolute; left: 0; right: 0; top: 20px; height: 140px; transform: scale(.62); transform-origin: 50% 0; }
+  .board .fr svg.word { position: absolute; left: calc(50% - 140px); top: 0; width: 280px; height: 140px; overflow: visible; }
+  .board .fr .desc { position: absolute; left: -40px; right: -40px; top: 148px; text-align: center; font-size: 16px; font-weight: 500; color: rgba(20,20,20,.72); }
+  .board figcaption { font-size: 13px; font-weight: 700; margin-top: 8px; }
+  .board figcaption span { display: block; font-weight: 500; color: rgba(20,20,20,.62); line-height: 1.4; }
+
+  table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 16px; overflow: hidden; font-size: 13px; margin-bottom: 32px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(20,20,20,.07); vertical-align: middle; }
+  th { font-weight: 700; background: #F3F3F1; }
+  td { font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .ok { color: #17743F; font-weight: 700; } .no { color: #B3241B; font-weight: 700; } .na { color: rgba(20,20,20,.62); }
+  .sw { display: inline-flex; align-items: center; gap: 8px; }
+  .chip { display: inline-grid; place-items: center; min-width: 52px; height: 28px; padding: 0 8px; border-radius: 8px; font-weight: 700; font-size: 12px; border: 1px solid rgba(20,20,20,.08); }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .spec { background: #fff; border-radius: 16px; padding: 24px; font-size: 14px; line-height: 1.6; }
+  .spec h4 { margin: 0 0 8px; font-size: 16px; }
+  .spec p, .spec li { color: rgba(20,20,20,.78); font-weight: 500; }
+  .spec ul { padding-left: 20px; margin: 8px 0; }
+  .spec code { font-size: 12.5px; background: #F3F3F1; padding: 1px 6px; border-radius: 6px; }
+  .pal { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
+  .pal div { border-radius: 16px; overflow: hidden; background: #fff; font-size: 12px; font-weight: 500; }
+  .pal i { display: grid; place-items: center; height: 72px; font-style: normal; font-weight: 700; font-size: 15px; }
+  .pal p { margin: 0; padding: 8px 12px 12px; color: rgba(20,20,20,.72); line-height: 1.4; }
+  .pal p b { color: #141414; display: block; }
+
+  /* Desktop (Fluent window, v7.1 look) */
+  .dstack { display: flex; flex-direction: column; gap: 40px; margin-bottom: 40px; }
+  .dshot h3 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+  .dshot p { font-size: 13px; font-weight: 500; color: rgba(20,20,20,.62); margin: 0 0 16px; max-width: 760px; line-height: 1.45; }
+  .dwin { --dnav: #F1EEEA; --dpage: #FBFAF8; --dcard: #FFFFFF; --dborder: rgba(0,0,0,.06); --dtext: #1A1A1A; --dmuted: #5F5F5F; --daccent: #8F4C2C; --donacc: #FFFFFF; --dsel: rgba(0,0,0,.055); --dkey: #FBFAF8;
+          --ink: #8F4C2C; --wash: rgba(143,76,44,.12); --line: rgba(143,76,44,.55);
+          width: 1100px; height: 720px; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; background: var(--dnav); color: var(--dtext);
+          font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; box-shadow: 0 26px 60px rgba(0,0,0,.25), 0 0 0 1px rgba(0,0,0,.14); position: relative; flex: none; }
+  .dwin.dk { --dnav: #1C1A18; --dpage: #242120; --dcard: #2D2A28; --dborder: rgba(255,255,255,.07); --dtext: #F2F0ED; --dmuted: #B9B3AC; --daccent: #D9946D; --donacc: #24140C; --dsel: rgba(255,255,255,.06); --dkey: #242120;
+             --ink: #D9946D; --wash: rgba(217,148,109,.16); --line: rgba(217,148,109,.5); box-shadow: 0 26px 60px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.08); }
+  .dtb { height: 40px; flex: none; display: flex; align-items: center; gap: 10px; padding-left: 14px; font-size: 12px; }
+  .dmark { width: 16px; height: 16px; border-radius: 4px; background: #8F4C2C; display: grid; place-items: center; } .dmark svg { width: 10px; height: 10px; }
+  .dcaps { margin-left: auto; display: flex; } .dcaps svg { width: 46px; height: 40px; padding: 15px 18px; fill: none; stroke: currentColor; stroke-width: 1; }
+  .dbody { flex: 1; min-height: 0; position: relative; }
+  .dhome { position: absolute; inset: 0; display: flex; }
+  .dnav { width: 240px; flex: none; padding: 4px 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .dword { font: 600 24px Fraunces, Georgia, serif; letter-spacing: -.02em; padding: 8px 12px 14px; }
+  .dni { height: 36px; border-radius: 4px; display: flex; align-items: center; gap: 14px; padding: 0 12px; font-size: 14px; position: relative; }
+  .dni svg.i { width: 16px; height: 16px; }
+  .dni.on { background: var(--dsel); } .dni.on::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--daccent); }
+  .dni.foot { margin-top: auto; }
+  .dpg { flex: 1; min-width: 0; background: var(--dpage); border-top-left-radius: 8px; border-top: 1px solid var(--dborder); border-left: 1px solid var(--dborder); padding: 20px 40px 30px; overflow: hidden; }
+  .dband { height: 112px; margin: 0 0 4px; }
+  .dband svg.doodle { height: 112px; }
+  .dgreet { font: 600 40px/48px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; letter-spacing: -.02em; margin: 0; }
+  .dgreet span { display: block; white-space: nowrap; }
+  .dib { display: flex; align-items: flex-start; gap: 12px; padding: 12px 8px 12px 14px; border-radius: 4px; border: 1px solid var(--dborder); margin-top: 16px; font-size: 14px; line-height: 20px; }
+  .dib.err { background: #FDE7E9; } .dwin.dk .dib.err { background: #442726; }
+  .dib .gl { width: 16px; height: 16px; border-radius: 50%; background: #C42B1C; display: grid; place-items: center; margin-top: 2px; flex: none; }
+  .dwin.dk .dib .gl { background: #FF99A4; }
+  .dib .gl svg { width: 8px; height: 8px; fill: none; stroke: #fff; stroke-width: 1.6; } .dwin.dk .dib .gl svg { stroke: #442726; }
+  .dib .tx { flex: 1; } .dib .tx b { font-weight: 600; margin-right: 8px; }
+  .dbtn { height: 32px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--dborder); background: var(--dcard); font-size: 14px; display: inline-flex; align-items: center; white-space: nowrap; flex: none; }
+  .dbtn.acc { background: var(--daccent); color: var(--donacc); border-color: rgba(0,0,0,.1); }
+  .dhero { margin-top: 20px; padding: 22px 24px; border-radius: 8px; background: var(--dcard); border: 1px solid var(--dborder); display: flex; align-items: center; gap: 24px; }
+  .dhero .tx { flex: 1; } .dhero b { display: block; font-size: 20px; line-height: 28px; font-weight: 600; } .dhero small { display: block; font-size: 13px; color: var(--dmuted); margin-top: 6px; }
+  .dkeys { display: flex; gap: 6px; } .dkeys span { height: 48px; min-width: 48px; padding: 0 14px; display: grid; place-items: center; border-radius: 6px; background: var(--dkey); border: 1px solid var(--dborder); border-bottom-width: 4px; font-size: 18px; font-weight: 600; }
+  .dstats { display: flex; gap: 3px; margin-top: 3px; } .dstats div { flex: 1; background: var(--dcard); border: 1px solid var(--dborder); border-radius: 4px; padding: 14px 18px; }
+  .dstats b { display: block; font: 600 28px/36px "Segoe UI Variable Display", "Segoe UI", sans-serif; } .dstats small { font-size: 13px; color: var(--dmuted); }
+  .dsec { display: flex; justify-content: space-between; align-items: center; margin: 24px 0 8px; font-size: 14px; } .dsec b { font-weight: 600; } .dsec span { font-size: 13px; color: var(--daccent); }
+  .drow { display: grid; grid-template-columns: 28px 110px 1fr auto; gap: 14px; align-items: start; padding: 12px 14px; background: var(--dcard); border: 1px solid var(--dborder); border-radius: 4px; font-size: 14px; line-height: 21px; }
+  .dapp { width: 24px; height: 24px; border-radius: 50%; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+  .drow .when { font-size: 12px; color: var(--dmuted); line-height: 18px; } .drow .when b { display: block; color: var(--dtext); font-weight: 600; font-size: 13px; }
+  .drow .dbtn { height: 28px; font-size: 13px; }
+  .dsplash { position: absolute; inset: 0; background: var(--dpage); }
+  .dsplash .stage { position: absolute; left: 50%; top: 50%; width: 280px; height: 180px; transform: translate(-50%, -62%) scale(1.25); }
+  .dsplash svg.word { position: absolute; left: 0; top: 0; width: 280px; height: 140px; overflow: visible; }
+  .dsplash .desc { position: absolute; left: -80px; right: -80px; top: 148px; text-align: center; font: 500 15px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: rgba(20,20,20,.72); }
+  .dwin.dk .dsplash .desc { color: rgba(242,237,232,.74); }
+  .dthumbs { display: flex; gap: 16px; margin-bottom: 40px; }
+  .dthumb { margin: 0; } .dthumbbox { width: 385px; height: 252px; overflow: hidden; border-radius: 6px; }
+  .dthumbbox .dwin { transform: scale(.35); transform-origin: 0 0; }
+  .dthumb figcaption { font-size: 13px; font-weight: 700; margin-top: 8px; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  body.solo { background: #E9E9E6; }
+  body.solo .sheet > *:not(#soloMount) { display: none !important; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="intro">
+    <h1>Home greeting, doodles and the written splash</h1>
+    <p>Three proposals for Voxa on Android, built on the v6 tokens. The green "Ready to dictate" goes; the greeting becomes the header, drawn over by a small ink doodle that changes with the time of day, your own milestones and a few occasions. The splash becomes the nib writing the word Voxa. Section three brings the greeting, the doodle and the splash to the desktop app. Section four checks every colour pair against WCAG and fixes the ones that fail.</p>
+  </div>
+  <div class="tools">
+    <button id="replay">Replay all motion</button>
+    <button id="loop" aria-pressed="true">Auto replay is on</button>
+  </div>
+
+  <!-- ============ 1. HOME ============ -->
+  <h2 class="part">1. Home: a big greeting with a doodle</h2>
+  <p class="lede">The greeting is two words and your name, set at 40: on one line when it fits, otherwise the name moves to its own line. Above it, a 112 dp band where a sepia pen line draws the horizon and then the doodle, all finished by 1.4 seconds, once per doodle per day. The avatar stays in the top right; every doodle keeps that corner clear. When nothing is wrong, nothing is said: the screen is the greeting and your numbers.</p>
+  <div class="row" id="homesA"></div>
+  <div class="row" id="homesB"></div>
+  <div class="row" id="homesC"></div>
+  <div class="row" id="homesD"></div>
+
+  <h3 style="font-size:20px;margin:0 0 8px">Every doodle</h3>
+  <p class="lede">One pen, one sepia ink, a 2 dp round stroke on a 1.5 dp horizon, and a 12 % wash for anything that glows. Five follow the time of day, one marks the weekend, four come from your own use (the streak tally is drawn from the real count, shown here at 7 and 30), and two are occasions everyone has: your birthday and New Year. Nothing is tied to a country, a religion or a region. Each is 4 to 40 short paths in a 343 by 112 box, 0.5 to 1.5 KB as path data. The captions come from the same time table as the greetings.</p>
+  <div class="cat" id="cat"></div>
+
+  <h3 style="font-size:20px;margin:0 0 8px">The same doodle on different days</h3>
+  <p class="lede">So a daily user does not see one identical drawing for months, each time of day doodle varies a little with the date: how many birds and where, which cloud and where, which of four star layouts. Every position comes from a short list of safe spots, never a free random value, and the date is the seed, so a day's drawing is the same all day. At night the moon is the real phase for the date, worked out from the length of a lunar month, not always a crescent.</p>
+  <div class="cat" id="vary"></div>
+  <p class="note" id="cornerCheck" style="margin:-24px 0 40px;font-size:13px"></p>
+
+  <h3 style="font-size:20px;margin:0 0 8px">When something is wrong</h3>
+  <p class="lede">A single 48 dp notice sits under the greeting, only while there is a problem, and the whole row is the button. If two things are wrong, it shows the one that blocks dictation first (signed out, then microphone, then keyboard, then offline) and says "and 1 more". It never shows for a healthy state. While it shows, the doodle is drawn already finished with no flourish, so nothing moves next to the problem.</p>
+  <div class="notices" id="notices"></div>
+
+  <h3 style="font-size:20px;margin:0 0 8px">Your birthday, in Settings</h3>
+  <p class="lede">The only occasion that needs anything from you, so it is optional and off until you add it. Day and month only, never the year, kept on this phone. On the day it wins over everything else on Home.</p>
+  <div class="row" id="bday"></div>
+
+  <div class="twocol">
+    <div class="spec">
+      <h4>The greeting pool</h4>
+      <p>Picked once when Home opens, by the first rule that matches, top to bottom: birthday, then New Year, then a milestone, then the day of the week, then the time of day. Within a rule with more than one line it rotates by date.</p>
+      <table id="pool" style="margin:12px 0 0"></table>
+    </div>
+    <div class="spec">
+      <h4>Doodle motion and build</h4>
+      <ul>
+        <li><b>Beat 1, horizon:</b> 0 to 360 ms, the line draws left to right, <code>FastOutSlowIn</code>.</li>
+        <li><b>Beat 2, subject:</b> strokes start at 240 ms, 70 to 120 ms apart, each 110 to 520 ms, <code>CubicBezier(0.4, 0, 0.2, 1)</code>. Everything is drawn by about 1,300 ms.</li>
+        <li><b>Beat 3, wash:</b> fills fade 0 to 1 over 240 ms as the last stroke lands.</li>
+        <li><b>One short flourish:</b> 1,000 to 1,400 ms, once: a star twinkles, the candle flickers, steam rises 4 dp, the rays turn. Every doodle is finished by 1,400 ms (each caption above says when, computed from its parts).</li>
+        <li><b>When it plays:</b> once per doodle per calendar day, the first time Home shows it. After that, and when coming back from another tab or after the app was closed by the system, Home shows the finished drawing. The doodle is picked only when Home opens.</li>
+        <li><b>With a problem notice:</b> drawn finished, no flourish.</li>
+        <li><b>Reduced motion</b> (system animator scale 0 or Remove animations on): the finished drawing, no movement at all.</li>
+      </ul>
+      <h4 style="margin-top:16px">Compose</h4>
+      <ul>
+        <li>Each doodle is a list of <code>Stroke(path, startMs, durMs)</code> built once with <code>PathParser().parsePathString(d).toPath()</code> inside <code>remember</code>.</li>
+        <li>One <code>Animatable(0f..1100f)</code> drives the clock. In <code>Canvas</code>, each stroke uses <code>PathMeasure.getSegment(0, len * p, dst)</code> and <code>drawPath(dst, ink, style = Stroke(2.dp, cap = Round))</code>.</li>
+        <li>Colours come from <code>vx.accent</code>, so dark mode is free. No images, no Lottie, about 150 lines for the engine plus the path strings.</li>
+        <li>No date tables: New Year is fixed, the birthday is yours, milestones come from your own stats. The daily variation is a pure function of the date (a 32 bit hash seeds a tiny generator), so the same cases can be tested on Android and desktop.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ 2. SPLASH ============ -->
+  <h2 class="part">2. Splash: the pen writes Voxa</h2>
+  <p class="lede">The nib from the new icon writes the wordmark as one continuous monoline stroke, finishing with a swash that comes back under the word and crosses the x, the way you would cross a t. The nib keeps a writer's slant (35 degrees) and sways only a few degrees with the stroke direction, the way a held pen does; it never spins to follow the line. Then it lifts away, the ink settles, and one line of description rises in. The owner chose variant B (below): the nib drifts in unhurried, rests on the paper, and starts the V slowly. 2,420 ms in total, then Home fades in over 300 ms. A tap anywhere skips it.</p>
+  <div class="row" id="splashes"></div>
+
+  <h3 style="font-size:20px;margin:0 0 8px">Storyboard</h3>
+  <div class="board" id="board"></div>
+
+  <div class="twocol">
+    <div class="spec">
+      <h4>Timing, per beat (variant B, chosen)</h4>
+      <table id="beats" style="margin:12px 0 0"></table>
+    </div>
+    <div class="spec">
+      <h4>Description, three options</h4>
+      <ul>
+        <li><b>Talk instead of typing</b> (recommended: says what Voxa does in four plain words)</li>
+        <li>Say it, and it's written</li>
+        <li>Your voice, in writing</li>
+      </ul>
+      <h4 style="margin-top:16px">Dark mode</h4>
+      <p>The background becomes the icon's own tile colour, #211B17, the ink a warm off white #F2EDE8, the nib the icon's light sepia #D99366, the description 74 % off white (9.8 to 1). The Android 12 system splash already shows the icon on that tile, so the hand off is seamless.</p>
+      <h4 style="margin-top:16px">Hand off from the system splash</h4>
+      <p>Android 12 and later always shows the launcher icon first. Set <code>windowSplashScreenBackground</code> to the splash colour and the animated icon to the bare nib. Our Compose sequence begins with the nib already on screen, so beat 1 is the nib travelling from the centre to the start of the V rather than appearing from nothing.</p>
+      <h4 style="margin-top:16px">Reduced motion</h4>
+      <p>The finished frame (wordmark and description, no nib) shows for 400 ms and Home crossfades in. Cold start only; a warm start goes straight to Home.</p>
+      <h4 style="margin-top:16px">Compose</h4>
+      <p>One <code>Path</code> from the SVG string below, one <code>PathMeasure</code>. Each frame: <code>getSegment(0, len * p)</code> for the ink, <code>getPosition(len * p)</code> and <code>getTangent</code> for the nib, which is a 10 line <code>Path</code> drawn with <code>withTransform { translate; rotate }</code>.</p>
+      <p style="word-break:break-all;font-size:11px;color:rgba(20,20,20,.62)" id="pathOut"></p>
+    </div>
+  </div>
+
+  <h3 style="font-size:20px;margin:40px 0 8px" id="ab">Variant B is chosen; variant A is kept for reference</h3>
+  <p class="lede">A was the first timing. B, the one the owner chose, keeps the same write and the same ending, but takes its time getting started: the nib fades and drifts in over 450 ms instead of 250, rests on the paper for 120 ms (a small press, and the first drop of ink appears under it), then starts the V slowly and finds its pace. The ending is untouched, so B is A plus 420 ms, all of it in the first half second. Both loop from the same start here, so you can watch them side by side.</p>
+  <div class="row" id="abRow"></div>
+  <div class="twocol">
+    <div class="spec"><h4>Variant A, 2,000 ms (not chosen)</h4><table id="beatsA" style="margin:12px 0 0"></table></div>
+    <div class="spec"><h4>Variant B, 2,420 ms (chosen)</h4><table id="beatsB" style="margin:12px 0 0"></table><p id="abPace" style="margin:12px 0 0;font-size:13px"></p></div>
+  </div>
+  <h3 style="font-size:20px;margin:8px 0 8px">Storyboard, variant A (not chosen)</h3>
+  <div class="board" id="boardB"></div>
+
+  <!-- ============ 3. DESKTOP ============ -->
+  <h2 class="part">3. Desktop: the greeting, the doodle and the splash</h2>
+  <p class="lede">The same three ideas in the Windows and Mac app, on the v7 Fluent window. Home's header becomes the doodle band with the big two word greeting under it. The "Ready to dictate" line goes: when nothing is wrong the window says nothing about readiness, and an InfoBar appears only while something needs you. The splash plays inside the window's own content area, only the first time you open Home after Voxa starts.</p>
+  <div class="dstack" id="deskHomes"></div>
+
+  <h3 style="font-size:20px;margin:16px 0 8px">Desktop splash</h3>
+  <p class="lede">When you open the Home window for the first time since Voxa started, the content area is blank paper and the nib writes Voxa in its centre, at 1.25 times the phone size, with exactly the phone timing, variant B (2,420 ms). Then Home crossfades in over 300 ms and the doodle draws itself. The title bar stays a normal title bar the whole time, so it never reads as a separate splash window.</p>
+  <div class="tools"><button id="dVarB" aria-pressed="true">Play variant B, chosen</button><button id="dVarA" aria-pressed="false">Play variant A, not chosen</button></div>
+  <div class="dstack" id="deskLive"></div>
+  <div class="dthumbs" id="deskStills"></div>
+
+  <div class="twocol">
+    <div class="spec">
+      <h4>When the desktop splash plays</h4>
+      <ul>
+        <li><b>Only on a cold open of Home:</b> the first time you open the window after Voxa starts, from the tray icon, the tray menu, or launching Voxa again from Start or the Dock. Later opens in the same run go straight to Home.</li>
+        <li><b>Never at login.</b> Start with Windows (or a Mac login item) starts Voxa in the tray with no window, so there is nothing to play.</li>
+        <li><b>Never over other apps.</b> It is drawn inside Voxa's own window, not a separate topmost window. It never opens a window, raises one or takes focus by itself.</li>
+        <li><b>Only when you are looking.</b> If the window opens without becoming the active window (Windows refuses the focus and flashes the taskbar instead), or it opens straight to a page to fix something (Sign in from the strip, a notification), it skips to that page.</li>
+        <li><b>Skippable:</b> any click or key goes straight to Home, with the same 300 ms crossfade.</li>
+        <li><b>Reduced motion</b> (Windows: Animation effects off; Mac: Reduce motion): the finished wordmark, still, no nib, for 400 ms, then Home crossfades in. The doodle shows finished.</li>
+      </ul>
+    </div>
+    <div class="spec">
+      <h4>Building it in GPUI 0.2, cheaply</h4>
+      <ul>
+        <li><b>One canvas, two paths.</b> A <code>canvas()</code> element paints with <code>window.paint_path</code>. The wordmark string has only M and C commands, so a 30 line parser turns it into a <code>PathBuilder</code> once.</li>
+        <li><b>Stroke reveal by length:</b> GPUI's <code>PathBuilder::dash_array(&amp;[px(len * p), px(len)])</code> already measures the path and keeps only the first <code>len * p</code>, the same trick as the SVG here. Round caps and joins go through <code>with_style(PathStyle::Stroke(StrokeOptions::default().with_line_cap(Round)...))</code>.</li>
+        <li><b>The nib</b> needs the point and tangent at <code>len * p</code>: <code>lyon::algorithms::measure::PathMeasurements</code>, built once. lyon 1.0 is already a GPUI dependency, so naming it in Cargo.toml adds no build weight. The nib's four small shapes are rebuilt each frame with <code>PathBuilder::rotate</code> and <code>translate</code>.</li>
+        <li><b>Clock:</b> <code>window.request_animation_frame()</code> while the splash runs (2.42 s plus the 300 ms crossfade), then it stops asking, so idle cost is zero. Home's root takes <code>.opacity(x)</code> for the crossfade.</li>
+        <li><b>Doodles:</b> the same engine. GPUI cannot clip a path to a shape, so the hatch lines are stored already clipped (a few line segments per doodle, computed once from this page).</li>
+        <li><b>Cost:</b> one stroked path of about 250 dp and five tiny fills per frame, tessellated in well under a millisecond; no images, no fonts, no new crates.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ 4. CONTRAST ============ -->
+  <h2 class="part">4. Colour contrast, light and dark</h2>
+  <p class="lede">Every text and component pair the app and keyboard actually use, computed here in the page with the WCAG 2.x relative luminance formula (alpha colours are flattened onto their real background first). Targets: text under 18 pt needs 4.5 to 1 for AA and 7 to 1 for AAA; large text 3 and 4.5; icons and component edges 3 to 1 (AA, there is no AAA for those). Body text (100 % and 72 %) reaches AAA in both themes.</p>
+  <div id="palette"></div>
+  <table id="contrast"></table>
+  <div class="spec" id="summary"></div>
+  <div id="soloMount"></div>
+</div>
+
+<script>
+/* ---------------- shared ---------------- */
+const params = new URLSearchParams(location.search);
+const STILL = params.has('still');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const NS = 'http://www.w3.org/2000/svg';
+const ease = (x1, y1, x2, y2) => { // cubic bezier easing, same as Compose CubicBezierEasing
+  return t => { if (t <= 0) return 0; if (t >= 1) return 1;
+    let lo = 0, hi = 1, u = t; for (let i = 0; i < 24; i++) { u = (lo + hi) / 2; const x = 3*(1-u)*(1-u)*u*x1 + 3*(1-u)*u*u*x2 + u*u*u; if (x < t) lo = u; else hi = u; }
+    return 3*(1-u)*(1-u)*u*y1 + 3*(1-u)*u*u*y2 + u*u*u; };
+};
+const STD = ease(.4, 0, .2, 1), DECEL = ease(.05, .7, .1, 1), ACCEL = ease(.3, 0, .8, .15);
+const I = {
+  home: '<path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/>', hist: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+  words: '<path d="M4 7h16M4 12h10M4 17h7"/>', set: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  micoff: '<path d="M9 9v2a3 3 0 0 0 5.1 2.1M15 10V6a3 3 0 0 0-5.7-1.3M5 11a7 7 0 0 0 11.4 5.4M19 11a7 7 0 0 1-.6 2.8M12 18v3M4 4l16 16"/>',
+  user: '<circle cx="12" cy="9" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+  kb: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 14h8M7 10h.01M11 10h.01M15 10h.01"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.3 1.5A3.3 3.3 0 0 0 7 18zM4 4l16 16"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>',
+  cake: '<path d="M4 20h16M5 20v-7h14v7M5 15.5c2 1.5 3-1.5 5 0s3 1.5 5 0 3-1.5 4 0M12 13V9M12 4.5c-1 1-1 2.2 0 3 1-.8 1-2 0-3z"/>',
+};
+const icon = (k, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[k]}</svg>`;
+
+/* ---------------- doodles ----------------
+   Each part: [type, d, start ms, duration ms, tag]. type: s stroke, h horizon, w wash (fades), dot (fades),
+   hatch: pen shading, [ 'hatch', clipPath, [x0, y0, x1, y1], start ms, ms per line, gap ].
+   Box 343 x 112, horizon at y 92. Subject parts are scaled by `scale` about `origin` (stroke width compensated).
+   Keep out: x > 287 and y < 52 (avatar). A doodle's `parts` may be a function of ctx = { date, n }: the date seeds
+   the small daily variations, the moon phase and the weekday; n is the count for milestones. */
+
+/* One table for the time of day. The doodle and the greeting both come from it, and every caption on this page is rendered from it. */
+const SLOTS = [
+  { from: 5, to: 8, doodle: 'sunrise', lines: ['Early start', 'Up early'] },
+  { from: 8, to: 11.5, doodle: 'morning', lines: ['Good morning', 'Morning'] },
+  { from: 11.5, to: 12, doodle: 'midday', lines: ['Hello', 'Hey there'] },
+  { from: 12, to: 16, doodle: 'midday', lines: ['Good afternoon', 'Hey there'] },
+  { from: 16, to: 19, doodle: 'evening', lines: ['Good evening', 'Long day'] },
+  { from: 19, to: 22, doodle: 'night', lines: ['Good evening', 'Evening'] },
+  { from: 22, to: 24, doodle: 'night', lines: ['Night owl', 'Late one', 'Hey there'] },
+  { from: 0, to: 5, doodle: 'night', lines: ['Still up', 'Hey there'] },
+];
+const hourName = h => { if (h === 0 || h === 24) return 'midnight'; if (h === 12) return 'noon'; const H = Math.floor(h), M = Math.round((h - H) * 60); return `${((H + 11) % 12) + 1}${M ? ':' + String(M).padStart(2, '0') : ''}`; };
+const half = h => (h === 0 || h === 12 || h === 24) ? '' : (h < 12 ? 'am' : 'pm');
+const fmtRange = (a, b) => { const A = hourName(a), B = hourName(b), ha = half(a), hb = half(b);
+  if (ha && hb && ha === hb) return `${A} to ${B} ${hb}`; return `${A}${ha ? ' ' + ha : ''} to ${B}${hb ? ' ' + hb : ''}`; };
+const slotOfDoodle = key => { const s = SLOTS.filter(x => x.doodle === key).map(x => x.from < 5 ? { from: x.from + 24, to: x.to + 24 } : x).sort((p, q) => p.from - q.from);
+  return s.length ? [s[0].from % 24, s[s.length - 1].to % 24] : null; };
+const whenOf = key => { const r = slotOfDoodle(key); return r ? fmtRange(r[0], r[1]) : DOODLES[key].when; };
+
+/* Daily seed: the same date always gives the same drawing, so it is stable all day and testable. */
+const seedOf = iso => { let h = 2166136261; for (const c of iso) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+const rng = seed => () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const pick = (r, list) => list[Math.floor(r() * list.length)];
+const pickN = (r, list, n) => { const a = [...list], out = []; while (n-- > 0 && a.length) out.push(a.splice(Math.floor(r() * a.length), 1)[0]); return out; };
+const TODAY = '2026-11-28';
+
+/* The real moon: synodic month counted from the new moon of 6 January 2000, 18:14 UTC, taken at 20:00 UTC. */
+const SYN = 29.530589;
+const moonAge = iso => { const [y, m, d] = iso.split('-').map(Number); const t = Date.UTC(y, m - 1, d, 20, 0), ref = Date.UTC(2000, 0, 6, 18, 14); return (((t - ref) / 864e5) % SYN + SYN) % SYN; };
+const moonLit = age => (1 - Math.cos(2 * Math.PI * age / SYN)) / 2;
+const moonName = age => { const f = age / SYN; return f < .03 || f > .97 ? 'New moon' : f < .22 ? 'Waxing crescent' : f < .28 ? 'First quarter' : f < .47 ? 'Waxing gibbous' : f < .53 ? 'Full moon' : f < .72 ? 'Waning gibbous' : f < .78 ? 'Last quarter' : 'Waning crescent'; };
+function moonPath(cx, cy, r, age) { // the lit part: the limb on the lit side, then the terminator back up
+  const f = age / SYN, k = Math.cos(2 * Math.PI * f), rx = Math.max(.01, Math.abs(k) * r), waxing = f < .5, crescent = k > 0;
+  const top = `${cx} ${cy - r}`, bot = `${cx} ${cy + r}`;
+  return `M${top} A${r} ${r} 0 0 ${waxing ? 1 : 0} ${bot} A${rx.toFixed(2)} ${r} 0 0 ${waxing ? (crescent ? 0 : 1) : (crescent ? 1 : 0)} ${top} Z`;
+}
+
+const H = (extra = '') => ['h', 'M6 92 C 70 90.5, 130 93, 190 91.8 S 300 92.6, 337 91.6' + extra, 0, 360];
+const rays = (cx, cy, r1, r2, a0, a1, n, t0, step, tag) => { const out = []; for (let i = 0; i < n; i++) { const a = (a0 + (a1 - a0) * i / (n - 1)) * Math.PI / 180; out.push(['s', `M${(cx + r1 * Math.cos(a)).toFixed(1)} ${(cy - r1 * Math.sin(a)).toFixed(1)} L${(cx + r2 * Math.cos(a)).toFixed(1)} ${(cy - r2 * Math.sin(a)).toFixed(1)}`, t0 + i * step, 160, tag]); } return out; };
+const spark = (x, y, r) => `M${x} ${y - r} Q${x} ${y} ${x + r} ${y} Q${x} ${y} ${x} ${y + r} Q${x} ${y} ${x - r} ${y} Q${x} ${y} ${x} ${y - r} Z`;
+const bird = (x, y, s = 1) => `M${x} ${y} q${5*s} ${-6*s} ${10*s} 0 q${5*s} ${-6*s} ${10*s} 0`;
+const dot = (x, y, r = 1.6) => `M${x} ${y} m-${r} 0 a${r} ${r} 0 1 0 ${2*r} 0 a${r} ${r} 0 1 0 -${2*r} 0`;
+const circ = (x, y, r) => `M${x} ${y} m-${r} 0 a${r} ${r} 0 1 0 ${2*r} 0 a${r} ${r} 0 1 0 -${2*r} 0`;
+const burst = (cx, cy, r1, r2, n, t0) => { const o = []; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + .2; o.push(['s', `M${(cx + r1*Math.cos(a)).toFixed(1)} ${(cy + r1*Math.sin(a)).toFixed(1)} L${(cx + r2*Math.cos(a)).toFixed(1)} ${(cy + r2*Math.sin(a)).toFixed(1)}`, t0 + (i % 3) * 30, 200]); o.push(['dot', dot(+(cx + (r2 + 4)*Math.cos(a)).toFixed(1), +(cy + (r2 + 4)*Math.sin(a)).toFixed(1), 1.4), t0 + 220, 200]); } return o; };
+const birds = (list, t0) => list.map(([x, y, s], i) => ['s', bird(x, y, s), t0 + i * 70, 200]);
+const wave = (x, y, n) => `M${x} ${y}` + ' q2.5 -3.5 5 0' + ' t5 0'.repeat(n - 1);
+
+/* Safe spots for the daily variations, per doodle. Every spot is checked against the avatar corner below. */
+const SAFE = {
+  sunriseBirds: [[196, 52, 1], [212, 40, .8], [92, 50, .8], [72, 60, .9], [226, 60, .7]],
+  morningBirds: [[206, 36, .8], [74, 40, .8], [236, 52, .7], [92, 56, .7]],
+  morningClouds: [
+    [['s', 'M176 50 C 182 43, 194 43, 200 47 C 206 42, 218 44, 222 50', 760, 220], ['s', 'M194 58 C 206 55, 226 55, 244 58', 830, 240]],
+    [['s', 'M44 44 C 50 37, 62 37, 68 41 C 74 36, 86 38, 90 44', 760, 220], ['s', 'M30 52 C 44 49, 64 49, 82 52', 830, 240]],
+    [['s', 'M178 66 C 184 59, 196 59, 202 63 C 208 58, 222 60, 228 66', 760, 240]],
+  ],
+  middayClouds: [176, 30, 196],
+  middayBirds: [[200, 40, .8], [84, 70, .8], [226, 46, .7]],
+  eveningBirds: [[150, 56, .9], [104, 40, .8], [244, 58, .8], [128, 30, .7]],
+  nightStars: [
+    { tw: [204, 34, 7], sp: [[236, 64, 5], [86, 44, 5]], dots: [[60, 84], [260, 86]] },
+    { tw: [92, 30, 7], sp: [[214, 48, 5], [250, 74, 4]], dots: [[40, 70], [196, 84]] },
+    { tw: [222, 40, 7], sp: [[70, 56, 5]], dots: [[100, 24], [250, 82], [36, 80]] },
+    { tw: [60, 40, 6], sp: [[206, 28, 5], [242, 66, 4]], dots: [[92, 78], [224, 86]] },
+  ],
+};
+
+function tallyParts(n) { // groups of five, four strokes and a slash; then the remainder; then one spark
+  const big = n <= 10, sp = big ? 14 : 7.5, top = big ? 50 : 58, gateW = 3 * sp, gap = big ? 22 : 15, over = big ? 8 : 3;
+  const groups = Math.floor(n / 5), rest = n % 5, marks = n + groups, step = Math.min(90, 760 / marks);
+  const width = groups * (gateW + gap) + (rest ? (rest - 1) * sp : -gap);
+  let x = 165 - width / 2, t = 260; const out = [H()];
+  for (let g = 0; g < groups; g++) {
+    for (let i = 0; i < 4; i++) { out.push(['s', `M${(x + i * sp + 2).toFixed(1)} 88 L${(x + i * sp).toFixed(1)} ${top}`, t, 110]); t += step; }
+    out.push(['s', `M${(x - over).toFixed(1)} ${big ? 80 : 82} L${(x + gateW + over).toFixed(1)} ${big ? 56 : 62}`, t, 140]); t += step;
+    x += gateW + gap;
+  }
+  for (let i = 0; i < rest; i++) { out.push(['s', `M${(x + i * sp + 2).toFixed(1)} 88 L${(x + i * sp).toFixed(1)} ${top}`, t, 110]); t += step; }
+  const sx = x + (rest ? (rest - 1) * sp : -gap) + 22;
+  out.push(['s', spark(+sx.toFixed(1), big ? 44 : 50, 6), t + 40, 160]);
+  return out;
+}
+// The notebook: both pages filled for a words milestone; one line, ending in a loop, for the first dictation.
+const NOTEBOOK = 'M108 86 C 126 82, 148 82, 165 87 C 182 82, 204 82, 222 86 L222 42 C 204 38, 182 38, 165 43 C 148 38, 126 38, 108 42 Z';
+const LOOPEND = (x, y, t) => ['s', `M${x} ${y} q2.5 -3.5 5 0 t5 0 t5 0 C ${x + 19} ${y - 4}, ${x + 27} ${y - 8}, ${x + 31} ${y - 2} C ${x + 34} ${y + 4}, ${x + 24} ${y + 6}, ${x + 26} ${y - 1} C ${x + 28} ${y - 6}, ${x + 35} ${y - 4}, ${x + 41} ${y - 2}`, t, 220];
+const notebook = full => [H(), ['s', NOTEBOOK, 240, 520], ['s', 'M165 43 V87', 560, 140],
+  ...(full ? [...[50, 58, 66, 74].map((y, i) => ['s', wave(116, y, 8), 640 + i * 70, 150]), ...[50, 58, 66].map((y, i) => ['s', wave(173, y, 8), 920 + i * 70, 150]), LOOPEND(173, 74, 1130)]
+    : [LOOPEND(118, 52, 680)])];
+
+const DOODLES = {
+  sunrise: { name: 'Sunrise', scale: 1.3, origin: [152, 92], parts: ({ date }) => { const r = rng(seedOf(date + 'sunrise')); return [H(),
+    ['s', 'M118 92 A34 34 0 0 1 186 92', 260, 420],
+    ['hatch', 'M118 92 A34 34 0 0 1 186 92 Z', [118, 58, 186, 92], 600, 22, 6],
+    ...rays(152, 92, 42, 52, 160, 20, 7, 520, 55),
+    ...birds(pickN(r, SAFE.sunriseBirds, pick(r, [0, 1, 2, 2, 3])), 880)]; } },
+  morning: { name: 'Morning', note: 'Sunrise with the sun clear of the horizon', scale: 1.15, origin: [150, 92], parts: ({ date }) => { const r = rng(seedOf(date + 'morning')); return [H(),
+    ['s', circ(126, 56, 19), 260, 400],
+    ['hatch', circ(126, 56, 19), [107, 37, 145, 75], 600, 20, 6],
+    ...rays(126, 56, 25, 32, 200, -20, 6, 500, 50),
+    ...pick(r, SAFE.morningClouds),
+    ...birds(pickN(r, SAFE.morningBirds, pick(r, [0, 1, 1, 2])), 940)]; } },
+  midday: { name: 'Midday', scale: 1.15, origin: [150, 92], parts: ({ date }) => { const r = rng(seedOf(date + 'midday')); const cx = pick(r, SAFE.middayClouds); return [H(),
+    ['s', circ(122, 50, 21), 260, 420],
+    ['hatch', circ(122, 50, 21), [101, 29, 143, 71], 620, 20, 6],
+    ...rays(122, 50, 28, 36, 90, 405, 8, 500, 45, 'ray').slice(0, 8),
+    ['s', cx < 120 ? `M${cx} 86 h52 a10 10 0 0 0 -4 -19 a13 13 0 0 0 -24 -3 a10 10 0 0 0 -17 8 a7 7 0 0 0 -7 14` : `M${cx} 86 h60 a11 11 0 0 0 -4 -21 a15 15 0 0 0 -28 -4 a11 11 0 0 0 -20 9 a8 8 0 0 0 -8 16`, 720, 380],
+    ...birds(pickN(r, SAFE.middayBirds, pick(r, [0, 0, 1])), 900)]; },
+    flourish: 'turn', pivot: [122, 50] },
+  evening: { name: 'Evening', scale: 1.3, origin: [208, 92], parts: ({ date }) => { const r = rng(seedOf(date + 'evening')); return [
+    ['h', 'M6 92 C 40 92, 56 66, 96 66 S 140 92, 164 92 S 300 92.6, 337 91.6', 0, 380],
+    ['s', 'M180 92 A28 28 0 0 1 236 92', 300, 380],
+    ['hatch', 'M180 92 A28 28 0 0 1 236 92 Z', [180, 64, 236, 92], 600, 22, 6],
+    ['s', 'M186 98 H230', 640, 160], ['s', 'M194 103 H222', 720, 140], ['s', 'M202 108 H214', 790, 120],
+    ...birds(pickN(r, SAFE.eveningBirds, pick(r, [0, 1, 1, 2])), 860)]; } },
+  night: { name: 'Night', note: 'The real moon phase for the date', scale: 1.2, origin: [160, 92], parts: ({ date }) => { const r = rng(seedOf(date + 'night')); const L = pick(r, SAFE.nightStars);
+    const age = moonAge(date), lit = moonLit(age), m = moonPath(138, 47, 22, age);
+    const moon = lit < .03 ? [['h', circ(138, 47, 22), 260, 520]] : lit > .97 ? [['s', circ(138, 47, 22), 260, 520], ['hatch', circ(138, 47, 22), [116, 25, 160, 69], 700, 20, 5]] : [['s', m, 260, 520], ['hatch', m, [116, 25, 160, 69], 700, 20, 5]];
+    return [H(), ...moon,
+      ['s', spark(...L.tw), 620, 220, 'tw'], ...L.sp.map(([x, y, s], i) => ['s', spark(x, y, s), 720 + i * 80, 200]),
+      ...L.dots.map(([x, y], i) => ['dot', dot(x, y), 900 + i * 40, 200])]; },
+    flourish: 'twinkle' },
+  weekend: { name: 'Weekend', when: 'Saturday and Sunday, 5 am to noon', note: 'A plain mug and an open book', scale: 1.3, origin: [165, 92], parts: [H(),
+    ['s', 'M124 56 H156 V84 C156 89, 152 92, 147 92 H133 C128 92, 124 89, 124 84 Z', 260, 420],
+    ['hatch', 'M124 70 H156 V84 C156 89, 152 92, 147 92 H133 C128 92, 124 89, 124 84 Z', [124, 70, 156, 92], 640, 18, 5],
+    ['s', 'M156 62 C 168 62, 168 80, 156 80', 560, 200],
+    ['s', 'M174 90 L178 70 C 188 66, 200 67, 207 73 C 214 67, 226 66, 236 70 L240 90 C 230 86, 216 86, 207 91 C 198 86, 184 86, 174 90 Z', 620, 360],
+    ['s', 'M207 73 V91', 820, 100],
+    ['s', wave(183, 76, 4) + ' ' + wave(183, 82, 3) + ' ' + wave(212, 76, 4) + ' ' + wave(212, 82, 4), 880, 220],
+    ['s', 'M134 49 C 128 43, 140 38, 134 30', 820, 240, 'st'], ['s', 'M147 49 C 141 43, 153 38, 147 28', 880, 240, 'st']],
+    flourish: 'rise' },
+  streak: { name: 'Streak', when: 'Every 7th day in a row', note: 'Drawn from the real count', scale: 1, origin: [165, 92], parts: ({ n = 7 }) => tallyParts(n) },
+  words: { name: 'Words milestone', when: 'The day you pass 1,000, 10,000 or 100,000', note: 'A notebook, filled', scale: 1.15, origin: [165, 92], parts: notebook(true) },
+  first: { name: 'First dictation', when: 'The day of your first dictation', note: 'The same notebook, one line in', scale: 1.15, origin: [165, 92], parts: notebook(false) },
+  birthday: { name: 'Birthday', when: 'Your birthday, if you add it', note: 'A cake with one candle', scale: 1.15, origin: [159, 92], parts: [H(),
+    ['s', 'M120 92 H198', 220, 180],
+    ['s', 'M128 92 V64 H190 V92', 300, 380],
+    ['s', 'M128 71 C 134 78, 140 64, 147 71 S 160 78, 166 71 S 180 64, 190 71', 560, 240],
+    ['hatch', 'M128 76 H190 V92 H128 Z', [128, 76, 190, 92], 700, 16, 5],
+    ['s', 'M159 64 V48', 680, 120],
+    ['w', 'M159 44 C 153 39, 155 31, 159 24 C 163 31, 165 39, 159 44 Z', 900, 240, 'fl'],
+    ['s', 'M159 44 C 153 39, 155 31, 159 24 C 163 31, 165 39, 159 44 Z', 760, 240, 'fl'],
+    ['s', spark(108, 50, 5), 900, 180], ['s', spark(212, 40, 5), 960, 180], ['dot', dot(96, 72), 1000, 160], ['dot', dot(224, 70), 1040, 160]],
+    flourish: 'flicker' },
+  newyear: { name: 'New Year', when: '1 January', scale: 1.1, origin: [165, 92], parts: [H(),
+    ['s', 'M118 92 C 116 78, 122 64, 120 48', 240, 260], ['s', 'M206 92 C 208 82, 204 74, 206 64', 360, 220],
+    ...burst(120, 38, 8, 24, 10, 500), ...burst(206, 56, 6, 16, 8, 640)] },
+};
+const FLOURISH = { start: 1000, dur: 400 }; // one short flourish; every doodle is finished by 1,400 ms
+const partsOf = (key, ctx = {}) => { const d = DOODLES[key]; return typeof d.parts === 'function' ? d.parts({ date: TODAY, n: 7, ...ctx }) : d.parts; };
+const doneBy = (key, ctx) => { let m = 0; partsOf(key, ctx).forEach(([t, path, a, b, c, gap]) => {
+  if (t === 'hatch') { const [x0, y0, x1, y1] = a, step = gap * Math.SQRT2, n = Math.ceil((x1 + y1 - x0 - y0 - step / 2) / step); m = Math.max(m, b + (n - 1) * c + 110); }
+  else m = Math.max(m, a + b); }); return DOODLES[key].flourish ? Math.max(m, FLOURISH.start + FLOURISH.dur) : m; };
+
+let clipId = 0;
+// opts.wide: draw on a wider band (desktop). The subject sits at opts.dx and the horizon runs the full width.
+function doodleSVG(key, ctx = {}, opts = {}) {
+  const d = DOODLES[key], sc = d.scale || 1, [ox, oy] = d.origin || [0, 0], W = opts.wide || 343, dx = opts.dx || 0;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} 112`); svg.setAttribute('class', 'doodle'); svg.setAttribute('aria-hidden', 'true');
+  if (opts.wide) { svg.style.width = W + 'px'; }
+  svg.dataset.key = key;
+  const defs = document.createElementNS(NS, 'defs'); svg.appendChild(defs);
+  const root = document.createElementNS(NS, 'g'); root.setAttribute('transform', `translate(${dx} 0)`); svg.appendChild(root);
+  const g = document.createElementNS(NS, 'g');
+  g.setAttribute('transform', `translate(${ox} ${oy}) scale(${sc}) translate(${-ox} ${-oy})`);
+  const add = (parent, cls, path, st, du, tag, sw) => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', path); p.setAttribute('class', cls); p.dataset.st = st; p.dataset.du = du; if (tag) p.dataset.tag = tag;
+    if (sw) p.style.strokeWidth = sw; parent.appendChild(p); return p;
+  };
+  partsOf(key, ctx).forEach(part => {
+    const [t, path, a, b, c, gap] = part;
+    if (t === 'h') { // the horizon is not scaled; on a wide band it runs edge to edge
+      if (path.startsWith('M6 92')) add(root, 'h', opts.wide ? `M${6 - dx} 92 L` + path.slice(1) + ` L${W - 6 - dx} 91.6` : path, a, b);
+      else add(g, 'h', path, a, b, null, (1.5 / sc).toFixed(2)); // the faint new moon
+      return; }
+    if (t === 'hatch') {
+      const id = 'hc' + (++clipId), cp = document.createElementNS(NS, 'clipPath'); cp.id = id;
+      const cpp = document.createElementNS(NS, 'path'); cpp.setAttribute('d', path); cp.appendChild(cpp); defs.appendChild(cp);
+      const hg = document.createElementNS(NS, 'g'); hg.setAttribute('clip-path', `url(#${id})`); g.appendChild(hg);
+      const [x0, y0, x1, y1] = a, step = gap * Math.SQRT2; let i = 0;
+      for (let k = x0 + y0 + step / 2; k < x1 + y1; k += step, i++)
+        add(hg, 'k', `M${(k - y1).toFixed(1)} ${y1} L${(k - y0).toFixed(1)} ${y0}`, b + i * c, 110, null, (1.2 / sc).toFixed(2));
+      return;
+    }
+    add(g, t, path, a, b, c, t === 's' ? (2 / sc).toFixed(2) : null);
+  });
+  root.appendChild(g);
+  if (opts.still) svg.dataset.still = '1';
+  return svg;
+}
+function playDoodle(svg) {
+  const d = DOODLES[svg.dataset.key], still = STILL || reduce || svg.dataset.still === '1';
+  svg.querySelectorAll('path[data-st]').forEach(p => {
+    p.getAnimations().forEach(a => a.cancel());
+    const st = +p.dataset.st, du = +p.dataset.du, t = p.getAttribute('class');
+    if (still) { p.style.strokeDasharray = ''; p.style.opacity = ''; return; }
+    if (t === 'w' || t === 'dot') { p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: du, delay: st, fill: 'both', easing: 'cubic-bezier(.4,0,.2,1)' }); return; }
+    const L = p.getTotalLength() + 1;
+    p.style.strokeDasharray = L;
+    p.animate([{ strokeDashoffset: L }, { strokeDashoffset: 0 }], { duration: du, delay: st, fill: 'both', easing: 'cubic-bezier(.4,0,.2,1)' });
+  });
+  if (!d.flourish || still) return;
+  const tagged = tag => [...svg.querySelectorAll(`path[data-tag="${tag}"]`)];
+  const pivot = (el, bottom) => { const b = el.getBBox(); el.style.transformBox = 'view-box'; el.style.transformOrigin = `${b.x + b.width / 2}px ${bottom ? b.y + b.height : b.y + b.height / 2}px`; };
+  const o = { duration: FLOURISH.dur, delay: FLOURISH.start, easing: 'cubic-bezier(.4,0,.2,1)' };
+  if (d.flourish === 'twinkle') tagged('tw').forEach(el => { pivot(el); el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.5) rotate(20deg)' }, { transform: 'scale(1)' }], o); });
+  if (d.flourish === 'flicker') tagged('fl').forEach(el => { pivot(el, true); el.animate([{ transform: 'none' }, { transform: 'scaleY(1.14) skewX(-5deg)' }, { transform: 'scaleY(.94) skewX(3deg)' }, { transform: 'none' }], o); });
+  if (d.flourish === 'rise') tagged('st').forEach(el => el.animate([{ transform: 'translateY(0)', opacity: 1 }, { transform: 'translateY(-4px)', opacity: .5 }, { transform: 'translateY(0)', opacity: 1 }], o));
+  if (d.flourish === 'turn') tagged('ray').forEach(el => { el.style.transformBox = 'view-box'; el.style.transformOrigin = `${d.pivot[0]}px ${d.pivot[1]}px`; el.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(22.5deg)' }], o); });
+}
+
+/* ---------------- home phones ---------------- */
+const tabs = (on = 'Home') => `<nav class="tabs">
+  ${[['home', 'Home'], ['hist', 'History'], ['words', 'Words'], ['set', 'Settings']].map(([k, n]) => `<a class="${n === on ? 'on' : ''}">${icon(k)}${n}</a>`).join('')}</nav>`;
+const NOTICES = {
+  signedout: { cls: 'warn', ic: 'user', t: 'Signed out of ChatGPT', s: 'Voxa needs it to write', go: 'Sign in' },
+  mic: { cls: 'bad', ic: 'micoff', t: 'Microphone is blocked', s: 'Voxa can\'t hear you', go: 'Allow' },
+  kb: { cls: 'warn', ic: 'kb', t: 'Voxa keyboard is off', s: 'Turn it on to use it in any app', go: 'Turn on' },
+  offline: { cls: 'calm', ic: 'cloud', t: 'You\'re offline', s: 'Dictation comes back with the internet', go: '' },
+};
+const noticeHTML = (k, more) => { const n = NOTICES[k]; return `<div class="notice ${n.cls}" role="button" tabindex="0">${icon(n.ic, 'i ic')}<span class="msg">${n.t}<small>${more ? n.s + '. 1 more to fix' : n.s}</small></span>${n.go ? `<span class="go">${n.go}${icon('chev')}</span>` : ''}</div>`; };
+const sampleStats = { big: '1h 24m', lbl: 'saved this week versus typing', a: '4,611', b: '148' };
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const dayName = iso => DAYS[new Date(iso + 'T12:00:00Z').getUTCDay()];
+const longDate = iso => { const d = new Date(iso + 'T12:00:00Z'); return `${dayName(iso)} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`; };
+
+function homePhone({ key, g1, name = 'Sam', time = '9:41', date = TODAY, n, dark = false, notice, stats = sampleStats, title, note }) {
+  const shot = document.createElement('div'); shot.className = 'shot';
+  shot.innerHTML = `<h3>${title}</h3><p>${note} <span class="when">${longDate(date)}, ${time}.</span></p>
+  <div class="phone ${dark ? 'dark' : ''}">
+    <div class="sb"><span>${time.replace(/ [ap]m$/, '')}</span><span><i></i><i></i></span></div>
+    <div class="body">
+      <div class="hdr"><div class="avatar" role="img" aria-label="Account"></div></div>
+      <h1 class="greet"><span>${g1}</span> <span class="nm">${name}</span></h1>
+      ${notice ? noticeHTML(notice.k, notice.more) : ''}
+      <div class="card stats">
+        <div class="big">${stats.big}</div><div class="lbl">${stats.lbl}</div>
+        <div class="pair"><div><b>${stats.a}</b><span>words</span></div><div><b>${stats.b}</b><span>words a minute</span></div></div>
+      </div>
+      <div class="sect"><b>Recent</b><a>See all</a></div>
+      <div class="item"><span class="app"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/></svg></span><div class="t"><div class="top"><b>WhatsApp</b><span>9:31</span></div><div class="x">Hello, yeah. So this is actually from the Voxa app.</div></div></div>
+    </div>
+    <span class="fabmic">${icon('mic')}Try Voxa</span>
+    ${tabs()}
+  </div>`;
+  // With a problem notice on screen the doodle is drawn already finished, so the eye goes to the notice.
+  shot.querySelector('.hdr').prepend(doodleSVG(key, { date, n }, { still: !!notice }));
+  return shot;
+}
+const A = document.getElementById('homesA'), B = document.getElementById('homesB'), C = document.getElementById('homesC'), D = document.getElementById('homesD');
+[
+  { key: 'sunrise', g1: 'Early start,', time: '6:42 am', date: '2026-12-01', title: `Sunrise, ${whenOf('sunrise')}`, note: 'The sun comes up out of the horizon line, rays tick in, birds last (none to three, by date).' },
+  { key: 'morning', g1: 'Morning,', time: '9:14 am', date: '2026-12-02', title: `Morning, ${whenOf('morning')}`, note: 'Sunrise with the sun clear of the horizon, a third of the way up. "Morning, Sam" fits, so it is one line.' },
+  { key: 'midday', g1: 'Good afternoon,', name: 'Alexandria', time: '1:05 pm', date: '2026-12-03', title: `Midday, ${whenOf('midday')}`, note: 'A full sun and one cloud. A long name does not fit on one line, so it breaks before the name.' },
+  { key: 'evening', g1: 'Long day,', time: '6:08 pm', date: '2026-12-03', title: `Evening, ${whenOf('evening')}`, note: 'A hill, the sun half down, its reflection in three short strokes.' },
+].forEach(o => A.appendChild(homePhone(o)));
+[
+  { key: 'night', g1: 'Hey there,', time: '11:52 pm', date: '2026-12-01', title: `Night, ${whenOf('night')}`, note: 'Tonight\'s real moon and one of four star layouts. The neutral line, on one line; "Night owl" only from 10 pm.' },
+  { key: 'weekend', g1: 'Easy Sunday,', time: '9:20 am', date: '2026-11-29', title: 'Weekend morning', note: 'A plain mug and an open book; the steam rises once. Sunday says Sunday; Saturday says Saturday.' },
+  { key: 'streak', n: 7, g1: '7 days running,', time: '8:02 am', date: '2026-12-02', title: 'Streak: 7 days', note: 'A pen tally drawn from the real count: a gate of five, two more, a spark. Counted, not cheered.', stats: { big: '7 days', lbl: 'in a row with Voxa', a: '9,204', b: '151' } },
+  { key: 'words', g1: '1,000 words spoken,', time: '4:37 pm', date: '2026-12-03', title: 'Milestone: 1,000 words', note: 'A notebook, both pages filled, the last line ending in a loop. The greeting carries the real number.', stats: { big: '1,000', lbl: 'words written by voice', a: '1,000', b: '139' } },
+].forEach(o => B.appendChild(homePhone(o)));
+[
+  { key: 'birthday', g1: 'Happy birthday,', time: '8:40 am', date: '2027-03-14', title: 'Birthday', note: 'Only if you added it in Settings. A cake with one candle; the flame flickers once.' },
+  { key: 'newyear', g1: 'Happy New Year,', time: '12:04 am', date: '2027-01-01', title: 'New Year', note: 'Two bursts on their trails. The only greeting allowed three words.' },
+  { key: 'evening', g1: 'Good evening,', time: '5:20 pm', date: '2026-12-02', title: 'Evening, with a problem', note: 'The keyboard is off, so the notice shows and the doodle is already drawn: nothing moves next to a problem.', notice: { k: 'kb' } },
+  { key: 'night', g1: 'Still up,', time: '1:14 am', date: '2026-12-04', dark: true, title: 'Night, dark mode', note: 'Ink becomes the light sepia #D9946D; the horizon drops to 50 %. Mic blocked, plus one more, so the doodle is still.', notice: { k: 'mic', more: true } },
+].forEach(o => C.appendChild(homePhone(o)));
+[
+  { key: 'morning', g1: 'Good morning,', time: '10:26 am', date: '2026-12-08', dark: true, title: 'Morning, dark mode', note: 'The same climbing sun in light sepia; the hatching keeps it reading as a sun, not a moon.' },
+  { key: 'streak', n: 30, g1: '30 days running,', time: '7:50 am', date: '2026-12-24', title: 'Streak: 30 days', note: 'Six gates of five, smaller so they fit. Above 60 days the tally counts weeks instead of days.', stats: { big: '30 days', lbl: 'in a row with Voxa', a: '41,380', b: '149' } },
+  { key: 'first', g1: 'First words,', time: '7:15 pm', date: '2026-11-20', title: 'Milestone: first dictation', note: 'The notebook with one line in it. Shown the first time you open Home after your first dictation.' },
+  { key: 'birthday', g1: 'Happy birthday,', time: '9:02 pm', date: '2027-03-14', dark: true, title: 'Birthday, dark mode', note: 'The flame\'s wash lifts to 16 % so it still glows on #121212.' },
+].forEach(o => D.appendChild(homePhone(o)));
+// One line when the whole greeting fits at 40 in the content width; otherwise break before the name (never inside
+// the greeting words); if a line still does not fit at 40, step to 32, never smaller. Measured with the real text width.
+const fitGreetings = () => document.querySelectorAll('.greet').forEach(h => {
+  h.classList.remove('fit'); h.classList.add('one');
+  if (h.scrollWidth <= h.clientWidth + 1) return;
+  h.classList.remove('one');
+  if ([...h.children].some(s => s.scrollWidth > h.clientWidth + 1)) h.classList.add('fit');
+});
+
+// catalogue: every doodle, the tally at 7 and at 30
+const cat = document.getElementById('cat');
+const CAT = [['sunrise'], ['morning'], ['midday'], ['evening'], ['night'], ['weekend'], ['streak', { n: 7 }, 'Streak, 7 days'], ['streak', { n: 30 }, 'Streak, 30 days'], ['words'], ['first'], ['birthday'], ['newyear']];
+CAT.forEach(([k, ctx = {}, label]) => { const f = document.createElement('figure'); f.appendChild(doodleSVG(k, ctx)); f.insertAdjacentHTML('beforeend', `<figcaption>${label || DOODLES[k].name}<span>${whenOf(k)}. Done by ${Math.round(doneBy(k, ctx)).toLocaleString('en-US')} ms</span></figcaption>`); cat.appendChild(f); });
+
+// daily variation and the real moon: the same doodle on three different days
+const vary = document.getElementById('vary');
+const addDay = (k, date, extra) => { const f = document.createElement('figure'); f.appendChild(doodleSVG(k, { date })); f.insertAdjacentHTML('beforeend', `<figcaption>${DOODLES[k].name}, ${longDate(date)}<span>${extra}</span></figcaption>`); vary.appendChild(f); };
+['2026-12-01', '2026-12-02', '2026-12-05'].forEach(d => addDay('morning', d, 'Clouds and birds from this date\'s seed'));
+// three moon phases: a few days, about a week and about two weeks after the next new moon
+let nm = new Date(TODAY + 'T12:00:00Z'); while (moonAge(nm.toISOString().slice(0, 10)) > 1) nm = new Date(nm.getTime() + 864e5);
+[4, 8, 15].forEach(k => { const d = new Date(nm.getTime() + k * 864e5).toISOString().slice(0, 10), a = moonAge(d); addDay('night', d, `${moonName(a)}, ${Math.round(moonLit(a) * 100)} % lit`); });
+
+// the avatar corner check: every time of day doodle on each of the next 60 days
+function checkCorner() {
+  const box = document.createElement('div'); box.style.cssText = 'position:absolute;left:-9999px;top:0;width:343px'; document.body.appendChild(box);
+  let n = 0; const hits = [];
+  ['sunrise', 'morning', 'midday', 'evening', 'night'].forEach(k => { for (let i = 0; i < 60; i++) {
+    const d = new Date(Date.parse(TODAY + 'T12:00:00Z') + i * 864e5).toISOString().slice(0, 10), svg = doodleSVG(k, { date: d });
+    svg.style.width = '343px'; svg.style.height = '112px'; box.appendChild(svg); const R = svg.getBoundingClientRect(); n++;
+    svg.querySelectorAll('path[data-st]').forEach(p => { const b = p.getBoundingClientRect(); if (b.right - R.left > 287 && b.top - R.top < 52) hits.push(`${k} ${d}`); });
+    box.removeChild(svg); } });
+  box.remove();
+  return { n, hits: [...new Set(hits)] };
+}
+const cc = checkCorner();
+document.getElementById('cornerCheck').textContent = cc.hits.length ? `Avatar corner check: ${cc.hits.length} collisions: ${cc.hits.join(', ')}` : `Avatar corner check, run in this page: the 5 time of day doodles on each of the next 60 days (${cc.n} drawings); none enters the avatar corner.`;
+
+// notices
+const nWrap = document.getElementById('notices');
+[['signedout', 'Signed out', 'Sends you to sign in'], ['mic', 'Microphone blocked', 'Opens the permission prompt, or app settings if denied twice'], ['kb', 'Keyboard off', 'Opens keyboard settings'], ['offline', 'Offline', 'Not tappable; goes away by itself']].forEach(([k, t, s]) => {
+  const d = document.createElement('div'); d.innerHTML = `<b>${t}</b><span style="font-size:12px;font-weight:500;color:rgba(20,20,20,.62)">${s}</span>${noticeHTML(k)}`; nWrap.appendChild(d);
+});
+
+// birthday in Settings: empty, picking, filled
+function settingsPhone({ title, note, value, sheet }) {
+  const shot = document.createElement('div'); shot.className = 'shot';
+  const row = (ic, h, s, right = '') => `<div class="srow">${icon(ic, 'i sic')}<div class="st"><b>${h}</b>${s ? `<small>${s}</small>` : ''}</div>${right}</div>`;
+  shot.innerHTML = `<h3>${title}</h3><p>${note}</p>
+  <div class="phone">
+    <div class="sb"><span>9:41</span><span><i></i><i></i></span></div>
+    <div class="body set">
+      <h1 class="stitle">Settings</h1>
+      <div class="sgroup">Account</div>
+      ${row('user', 'ChatGPT', 'Signed in as Sam')}
+      <div class="sgroup">You</div>
+      ${row('cake', 'Your birthday', value ? `${value}. Voxa will wish you on the day` : 'Add it and Voxa will wish you on the day', value ? '<span class="slink">Change</span>' : '<span class="slink">Add</span>')}
+      <p class="sfoot">Day and month only, no year. It stays on this phone and is never sent anywhere.</p>
+      <div class="sgroup">Dictation</div>
+      ${row('kb', 'Voxa keyboard', 'On and selected')}
+      ${row('mic', 'Microphone', 'Phone mic, or a connected headset')}
+    </div>
+    ${tabs('Settings')}
+    ${sheet ? `<div class="scrim"></div><div class="bsheet" role="dialog" aria-label="Your birthday">
+      <b class="sh">Your birthday</b><small>Day and month. Voxa never asks for the year.</small>
+      <div class="wheels"><div class="wheel">${[12, 13, 14, 15, 16].map(d => `<span class="${d === 14 ? 'on' : ''}">${d}</span>`).join('')}</div>
+      <div class="wheel">${['January', 'February', 'March', 'April', 'May'].map(m => `<span class="${m === 'March' ? 'on' : ''}">${m}</span>`).join('')}</div><i class="band"></i></div>
+      <div class="sbtns"><span class="btn-t">Remove</span><span class="btn-f">Save</span></div></div>` : ''}
+  </div>`;
+  return shot;
+}
+const bday = document.getElementById('bday');
+[
+  { title: 'Not added', note: 'Optional, and off until you add it. Nothing about it shows on Home.' },
+  { title: 'Picking the day', note: 'A sheet with two wheels, day and month. Save, or Remove to forget it.', sheet: true },
+  { title: 'Added', note: 'On the day: the cake doodle and "Happy birthday, Sam", above everything else.', value: '14 March' },
+].forEach(o => bday.appendChild(settingsPhone(o)));
+
+// greeting pool: one priority order. Birthday, then New Year, then a milestone, then the day, then the time of day table (SLOTS)
+const POOL = [
+  ['Birthday: the day and month you added in Settings', 'Happy birthday, Sam', 'Birthday'],
+  ['New Year: 1 January', 'Happy New Year, Sam', 'New Year'],
+  ['Milestone: first dictation', 'First words, Sam', 'First dictation'],
+  ['Milestone: passed 1,000, 10,000 or 100,000 words (the real number)', '1,000 words spoken, Sam', 'Words milestone'],
+  ['Milestone: 7, 14, 21, 30 days in a row and so on (the real count)', '7 days running, Sam', 'Streak, drawn from the count'],
+  ['Milestone, optional: one year since you installed Voxa', 'One year with Voxa, Sam', 'Streak tally of 52 weeks'],
+  ['Back after 7 or more days away', 'Welcome back, Sam', 'Time of day'],
+  ['First open after setup', 'Hello there, Sam', 'Time of day'],
+  ['Saturday, 5 am to noon', 'Saturday morning, Sam', 'Weekend'],
+  ['Sunday, 5 am to noon', 'Easy Sunday, Sam / Slow Sunday, Sam', 'Weekend'],
+  ['Monday, 5 to 11:30 am', 'Fresh week, Sam', 'Sunrise before 8 am, Morning after'],
+  ['Friday, 4 pm to midnight', 'Nearly weekend, Sam', 'Evening before 7 pm, Night after'],
+  ...SLOTS.slice().sort((a, b) => (a.from < 5 ? a.from + 24 : a.from) - (b.from < 5 ? b.from + 24 : b.from)).map(s => [fmtRange(s.from, s.to), s.lines.map(l => l + ', Sam').join(' / '), DOODLES[s.doodle].name]),
+];
+document.getElementById('pool').innerHTML = '<tr><th>Rule</th><th>Greeting</th><th>Doodle</th></tr>' + POOL.map(r => `<tr><td>${r[0]}</td><td><b>${r[1]}</b></td><td>${r[2]}</td></tr>`).join('') +
+  '<tr><td colspan="3" class="na">' + POOL.reduce((n, r) => n + r[1].split(' / ').length, 0) + ' greetings. The time of day rows are the same table the doodles use, so a greeting always names the part of the day its doodle draws: no "Good afternoon" before noon or over a morning sun, "Night owl" and "Late one" only from 10 pm, with a neutral "Hey there" in the mix. A milestone you pass on your birthday or New Year waits in a queue and shows on the next ordinary day, within 3 days. Name is the first name from the ChatGPT profile; with no name, the greeting is one line ("Good afternoon"), never a stand in like "friend". The whole greeting is one line when it fits at 40 in the content width (measure it, in Compose with <code>TextMeasurer</code>, or put a non breaking space between the greeting words and a normal space before the name so it can only wrap there); otherwise it breaks before the name, never inside the greeting words. If a line still does not fit at 40, it steps to 32, never smaller.</td></tr>';
+
+/* ---------------- splash ---------------- */
+// The wordmark: one continuous monoline stroke. Box 280 x 140, baseline 100, x height 64, cap 26. V, a bridge into a clockwise o, the first stroke of the x, a, then a swash back under the word that crosses the x.
+const WORD = 'M16 38 C 18 28, 30 24, 36 34 C 42 50, 52 80, 58 100 C 64 82, 74 58, 84 46 C 88 41, 94 40, 95 45 C 96 50, 92 56, 98 60 C 104 64, 112 64, 121 64 C 130 64, 136 72, 136 82 C 136 92, 130 100, 121 100 C 112 100, 106 92, 106 82 C 106 72, 112 64, 121 64 C 130 64, 140 64, 148 64 C 156 66, 160 74, 164 82 C 168 90, 174 98, 182 100 C 188 100, 192 84, 198 74 C 202 68, 208 65, 214 65 C 218 65, 222 66, 223 68 C 216 63, 200 66, 198 82 C 197 94, 204 101, 211 100 C 218 99, 222 90, 223 80 C 223 74, 223 68, 223 66 C 223 78, 222 92, 226 98 C 229 102, 236 101, 242 96 C 250 90, 252 104, 236 110 C 214 116, 176 118, 160 110 C 154 106, 154 102, 156 98 C 164 86, 172 74, 184 64 C 186 62, 190 61, 193 62';
+document.getElementById('pathOut').textContent = 'Wordmark path (280 x 140): ' + WORD;
+// The nib from the Speaking nib icon, tip moved to 0,0 and scaled to 0.9.
+const NIB = 'M-16,-53 H16 V-41 C16,-27 8,-15 0,0 C-8,-15 -16,-27 -16,-41 Z';
+function splashStage(dk, v = 'b', paper) {
+  const ink = dk ? '#F2EDE8' : '#1F1A17', nib = dk ? '#D99366' : '#8F4C2C', hole = paper || (dk ? '#211B17' : '#FFFFFF');
+  return `<div class="stage" data-v="${v}"><svg class="word" viewBox="0 0 280 140">
+    <path class="ink" d="${WORD}" fill="none" stroke="${ink}" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="nib"><g transform="scale(.9)"><path d="${NIB}" fill="${nib}"/><circle cx="0" cy="-32" r="4.6" fill="${hole}"/><path d="M0 -27 L-2.6 -20 L2.6 -14 L-1.8 -8 L0 -1" fill="none" stroke="${hole}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><rect x="-16" y="-44" width="32" height="2.2" fill="${hole}"/></g></g>
+  </svg><div class="desc">Talk instead of typing</div></div>`;
+}
+// Variant A: the approved timing. Variant B: the same write, with a slower, more unhurried opening.
+const TV = {
+  a: { appear: [0, 250], hold: null, write: [250, 1450], lift: [1450, 1650], settle: [1450, 1850], desc: [1600, 2000], total: 2000,
+       moveEase: DECEL, fadeMs: 250, writeEase: ease(.42, 0, .3, 1) },
+  b: { appear: [0, 450], hold: [450, 570], write: [570, 1870], lift: [1870, 2070], settle: [1870, 2270], desc: [2020, 2420], total: 2420,
+       moveEase: ease(.3, 0, .15, 1), fadeMs: 320, writeEase: ease(.64, 0, .3, 1) },
+};
+const T = TV.a;
+function renderSplash(stage, t, v) {
+  const V = TV[v || stage.dataset.v || 'a'];
+  const ink = stage.querySelector('.ink'), nib = stage.querySelector('.nib'), desc = stage.querySelector('.desc');
+  if (!ink._L) ink._L = ink.getTotalLength();
+  const L = ink._L, clamp = x => Math.max(0, Math.min(1, x));
+  const p = V.writeEase(clamp((t - V.write[0]) / (V.write[1] - V.write[0])));
+  // pen down (variant B): the nib touches the paper and the first drop of ink appears under it
+  const h = V.hold ? clamp((t - V.hold[0]) / (V.hold[1] - V.hold[0])) : 0;
+  const touched = V.hold ? t >= V.hold[0] + 40 : p > 0;
+  ink.style.strokeDasharray = `${L} ${L}`;
+  ink.style.strokeDashoffset = V.hold && touched && p === 0 ? L - .3 : L * (1 - p) + (p > 0 && p < 1 ? .01 : 0);
+  ink.style.opacity = V.hold && !touched ? 0 : ''; // variant A is unchanged
+  // ink settle: the line is a touch heavier while wet and settles to its weight
+  const s = clamp((t - V.settle[0]) / (V.settle[1] - V.settle[0]));
+  ink.setAttribute('stroke-width', (5.2 * (1 + .07 * (1 - STD(s)) * (p > 0 || touched ? 1 : 0))).toFixed(2));
+  // nib
+  const len = L * p, pt = ink.getPointAtLength(len);
+  const a = ink.getPointAtLength(Math.max(0, len - 4)), b = ink.getPointAtLength(Math.min(L, len + 4));
+  const dir = Math.atan2(b.y - a.y, b.x - a.x);
+  const sway = 7 * Math.cos(dir) - 3 * Math.sin(dir); // leans with rightward travel, lifts a little on upstrokes
+  const ap = V.moveEase(clamp((t - V.appear[0]) / (V.appear[1] - V.appear[0])));
+  const fade = clamp(t / V.fadeMs);
+  const lf = ACCEL(clamp((t - V.lift[0]) / (V.lift[1] - V.lift[0])));
+  // appear: from the centre of the screen (where the system splash icon was) to the start of the V
+  const start = ink.getPointAtLength(0), cx = 140, cy = 70;
+  let x = pt.x, y = pt.y;
+  if (t < V.write[0]) { x = cx + (start.x - cx) * ap; y = cy - 10 + (start.y - cy + 10) * ap; }
+  const press = Math.sin(Math.PI * h); // 0 to 1 to 0 over the hold: a small press into the paper
+  y += 1.6 * press;
+  x += 12 * lf; y -= 18 * lf;
+  const rot = 35 + sway + 8 * lf - 2 * press;
+  nib.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${rot.toFixed(2)}) scale(${(0.9 + .1 * ap - .02 * press).toFixed(3)})`);
+  nib.style.opacity = ((V.hold ? DECEL(fade) : ap) * (1 - lf)).toFixed(3);
+  const dsc = DECEL(clamp((t - V.desc[0]) / (V.desc[1] - V.desc[0])));
+  desc.style.opacity = dsc.toFixed(3); desc.style.transform = `translateY(${(8 * (1 - dsc)).toFixed(2)}px)`;
+}
+const liveStages = [];
+const phoneSplash = (dk, v) => `<div class="phone"><div class="sb" style="${dk ? 'color:#F2EDE8;background:#211B17' : ''}"><span>9:41</span><span><i style="${dk ? 'background:#F2EDE8' : ''}"></i><i style="${dk ? 'background:#F2EDE8' : ''}"></i></span></div><div class="splash ${dk ? 'dk' : ''}">${splashStage(dk, v)}</div></div>`;
+const splashShot = (wrap, d) => {
+  const shot = document.createElement('div'); shot.className = 'shot';
+  shot.innerHTML = `<h3>${d.title}</h3><p>${d.note}</p>${phoneSplash(d.dk, d.v)}`;
+  wrap.appendChild(shot);
+  const st = shot.querySelector('.stage');
+  if (d.still) { renderSplash(st, TV[d.v].total); st.querySelector('.nib').style.opacity = 0; } else liveStages.push(st);
+};
+const sWrap = document.getElementById('splashes');
+[
+  { dk: false, v: 'b', title: 'Splash, light', note: 'Plays on cold start. 2,420 ms, then Home. Here it loops so you can watch it.' },
+  { dk: true, v: 'b', title: 'Splash, dark', note: 'The icon tile colour, off white ink, the icon\'s light sepia nib.' },
+  { dk: false, v: 'b', still: true, title: 'Reduced motion', note: 'The end frame, no nib, held for 400 ms, then Home crossfades in.' },
+].forEach(d => splashShot(sWrap, d));
+const abRow = document.getElementById('abRow');
+[
+  { dk: false, v: 'a', title: 'Variant A, not chosen', note: '2,000 ms. The nib arrives in 250 ms and starts writing straight away.' },
+  { dk: false, v: 'b', title: 'Variant B, chosen', note: '2,420 ms. A slower drift in, a short pen down, a gentle start to the V.' },
+  { dk: true, v: 'b', title: 'Variant B, dark', note: 'The same timing on the icon tile colour.' },
+].forEach(d => splashShot(abRow, d));
+// storyboards
+const boardOf = (id, v, FR) => { const board = document.getElementById(id); FR.forEach(([t, a, b]) => { const f = document.createElement('figure'); f.innerHTML = `<div class="fr">${splashStage(false, v)}</div><figcaption>${t.toLocaleString('en-US')} ms, ${a}<span>${b}</span></figcaption>`; board.appendChild(f); renderSplash(f.querySelector('.stage'), t); }); };
+boardOf('board', 'b', [[220, 'Nib in', 'Drifting from where the system icon was'], [510, 'Pen down', 'A small press, the first drop of ink'], [900, 'V begun', 'Slow at first, then its pace'], [1250, 'o, then x', 'Even pace through the joins'], [1600, 'a, then swash', 'Back under the word'], [1970, 'x crossed, lift', 'Nib lifts up and right'], [2420, 'Rest', 'Description in, ink settled']]);
+boardOf('boardB', 'a', [[125, 'Nib in', 'Where the system icon was'], [250, 'Pen down', 'At the start of the V'], [600, 'V written', 'Speed eases in'], [930, 'o, then x', 'Even pace through the joins'], [1260, 'a, then swash', 'Back under the word'], [1550, 'x crossed, lift', 'Nib lifts up and right'], [2000, 'Rest', 'Description in, ink settled']]);
+// beats tables
+const beatsHTML = rows => '<tr><th>Beat</th><th>Time</th><th>Motion</th><th>Easing</th></tr>' + rows.map(r => `<tr>${r.map((c, i) => `<td>${i === 0 ? '<b>' + c + '</b>' : c}</td>`).join('')}</tr>`).join('');
+const BEATS_A = [
+  ['Nib in', '0 to 250 ms', 'Nib travels from the centre to the V, fades 0 to 1, scales 0.9 to 1', 'Emphasized decelerate (0.05, 0.7, 0.1, 1)'],
+  ['Write', '250 to 1,450 ms (1.2 s)', 'Stroke revealed by length, nib tip pinned to the head, 35 degree slant, sway within 8 degrees', 'CubicBezier(0.42, 0, 0.3, 1) on length'],
+  ['Lift', '1,450 to 1,650 ms', 'Nib moves 12 up right, 18 up, turns 8 degrees, fades out', 'Emphasized accelerate (0.3, 0, 0.8, 0.15)'],
+  ['Ink settle', '1,450 to 1,850 ms', 'Stroke weight 107 % to 100 %, as if the ink sinks in', 'Standard (0.4, 0, 0.2, 1)'],
+  ['Description', '1,600 to 2,000 ms', 'Rises 8 dp and fades 0 to 1', 'Emphasized decelerate'],
+  ['Out', 'From 2,000 ms', 'Home crossfades in over 300 ms (not counted)', 'Standard'],
+];
+const BEATS_B = [
+  ['Nib in', '0 to 450 ms', 'Nib drifts from the centre to the V and scales 0.9 to 1; it fades 0 to 1 over the first 320 ms', 'Drift (0.3, 0, 0.15, 1); fade emphasized decelerate'],
+  ['Pen down', '450 to 570 ms', 'Nib presses 1.6 dp into the paper and turns 2 degrees, then eases back; the first drop of ink appears at 490 ms', 'Half a sine'],
+  ['Write', '570 to 1,870 ms (1.3 s)', 'Stroke revealed by length, nib tip pinned to the head, 35 degree slant, sway within 8 degrees; the first part of the V is written slowly, then the pen finds its pace', 'CubicBezier(0.64, 0, 0.3, 1) on length'],
+  ['Lift', '1,870 to 2,070 ms', 'Nib moves 12 up right, 18 up, turns 8 degrees, fades out', 'Emphasized accelerate (0.3, 0, 0.8, 0.15)'],
+  ['Ink settle', '1,870 to 2,270 ms', 'Stroke weight 107 % to 100 %, as if the ink sinks in', 'Standard (0.4, 0, 0.2, 1)'],
+  ['Description', '2,020 to 2,420 ms', 'Rises 8 dp and fades 0 to 1', 'Emphasized decelerate'],
+  ['Out', 'From 2,420 ms', 'Home crossfades in over 300 ms (not counted)', 'Standard'],
+];
+document.getElementById('beats').innerHTML = beatsHTML(BEATS_B);
+document.getElementById('beatsA').innerHTML = beatsHTML(BEATS_A);
+document.getElementById('beatsB').innerHTML = beatsHTML(BEATS_B);
+{ const share = (v, ms) => Math.round(TV[v].writeEase(ms / (TV[v].write[1] - TV[v].write[0])) * 100);
+  document.getElementById('abPace').innerHTML = `How much of the word is written after the pen starts: at 150 ms, A ${share('a', 150)} % and B ${share('b', 150)} %; at 300 ms, A ${share('a', 300)} % and B ${share('b', 300)} %; at 600 ms, A ${share('a', 600)} % and B ${share('b', 600)} %. B's middle runs at about the same speed as A's, so it never feels sluggish once it is going.`; }
+
+/* ---------------- desktop ---------------- */
+const DI = {
+  home: '<path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/>', hist: I.hist, ins: '<path d="M5 20V10M12 20V4M19 20v-7"/>', words: I.words, set: I.set,
+};
+const dicon = k => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${DI[k]}</svg>`;
+const FEATHER_D = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4C12 4 6 9 5 19"/><path d="M20 4c0 7-5 11-11 11M8 12h7"/></svg>';
+const caps = `<span class="dcaps"><svg viewBox="0 0 10 10"><path d="M1 5h8"/></svg><svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg></span>`;
+const PAPER = { light: '#FBFAF8', dark: '#242120' };
+function deskWin({ dark = false, key = 'midday', date = TODAY, g1 = 'Good afternoon,', name = 'Sam', problem = false, splash = false, v = 'b' }) {
+  const w = document.createElement('div'); w.className = 'dwin' + (dark ? ' dk' : '');
+  const nav = [['home', 'Home', 1], ['hist', 'History'], ['ins', 'Insights'], ['words', 'Words']].map(([k, n, on]) => `<div class="dni ${on ? 'on' : ''}">${dicon(k)}${n}</div>`).join('');
+  w.innerHTML = `<div class="dtb"><span class="dmark">${FEATHER_D}</span>Voxa${caps}</div>
+  <div class="dbody"><div class="dhome">
+    <nav class="dnav"><span class="dword">voxa</span>${nav}<div class="dni foot">${dicon('set')}Settings</div></nav>
+    <main class="dpg">
+      <div class="dband"></div>
+      <h1 class="greet dgreet"><span>${g1}</span> <span>${name}</span></h1>
+      ${problem ? `<div class="dib err" role="alert"><span class="gl"><svg viewBox="0 0 10 10"><path d="M2.5 2.5l5 5M7.5 2.5l-5 5"/></svg></span><div class="tx"><b>You're signed out of ChatGPT.</b>Voxa can't write anything until you sign in. 1 dictation is waiting and will be written out when you do.</div><span class="dbtn acc">Sign in</span></div>` : ''}
+      <div class="dhero"><div class="tx"><b>Click where you want to type, press your shortcut, and talk.</b><small>Press it again to finish. Esc cancels. Works in every app.</small></div><span class="dkeys"><span>Ctrl</span><span>Space</span></span></div>
+      <div class="dstats"><div><b>1,284</b><small>words today</small></div><div><b>9,204</b><small>words in the last 7 days</small></div><div><b>7 days</b><small>in a row</small></div></div>
+      <div class="dsec"><b>Recent</b><span>See all in History</span></div>
+      <div class="drow"><span class="dapp" style="background:#25D366">W</span><div class="when"><b>4:12 pm</b>WhatsApp</div><div class="txt">Running ten minutes late, start without me and I'll catch up on the notes.</div><span class="dbtn">Copy</span></div>
+      <div class="drow" style="margin-top:3px"><span class="dapp" style="background:#4A154B">S</span><div class="when"><b>3:58 pm</b>Slack</div><div class="txt">Can you push the review to Thursday? The build is ready but I want one more pass on the setup flow.</div><span class="dbtn">Copy</span></div>
+    </main></div>
+    ${splash ? `<div class="dsplash">${splashStage(dark, v, dark ? PAPER.dark : PAPER.light)}</div>` : ''}
+  </div>`;
+  w.querySelector('.dband').appendChild(doodleSVG(key, { date }, { wide: 780, dx: 413, still: problem }));
+  return w;
+}
+const deskSet = (w, t) => { // t in ms from the window opening; the splash, then Home crossfades in
+  const st = w.querySelector('.dsplash .stage'); if (!st) return;
+  const V = TV[st.dataset.v], k = Math.max(0, Math.min(1, (t - V.total) / 300));
+  renderSplash(st, Math.min(t, V.total));
+  w.querySelector('.dsplash').style.opacity = (1 - STD(k)).toFixed(3); w.querySelector('.dhome').style.opacity = STD(k).toFixed(3);
+};
+const dshot = (wrap, title, note, w) => { const d = document.createElement('div'); d.className = 'dshot'; d.innerHTML = `<h3>${title}</h3><p>${note}</p>`; d.appendChild(w); wrap.appendChild(d); return w; };
+const dH = document.getElementById('deskHomes');
+dshot(dH, 'Home, light, nothing wrong', 'The doodle band runs the width of the page, the subject sits to the right, the greeting is set at 40, on one line when it fits (here it always does unless the name is very long). No readiness line: the hero card just says what to do.', deskWin({ key: 'midday', date: '2026-12-03', g1: 'Good afternoon,' }));
+dshot(dH, 'Home, light, signed out', 'The InfoBar appears under the greeting only while something is wrong, and the doodle is drawn already finished so nothing moves next to it.', deskWin({ key: 'evening', date: '2026-12-02', g1: 'Good evening,', problem: true }));
+dshot(dH, 'Home, dark, nothing wrong', 'Warm dark neutrals, the light sepia ink #D9946D, tonight\'s real moon.', deskWin({ dark: true, key: 'night', date: '2026-12-01', g1: 'Good evening,' }));
+// live desktop splash
+const deskLive = dshot(document.getElementById('deskLive'), 'Cold open of the Home window', 'Loops here: the splash, the crossfade, Home and its doodle, a pause.', deskWin({ key: 'midday', date: '2026-12-03', g1: 'Good afternoon,', splash: true }));
+let deskV = 'b', deskT0 = performance.now(), deskPlayed = false;
+const DESK_CYCLE = 6000;
+const setDeskV = v => { deskV = v; deskLive.querySelector('.dsplash .stage').dataset.v = v; document.getElementById('dVarA').setAttribute('aria-pressed', v === 'a'); document.getElementById('dVarB').setAttribute('aria-pressed', v === 'b'); deskT0 = performance.now(); deskPlayed = false; };
+document.getElementById('dVarA').onclick = () => setDeskV('a'); document.getElementById('dVarB').onclick = () => setDeskV('b');
+// stills
+const dS = document.getElementById('deskStills');
+[[false, 900, 'Writing, 900 ms'], [false, 2420, 'Finished, 2,420 ms'], [false, 2570, 'Crossfade to Home, 2,570 ms'], [true, 1500, 'Dark, 1,500 ms']].forEach(([dk, t, cap]) => {
+  const f = document.createElement('figure'); f.className = 'dthumb';
+  const w = deskWin({ dark: dk, key: dk ? 'night' : 'midday', date: '2026-12-03', g1: dk ? 'Good evening,' : 'Good afternoon,', splash: true });
+  const box = document.createElement('div'); box.className = 'dthumbbox'; box.appendChild(w); f.appendChild(box);
+  f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); dS.appendChild(f); deskSet(w, t);
+  if (t > 2420) w.querySelectorAll('.dband svg.doodle').forEach(sv => sv.dataset.still = '1');
+});
+
+/* ---------------- loops ---------------- */
+let loopOn = !STILL && !reduce, t0 = performance.now();
+const CYCLE = 4000; // A and B start together so they can be compared
+function frame(now) {
+  const t = (now - t0) % CYCLE;
+  liveStages.forEach(st => { const V = TV[st.dataset.v || 'a']; renderSplash(st, reduce || STILL ? V.total : Math.min(t, V.total)); });
+  if (!params.has('solo')) {
+    const dt = reduce || STILL ? 99999 : (now - deskT0) % DESK_CYCLE;
+    deskSet(deskLive, dt);
+    const total = TV[deskV].total;
+    if (dt >= total && !deskPlayed) { deskPlayed = true; deskLive.querySelectorAll('.dband svg.doodle').forEach(playDoodle); }
+    if (dt < total && deskPlayed) deskPlayed = false;
+  }
+  requestAnimationFrame(frame);
+}
+const playAll = () => { document.querySelectorAll('svg.doodle').forEach(playDoodle); t0 = performance.now(); };
+document.getElementById('replay').onclick = playAll;
+let loopTimer = null;
+const setLoop = on => { loopOn = on; const b = document.getElementById('loop'); b.textContent = on ? 'Auto replay is on' : 'Auto replay is off'; b.setAttribute('aria-pressed', on); clearInterval(loopTimer); if (on) loopTimer = setInterval(() => document.querySelectorAll('svg.doodle').forEach(sv => { if (!sv.closest('#deskLive')) playDoodle(sv); }), 5000); };
+document.getElementById('loop').onclick = () => setLoop(!loopOn);
+
+/* ---------------- contrast ---------------- */
+const hex = h => { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); };
+const toHex = a => '#' + a.map(v => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+const flat = (fg, a, bg) => { const f = hex(fg), b = hex(bg); return toHex(f.map((v, i) => v * a + b[i] * (1 - a))); };
+const lum = h => { const c = hex(h).map(v => { v /= 255; return v <= .04045 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+const C_ = (fg, a = 1) => ({ fg, a });
+// kind: t = text under 18 pt, L = large text (18.66 px bold or 24 px), u = icon or component (3:1), x = exempt
+const LW = '#FFFFFF', LS = '#F3F3F1', TX = '#141414', DB = '#121212', DS = '#232321', DC = '#1C1C1B', DT = '#F2F2F0';
+const tint = (c, a, bg) => flat(c, a, bg);
+const PAIRS = [
+  ['Light', 'Text 100 % on base (titles, numbers)', C_(TX), LW, 't', null],
+  ['Light', 'Text 100 % on surface (notice, segmented)', C_(TX), LS, 't', null],
+  ['Light', 'Text 72 % on base (body, dictation text)', C_(TX, .72), LW, 't', null],
+  ['Light', 'Text 72 % on surface (keyboard keys use base)', C_(TX, .72), LS, 't', null],
+  ['Light', 'Text 56 % on base (labels, times, captions)', C_(TX, .56), LW, 't', ['Text 62 %', C_(TX, .62)]],
+  ['Light', 'Text 56 % on surface (search hint)', C_(TX, .56), LS, 't', ['Text 62 %', C_(TX, .62)]],
+  ['Light', 'Tab labels 56 %, 12 px, on base', C_(TX, .56), LW, 't', ['Text 62 %', C_(TX, .62)]],
+  ['Light', 'Icons at 40 % (recent search, to do check)', C_(TX, .40), LW, 'u', ['Text 48 %', C_(TX, .48)]],
+  ['Light', 'Sepia text on base ("See all", links)', C_('#8F4C2C'), LW, 't', null],
+  ['Light', 'Sepia on accent 5 % (secondary button, copy pill)', C_('#8F4C2C'), tint('#8F4C2C', .06, LW), 't', null],
+  ['Light', 'White on sepia (primary button, mic)', C_('#FFFFFF'), '#8F4C2C', 't', null],
+  ['Light', 'Sepia mic and FAB against base', C_('#8F4C2C'), LW, 'u', null],
+  ['Light', 'Green text on base (plan pill, "Pasted")', C_('#1F9D55'), LW, 't', ['goodText #17743F', C_('#17743F')]],
+  ['Light', 'Green on green 10 % (plan pill)', C_('#1F9D55'), tint('#1F9D55', .10, LW), 't', ['goodText on its tint', C_('#17743F'), tint('#17743F', .10, LW)]],
+  ['Light', 'White check on green circle', C_('#FFFFFF'), '#1F9D55', 'u', null],
+  ['Light', 'Amber on amber 10 % (retry pill, notices)', C_('#B26B00'), tint('#B26B00', .10, LW), 't', ['warnText #9A5B00', C_('#9A5B00'), tint('#9A5B00', .10, LW)]],
+  ['Light', 'Amber icon on surface (notice)', C_('#B26B00'), LS, 'u', null],
+  ['Light', 'Red on red 8 % over base (delete)', C_('#C8281E'), tint('#C8281E', .08, LW), 't', null],
+  ['Light', 'Red on red 8 % over surface', C_('#C8281E'), tint('#C8281E', .08, LS), 't', ['dangerText #B3241B', C_('#B3241B'), tint('#B3241B', .08, LS)]],
+  ['Light', 'Switch track off (16 %) against card', C_(TX, .16), LW, 'u', ['Track 46 %', C_(TX, .46)]],
+  ['Light', 'Doodle ink, sepia on base (decorative)', C_('#8F4C2C'), LW, 'u', null],
+  ['Light', 'Doodle horizon, sepia 55 % (decorative)', C_('#8F4C2C', .55), LW, 'x', null],
+  ['Keyboard light', 'Key icons and "space" 72 % on key', C_(TX, .72), LW, 't', null],
+  ['Keyboard light', 'Muted 56 % on keyboard (timer, "seconds saved")', C_(TX, .56), LS, 't', ['Text 62 %', C_(TX, .62)]],
+  ['Keyboard light', '"Pasted in WhatsApp" green on keyboard', C_('#1F9D55'), LS, 't', ['goodText #17743F', C_('#17743F')]],
+  ['Keyboard light', 'Recording dot #E5484D on keyboard', C_('#E5484D'), LS, 'u', null],
+  ['Keyboard light', 'Key edge, white key on #F3F3F1', C_('#FFFFFF'), LS, 'x', null],
+  ['Keyboard light', 'Level bars, sepia 30 % (decorative)', C_('#8F4C2C', .3), LS, 'x', null],
+  ['Dark', 'Text 100 % on base', C_(DT), DB, 't', null],
+  ['Dark', 'Text 100 % on card', C_(DT), DC, 't', null],
+  ['Dark', 'Text 72 % on base', C_(DT, .72), DB, 't', null],
+  ['Dark', 'Text 72 % on surface', C_(DT, .72), DS, 't', null],
+  ['Dark', 'Text 56 % on base', C_(DT, .56), DB, 't', null],
+  ['Dark', 'Text 56 % on surface', C_(DT, .56), DS, 't', null],
+  ['Dark', 'Text 56 % on card', C_(DT, .56), DC, 't', null],
+  ['Dark', 'Icons at 40 % on surface', C_(DT, .40), DS, 'u', null],
+  ['Dark', 'Sepia #D9946D on base', C_('#D9946D'), DB, 't', null],
+  ['Dark', 'Sepia on card', C_('#D9946D'), DC, 't', null],
+  ['Dark', 'Sepia on accent 12 % (secondary button)', C_('#D9946D'), tint('#D9946D', .12, DB), 't', null],
+  ['Dark', 'Dark ink #24140C on sepia (primary button)', C_('#24140C'), '#D9946D', 't', null],
+  ['Dark', 'Green #45C27C on base', C_('#45C27C'), DB, 't', null],
+  ['Dark', 'Green on green 18 % over card', C_('#45C27C'), tint('#45C27C', .18, DC), 't', null],
+  ['Dark', 'Amber #E3A44A on amber 18 % over card', C_('#E3A44A'), tint('#E3A44A', .18, DC), 't', null],
+  ['Dark', 'Red #F07A70 on red 16 % over card', C_('#F07A70'), tint('#F07A70', .16, DC), 't', null],
+  ['Dark', 'Switch track off (16 %) against card', C_(DT, .16), DC, 'u', ['Track 35 %', C_(DT, .35)]],
+  ['Dark', 'Notice on surface: text 100 %', C_(DT), DS, 't', null],
+  ['Keyboard dark', 'Key icons 72 % on key #2E2E2C', C_(DT, .72), '#2E2E2C', 't', null],
+  ['Keyboard dark', 'Muted 56 % on keyboard #1A1A19', C_(DT, .56), '#1A1A19', 't', null],
+  ['Keyboard dark', '"Pasted" green on keyboard', C_('#45C27C'), '#1A1A19', 't', null],
+  ['Keyboard dark', 'Recording dot #F2555A on keyboard', C_('#F2555A'), '#1A1A19', 'u', null],
+  ['Keyboard dark', 'White check on green #45C27C', C_('#FFFFFF'), '#45C27C', 'u', ['onGood #0E2416', C_('#0E2416')]],
+  ['Light', 'Birthday picker, unselected 62 % on sheet', C_(TX, .62), LW, 't', null],
+  ['Light', 'Picker selected text on sepia 12 % band', C_(TX), tint('#8F4C2C', .12, LW), 't', null],
+  ['Dark', 'Birthday picker, unselected 62 % on sheet', C_(DT, .62), DC, 't', null],
+  ['Desktop', 'Text #1A1A1A on page #FBFAF8 (greeting, rows)', C_('#1A1A1A'), '#FBFAF8', 't', null],
+  ['Desktop', 'Text on nav #F1EEEA', C_('#1A1A1A'), '#F1EEEA', 't', null],
+  ['Desktop', 'Muted #5F5F5F on page', C_('#5F5F5F'), '#FBFAF8', 't', null],
+  ['Desktop', 'Muted #5F5F5F on card', C_('#5F5F5F'), '#FFFFFF', 't', null],
+  ['Desktop', 'Sepia link on page ("See all in History")', C_('#8F4C2C'), '#FBFAF8', 't', null],
+  ['Desktop', 'White on sepia button', C_('#FFFFFF'), '#8F4C2C', 't', null],
+  ['Desktop', 'Text on error InfoBar #FDE7E9', C_('#1A1A1A'), '#FDE7E9', 't', null],
+  ['Desktop', 'Error glyph #C42B1C on InfoBar', C_('#C42B1C'), '#FDE7E9', 'u', null],
+  ['Desktop', 'Selected nav pill, sepia on nav', C_('#8F4C2C'), '#F1EEEA', 'u', null],
+  ['Desktop', 'Doodle ink on page', C_('#8F4C2C'), '#FBFAF8', 'u', null],
+  ['Desktop', 'Splash ink #1F1A17 on page', C_('#1F1A17'), '#FBFAF8', 'L', null],
+  ['Desktop', 'Splash description 72 % on page', C_(TX, .72), '#FBFAF8', 't', null],
+  ['Desktop dark', 'Text #F2F0ED on page #242120', C_('#F2F0ED'), '#242120', 't', null],
+  ['Desktop dark', 'Text on nav #1C1A18', C_('#F2F0ED'), '#1C1A18', 't', null],
+  ['Desktop dark', 'Text on card #2D2A28', C_('#F2F0ED'), '#2D2A28', 't', null],
+  ['Desktop dark', 'Muted #B9B3AC on page', C_('#B9B3AC'), '#242120', 't', null],
+  ['Desktop dark', 'Muted #B9B3AC on card', C_('#B9B3AC'), '#2D2A28', 't', null],
+  ['Desktop dark', 'Sepia #D9946D link on page', C_('#D9946D'), '#242120', 't', null],
+  ['Desktop dark', 'Dark ink #24140C on sepia button', C_('#24140C'), '#D9946D', 't', null],
+  ['Desktop dark', 'Text on error InfoBar #442726', C_('#F2F0ED'), '#442726', 't', null],
+  ['Desktop dark', 'Error glyph #FF99A4 on InfoBar', C_('#FF99A4'), '#442726', 'u', null],
+  ['Desktop dark', 'Doodle ink on page', C_('#D9946D'), '#242120', 'u', null],
+  ['Desktop dark', 'Splash ink #F2EDE8 on page', C_('#F2EDE8'), '#242120', 'L', null],
+  ['Desktop dark', 'Splash description 74 % on page', C_('#F2EDE8', .74), '#242120', 't', null],
+  ['Splash', 'Ink #1F1A17 on white', C_('#1F1A17'), LW, 'L', null],
+  ['Splash', 'Description 72 % on white', C_(TX, .72), LW, 't', null],
+  ['Splash dark', 'Ink #F2EDE8 on #211B17', C_('#F2EDE8'), '#211B17', 'L', null],
+  ['Splash dark', 'Description 74 % on #211B17', C_('#F2EDE8', .74), '#211B17', 't', null],
+];
+const need = { t: [4.5, 7], L: [3, 4.5], u: [3, null], x: [null, null] };
+const verdict = (r, k) => { const [aa, aaa] = need[k]; if (aa == null) return ['<span class="na">Exempt</span>', '<span class="na">Exempt</span>']; return [r >= aa ? '<span class="ok">Pass</span>' : '<span class="no">Fail</span>', aaa == null ? '<span class="na">n/a</span>' : (r >= aaa ? '<span class="ok">Pass</span>' : '<span class="no">Fail</span>')]; };
+const kindName = { t: 'Text', L: 'Large text', u: 'Icon or part', x: 'Decorative' };
+let fails = [];
+const rowsHTML = PAIRS.map(([grp, name, f, bg, k, fix]) => {
+  const fg = flat(f.fg, f.a, bg), r = ratio(fg, bg), [aa, aaa] = verdict(r, k);
+  const chip = `<span class="chip" style="background:${bg};color:${fg}">Aa ${r.toFixed(2)}</span>`;
+  let fixCell = '<span class="na">Keep</span>';
+  if (fix) { const fbg = fix[2] || bg, ff = flat(fix[1].fg, fix[1].a, fbg), r2 = ratio(ff, fbg); const [aa2, aaa2] = verdict(r2, k);
+    fixCell = `<span class="sw"><span class="chip" style="background:${fbg};color:${ff}">Aa ${r2.toFixed(2)}</span><span><b>${fix[0]}</b>${fix[0].includes(ff) ? '' : ' = ' + ff}<br>AA ${aa2} AAA ${aaa2}</span></span>`;
+    if (need[k][0] && r < need[k][0]) fails.push([grp, name, r, fix[0], ff, r2]); }
+  return `<tr><td>${grp}</td><td>${name}<br><span class="na">${kindName[k]}: ${fg} on ${bg}</span></td><td>${chip}</td><td class="num">${r.toFixed(2)}</td><td>${aa}</td><td>${aaa}</td><td>${fixCell}</td></tr>`;
+}).join('');
+document.getElementById('contrast').innerHTML = '<tr><th>Theme</th><th>Pair</th><th>Sample</th><th>Ratio</th><th>AA</th><th>AAA</th><th>Proposed</th></tr>' + rowsHTML;
+document.getElementById('summary').innerHTML = `<h4>What fails today, and the fix</h4><ul>${fails.map(f => `<li><b>${f[0]}: ${f[1]}</b> at ${f[2].toFixed(2)}. Use ${f[3]} (${f[4]}), ${f[5].toFixed(2)} to 1.</li>`).join('')}</ul>
+<p>Dark mode passes AA everywhere except the switch track and the white check on the bright green; both are component fixes. The key edges on the keyboard are exempt (each key is identified by its label, not its outline), and the doodle horizon and level bars are decorative.</p>
+<p>In code: <code>text56</code> becomes <code>text62</code> (0.62f alpha), <code>text40</code> for icons becomes 0.48f in light, and three solid text tokens join <code>VxColors</code>: <code>goodText</code>, <code>warnText</code>, <code>dangerText</code>. The fill colours (<code>good</code>, <code>warn</code>, <code>danger</code>) stay for dots, rings and checks, so the look does not change.</p>`;
+const PAL = [
+  ['#141414', '#FFFFFF', 'Text', 'Unchanged. 100 % and 72 % reach AAA'],
+  ['#6D6D6D', '#FFFFFF', 'Muted, 62 %', 'Was 56 % (#7B7B7B, 4.23)'],
+  ['#8F4C2C', '#FFFFFF', 'Sepia', 'Unchanged, 6.49 on white'],
+  ['#17743F', '#FFFFFF', 'goodText', 'New. Fill #1F9D55 stays for dots'],
+  ['#9A5B00', '#FFFFFF', 'warnText', 'New. Was #B26B00 text, 3.72'],
+  ['#B3241B', '#FFFFFF', 'dangerText', 'New. For red text on tinted rows'],
+  ['#F2F2F0', '#121212', 'Dark text', 'Unchanged, 16.71'],
+  ['#D9946D', '#121212', 'Dark sepia', 'Unchanged, 7.50'],
+  ['#45C27C', '#121212', 'Dark green', 'Unchanged, 8.26'],
+  ['#0E2416', '#45C27C', 'Dark onGood', 'New. Check icon on green, was white 2.27'],
+  ['#E3A44A', '#121212', 'Dark amber', 'Unchanged'],
+  ['#F07A70', '#121212', 'Dark red', 'Unchanged'],
+];
+document.getElementById('palette').innerHTML = '<div class="pal">' + PAL.map(([c, bg, n, d]) => `<div><i style="background:${bg};color:${c}">${n.startsWith('Dark onGood') ? 'Check' : 'Aa'} ${ratio(c, bg).toFixed(1)}</i><p><b>${n} ${c}</b>${d}</p></div>`).join('') + '</div>';
+
+/* ---------------- solo modes for frame export ---------------- */
+if (params.has('solo')) {
+  document.body.classList.add('solo');
+  const mount = document.getElementById('soloMount');
+  const what = params.get('solo');
+  if (what === 'splash') { const dk = params.has('dark'); const t = +params.get('t'); mount.innerHTML = `<div class="phone" id="soloPhone" style="margin:20px"><div class="sb" style="${dk ? 'color:#F2EDE8;background:#211B17' : ''}"><span>9:41</span><span></span></div><div class="splash ${dk ? 'dk' : ''}">${splashStage(dk, params.get('v') || 'a')}</div></div>`; renderSplash(mount.querySelector('.stage'), t); }
+  // ?solo=cat: the doodle grid alone, for the GIF. doodleAt(ms) freezes every doodle at that time.
+  if (what === 'cat') { const c = document.getElementById('cat'); c.style.width = '1180px'; c.style.margin = '16px'; mount.appendChild(c); }
+  if (what === 'desk') { const w = deskWin({ dark: params.has('dark'), key: params.get('key') || 'midday', date: params.get('date') || '2026-12-03', g1: params.get('g') || 'Good afternoon,', problem: params.has('problem'), splash: params.has('t'), v: params.get('v') || 'b' }); w.style.margin = '20px'; mount.appendChild(w); if (params.has('t')) deskSet(w, +params.get('t')); }
+  if (what === 'phones') { const r = document.getElementById(params.get('row') || 'homesA'); mount.appendChild(r); }
+}
+
+window.doodleAt = ms => document.getAnimations().forEach(a => { a.pause(); a.currentTime = ms; });
+fitGreetings();
+playAll(); setLoop(loopOn && !params.has('solo')); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
