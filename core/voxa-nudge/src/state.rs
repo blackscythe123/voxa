@@ -37,6 +37,8 @@ pub struct Pending {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NudgeState {
+    /// The file format; a file from a newer, unknown version is not trusted ([`Self::from_json`]).
+    pub version: u32,
     /// The Settings switch "Reminders". On by default.
     pub enabled: bool,
     /// When reminders were sent, last 14 days (and always the latest).
@@ -53,12 +55,16 @@ pub struct NudgeState {
     pub bandit: Bandit,
 }
 
+/// The current file format.
+pub const STATE_VERSION: u32 = 1;
+
 /// The most dictation times kept.
 pub const MAX_REMEMBERED: usize = 400;
 
 impl Default for NudgeState {
     fn default() -> Self {
         Self {
+            version: STATE_VERSION,
             enabled: true,
             sent_ms: Vec::new(),
             pending: None,
@@ -72,6 +78,26 @@ impl Default for NudgeState {
 }
 
 impl NudgeState {
+    /// Reads a saved state. A file that doesn't parse, or comes from a newer version, starts over
+    /// with reminders OFF, unless the file itself still clearly says `"enabled": true`. Bandit
+    /// counts are cleaned up ([`Bandit::sanitize`]).
+    pub fn from_json(json: &str) -> Self {
+        match serde_json::from_str::<NudgeState>(json) {
+            Ok(mut s) if s.version <= STATE_VERSION => {
+                s.version = STATE_VERSION;
+                s.bandit.sanitize();
+                s
+            }
+            _ => {
+                let on = serde_json::from_str::<serde_json::Value>(json)
+                    .ok()
+                    .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
+                    .unwrap_or(false);
+                NudgeState { enabled: on, ..Default::default() }
+            }
+        }
+    }
+
     /// Merges dictation times from History into the remembered ones (last 28 days, newest kept).
     pub fn remember(&mut self, dictations_ms: &[u64], now_ms: u64) {
         let since = now_ms.saturating_sub(crate::features::LOOKBACK_DAYS * DAY_MS);
@@ -219,5 +245,21 @@ mod tests {
         assert_eq!(back, s);
         let empty: NudgeState = serde_json::from_str("{}").unwrap();
         assert!(empty.enabled, "missing fields take the defaults: reminders on");
+    }
+
+    #[test]
+    fn damaged_or_newer_files_keep_reminders_off() {
+        assert!(!NudgeState::from_json("not json").enabled);
+        assert!(!NudgeState::from_json(r#"{"enabled": false, "ignored_streak": -1}"#).enabled);
+        assert!(NudgeState::from_json(r#"{"enabled": true, "ignored_streak": -1}"#).enabled, "a readable choice is kept");
+        assert!(!NudgeState::from_json(r#"{"version": 2}"#).enabled);
+        assert!(NudgeState::from_json("{}").enabled, "an old file without a version is still read");
+    }
+
+    #[test]
+    fn bad_bandit_counts_are_cleaned_on_load() {
+        let s = NudgeState::from_json(r#"{"bandit": {"style": [[-5.0, 1e30], [1.0, 2.0], [0.0, 0.0], [0.0, 0.0]]}}"#);
+        assert_eq!(s.bandit.style[0], [0.0, crate::bandit::MAX_COUNT]);
+        assert_eq!(s.bandit.style[1], [1.0, 2.0]);
     }
 }

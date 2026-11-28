@@ -67,6 +67,8 @@ impl Rng {
 
     /// Gamma(shape, 1), shape > 0 (Marsaglia and Tsang, with the shape < 1 boost).
     pub fn gamma(&mut self, shape: f64) -> f64 {
+        // A bad shape (negative, zero, not a number) would recurse forever below.
+        let shape = if shape.is_finite() && shape > 0.0 { shape } else { 1e-3 };
         if shape < 1.0 {
             let u = self.unit().max(1e-300);
             return self.gamma(shape + 1.0) * u.powf(1.0 / shape);
@@ -124,5 +126,14 @@ mod tests {
         assert_eq!(a, hash_unit(&[1, 2, 3]));
         assert_ne!(a, hash_unit(&[1, 2, 4]));
         assert!((0.0..1.0).contains(&a));
+    }
+
+    #[test]
+    fn bad_shapes_never_recurse_forever() {
+        let mut r = Rng::new(9);
+        for shape in [-3.0, 0.0, f64::NAN, f64::NEG_INFINITY] {
+            assert!(r.gamma(shape).is_finite());
+        }
+        assert!(r.beta(-1.0, 2.0).is_finite());
     }
 }

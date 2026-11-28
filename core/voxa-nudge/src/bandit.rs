@@ -58,7 +58,18 @@ pub fn style_prior_mean(share: f32) -> f64 {
     (0.2 + 0.15 * share as f64).clamp(0.02, 0.98)
 }
 
+/// The most outcomes one arm counts (a phone sends at most one reminder every 3 days).
+pub const MAX_COUNT: f32 = 100_000.0;
+
 impl Bandit {
+    /// Counts from a file: negative, not a number or huge values (a damaged or edited file) would
+    /// break the Beta sampling, so they are clamped to 0..=[`MAX_COUNT`].
+    pub fn sanitize(&mut self) {
+        for c in self.style.iter_mut().chain(self.slot.iter_mut()).flatten() {
+            *c = if c.is_finite() { c.clamp(0.0, MAX_COUNT) } else if *c > 0.0 { MAX_COUNT } else { 0.0 };
+        }
+    }
+
     pub fn update(&mut self, style: usize, slot: Option<usize>, success: bool) {
         let k = if success { 0 } else { 1 };
         if let Some(s) = self.style.get_mut(style) {
