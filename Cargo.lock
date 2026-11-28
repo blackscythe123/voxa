@@ -7608,6 +7608,7 @@ dependencies = [
  "gpui",
  "hound",
  "image",
+ "log",
  "objc",
  "png 0.17.16",
  "raw-window-handle",

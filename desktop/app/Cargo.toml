@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+log = "0.4"
 voxa-core = { path = "../../core/voxa-core" }
 voxa-chatgpt = { path = "../../core/voxa-chatgpt" }
 voxa-vad = { path = "../../core/voxa-vad" }

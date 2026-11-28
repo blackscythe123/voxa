@@ -1482,7 +1482,28 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
     Some(new.into())
 }
 
+/// GPUI's own warnings and errors (e.g. "DirectX device lost") go into Voxa's log, so graphics
+/// problems leave a trace instead of failing silently.
+struct GpuiLog;
+
+impl log::Log for GpuiLog {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.level() <= log::Level::Warn
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            os::log(&format!("[{} {}] {}", r.level(), r.target(), r.args()));
+        }
+    }
+    fn flush(&self) {}
+}
+
+static GPUI_LOG: GpuiLog = GpuiLog;
+
 fn main() {
+    if log::set_logger(&GPUI_LOG).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--window") {
         return run_window(args.iter().any(|a| a == "--tour"));
