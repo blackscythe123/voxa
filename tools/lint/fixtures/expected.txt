@@ -35,6 +35,7 @@
 1 android-workmanager android/app/src/main/java/com/voxa/android/notify/Notifier.kt
 2 android-exact-alarm android/app/src/main/java/com/voxa/android/notify/BirthdayWish.kt    # setExactAndAllowWhileIdle, setAlarmClock; setWindow is fine
 1 android-exact-alarm android/app/src/main/AndroidManifest.xml
+1 android-signing android/app/build.gradle.kts                    # no v1/v2/v3 signing
 
 # 6. isolation
 1 isolation-env desktop/app/src/ui.rs

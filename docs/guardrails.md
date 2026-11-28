@@ -136,6 +136,9 @@ and no exact alarms (the birthday wish uses an inexact window alarm, owner decis
 - Exact alarms: `setExact*(` and `setAlarmClock(` calls, and the `SCHEDULE_EXACT_ALARM` /
   `USE_EXACT_ALARM` permissions, anywhere in the Android sources and manifest. Use
   `AlarmManager.setWindow` (as `notify/BirthdayWish.kt` does) or JobScheduler.
+- Signing (`android-signing`): `build.gradle.kts` enables the v1, v2 and v3 signature schemes, so
+  every installer takes a sideloaded APK (the universal APK once gave "There was a problem parsing
+  the package").
 
 ## 6. Isolation
 

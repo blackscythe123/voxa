@@ -8,6 +8,8 @@ fn copy() {
     let e = title("Happy Diwali from Voxa");                // Bad: copy-occasion
     let f = label("Open Voxa");                             // Good: product name
     let g = label("Ready. Press Ctrl+Space");               // Good: sentence then key name
+    let g2 = label("Easy Sunday");                          // Good: day names keep their capital
+    let g3 = title("Happy New Year");                       // Good: New Year is a name, and culture-neutral
     let h = format!("{ts}-{}.wav", 1);                      // Good: a file name, not a dash as punctuation
     os::log("Saved - ready");                               // Good: logs are not UI copy
 }

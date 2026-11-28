@@ -8,6 +8,8 @@
   android-exact-alarm  no exact alarms: no setExact*/setAlarmClock calls and no SCHEDULE_EXACT_ALARM or
                        USE_EXACT_ALARM permission. The birthday wish uses an inexact window alarm
                        (owner decision, 2026-11-28; notify/BirthdayWish.kt).
+  android-signing      the APK is signed with the v1, v2 and v3 schemes, so every installer takes it
+                       ("There was a problem parsing the package" on a sideloaded universal APK).
 """
 
 from __future__ import annotations
@@ -116,5 +118,17 @@ def check_workmanager(ctx: Ctx) -> list[Violation]:
     return out
 
 
+def check_signing(ctx: Ctx) -> list[Violation]:
+    if not ctx.exists(GRADLE):
+        return []
+    code = S.load(ctx.root, GRADLE).code
+    missing = [f"V{n}" for n in (1, 2, 3) if not re.search(rf"\benableV{n}Signing\s*=\s*true\b", code)]
+    if not missing:
+        return []
+    return [Violation("android-signing", GRADLE, 1, f"signingConfigs must set enable{'/'.join(missing)}Signing = true. Rule: the APK is "
+                      "signed with the v1, v2 and v3 schemes so every installer accepts it (\"There was a problem parsing the package\"; "
+                      "docs/guardrails.md#5-android)", key="signing " + ",".join(missing))]
+
+
 def check(ctx: Ctx) -> list[Violation]:
-    return check_size(ctx) + check_deps(ctx) + check_workmanager(ctx) + check_exact_alarm(ctx)
+    return check_size(ctx) + check_deps(ctx) + check_workmanager(ctx) + check_exact_alarm(ctx) + check_signing(ctx)

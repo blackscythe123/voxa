@@ -111,7 +111,7 @@ def main_self_test() -> int:
                     print(f"    {v.render()}")
     rules = {r for r, _ in expected}
     every = {"contrast", "copy-emoji", "copy-dash", "copy-case", "copy-occasion", "privacy-log", "privacy-notify", "focus-steal",
-             "focus-notify", "android-size", "android-deps", "android-workmanager", "android-exact-alarm", "isolation-env", "isolation-test-hook",
+             "focus-notify", "android-size", "android-deps", "android-workmanager", "android-exact-alarm", "android-signing", "isolation-env", "isolation-test-hook",
              "release-latest", "robust-case-slice", "robust-unwrap", "robust-atomic-write", "licence-consistent"}
     for r in sorted(every - rules):
         ok = False
