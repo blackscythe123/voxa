@@ -66,11 +66,16 @@ private class Inked(val src: DoodleStroke) {
  * Plays when [play] turns true, if the core says it should today (once per doodle per day);
  * [still] shows it finished
  * at once (a problem notice is showing, or reduced motion). Decorative: no semantics.
+ * [crop] is the part of the band shown, [x0, y0, x1, y1] in band units ([DoodleLayout.crop]); it
+ * fills the canvas's width. [horizon] false leaves the long ground line out (the phone's Home).
  */
 @Composable
-fun DoodleBand(g: HomeGreeting, play: Boolean, still: Boolean, onPlayed: () -> Unit, modifier: Modifier = Modifier) {
+fun DoodleBand(
+    g: HomeGreeting, play: Boolean, still: Boolean, onPlayed: () -> Unit, modifier: Modifier = Modifier,
+    crop: FloatArray = floatArrayOf(0f, 0f, BAND_W, BAND_H), horizon: Boolean = true,
+) {
     val c = vx
-    val strokes = remember(g) { g.strokes.map { Inked(it) } }
+    val strokes = remember(g, horizon) { g.strokes.filter { horizon || !it.horizon }.map { Inked(it) } }
     val done = g.doneMs.toFloat()
     // Waiting to play (the splash is up): nothing drawn yet. Not playing: finished.
     val clock = remember(g) { Animatable(if (g.play && !still) 0f else done) }
@@ -105,15 +110,20 @@ fun DoodleBand(g: HomeGreeting, play: Boolean, still: Boolean, onPlayed: () -> U
             StrokeKind.DOT to fill(1f),
         )
     }
+    val widths = remember { mapOf(StrokeKind.INK to 2f, StrokeKind.GROUND to 1.5f, StrokeKind.HATCH to 1.2f) }
     val part = remember { Path() }
     val m = remember { Matrix() }
     Canvas(modifier) {
         val t = clock.value
-        val k = size.width / BAND_W
+        val k = size.width / (crop[2] - crop[0])
+        // The pen keeps a pen's weight on a big doodle ([DoodleLayout.strokeScale]).
+        val kDp = k / density
+        val pen = DoodleLayout.strokeScale(kDp) / kDp
         drawIntoCanvas { cv ->
             val nc = cv.nativeCanvas
             nc.save()
             nc.scale(k, k)
+            nc.translate(-crop[0], -crop[1])
             for (s in strokes) {
                 val st = s.src.startMs.toFloat()
                 val du = s.src.durMs.toFloat()
@@ -129,6 +139,7 @@ fun DoodleBand(g: HomeGreeting, play: Boolean, still: Boolean, onPlayed: () -> U
                     nc.concat(m)
                 }
                 val base = paint.alpha
+                widths[s.src.kind]?.let { paint.strokeWidth = it * pen }
                 when (s.src.kind) {
                     StrokeKind.WASH, StrokeKind.DOT -> {
                         paint.alpha = (base * p * (f?.alpha ?: 1f)).toInt()

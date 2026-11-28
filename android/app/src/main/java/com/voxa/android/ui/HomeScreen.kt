@@ -95,9 +95,9 @@ fun HomeScreen(activity: MainActivity) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 104.dp)) {
-            // The doodle band, the greeting, and a notice only while something is wrong.
+            // The doodle, the greeting, and a notice only while something is wrong.
             HomeHeader(activity, account, problems)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
             if (askNotify) NotifyHomeCard(activity) { askNotify = false }
             UpdateHomeCard(activity)
             StatsCard(week)

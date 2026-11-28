@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,7 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -91,12 +92,16 @@ fun rememberProblems(activity: MainActivity): List<Problem> {
     }
 }
 
+private const val PHONE_HORIZON = true
+
 private val Greet40 = Type.Title.copy(fontSize = 40.sp, lineHeight = 44.sp, letterSpacing = (-0.03).em)
 private val Greet32 = Type.Title.copy(fontSize = 32.sp, lineHeight = 38.sp, letterSpacing = (-0.03).em)
 
 /**
- * Home's header (docs/ui-mocks/v7-home-greeting-and-splash.html): the doodle band with the avatar
- * in its corner, the greeting at 40 sp, and one notice only while something is wrong.
+ * Home's header (docs/ui-mocks/v7-home-greeting-and-splash.html; layout locked in
+ * v7-home-fullscreen-compare.html, "Phone, new", doodle above, bigger): the doodle cropped to its
+ * drawing above the greeting, the avatar in its own clear corner, the greeting at 40 sp, and one
+ * notice only while something is wrong.
  */
 @Composable
 fun HomeHeader(activity: MainActivity, account: AccountInfo?, problems: List<Problem>) {
@@ -125,33 +130,30 @@ fun HomeHeader(activity: MainActivity, account: AccountInfo?, problems: List<Pro
     val reduced = remember { reducedMotion(context) }
     val first = account?.name?.trim()?.split(' ')?.firstOrNull()?.takeIf { it.isNotEmpty() } ?: remember { GreetClock.debugName(context) }
 
-    // The band runs 8 dp past the content on each side, as in the mockup (343 dp on a 375 dp phone).
-    Box(
-        Modifier.fillMaxWidth().layout { m, cs ->
-            val extra = 16.dp.roundToPx()
-            val w = cs.maxWidth + extra
-            val p = m.measure(cs.copy(minWidth = w, maxWidth = w))
-            layout(cs.maxWidth, p.height) { p.place(-extra / 2, 0) }
-        },
-    ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val h = maxWidth * (BAND_H / BAND_W)
-            Box(Modifier.fillMaxWidth().height(h)) {
-                greeting?.let { g ->
-                    DoodleBand(
-                        // The drawing starts once the splash has gone.
-                        g, play = g.play && !activity.splashShowing, still = reduced || problems.isNotEmpty(),
-                        onPlayed = { app.core.doodlePlayed(g.doodle, g.date) },
-                        modifier = Modifier.fillMaxWidth().height(h),
-                    )
-                }
-                Box(Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 8.dp).clip(CircleShape).clickable { activity.go(Route.Tabbed(Tab.Settings)) }) {
-                    Avatar(account?.name?.ifEmpty { account?.email } ?: "", image = account?.image ?: "")
-                }
+    // The doodle above the greeting, cropped to its own drawing and as big as the width allows up
+    // to 150 dp, clear of the avatar's corner (DoodleLayout); the greeting right under it.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val width = maxWidth.value
+        val g = greeting
+        val crop = remember(g) { DoodleLayout.crop(g?.bounds ?: emptyList()) }
+        val box = remember(g, width) { g?.let { DoodleLayout.place(width, crop[2] - crop[0], crop[3] - crop[1]) } }
+        val avatar = DoodleLayout.avatar(width)
+        Box(Modifier.fillMaxWidth().height(DoodleLayout.rowHeight(width, box).dp)) {
+            if (g != null && box != null) {
+                DoodleBand(
+                    // The drawing starts once the splash has gone.
+                    g, play = g.play && !activity.splashShowing, still = reduced || problems.isNotEmpty(),
+                    onPlayed = { app.core.doodlePlayed(g.doodle, g.date) },
+                    modifier = Modifier.offset(box.x.dp, box.y.dp).size(box.w.dp, box.h.dp).clipToBounds(),
+                    crop = crop, horizon = PHONE_HORIZON,
+                )
+            }
+            Box(Modifier.offset(avatar.x.dp, avatar.y.dp).clip(CircleShape).clickable { activity.go(Route.Tabbed(Tab.Settings)) }) {
+                Avatar(account?.name?.ifEmpty { account?.email } ?: "", size = DoodleLayout.AVATAR.dp, image = account?.image ?: "")
             }
         }
     }
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(DoodleLayout.GREETING_GAP.dp))
     GreetingLine(greeting?.lead ?: "", first)
     problems.firstOrNull()?.let { p ->
         Spacer(Modifier.height(16.dp))
