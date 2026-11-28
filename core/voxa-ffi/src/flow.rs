@@ -528,6 +528,13 @@ fn recover_interrupted(dir: &std::path::Path) {
                 _ => continue,
             };
             e.status = Status::Waiting(next.into());
+            // Its length was only to be set at Stop: take it from the recording (16 kHz mono
+            // PCM16, 32000 bytes a second), so stats and "typing saved" count it.
+            if e.secs <= 0.0 {
+                if let Some(len) = e.audio.as_ref().and_then(|a| std::fs::metadata(a).ok()).map(|m| m.len()) {
+                    e.secs = len as f32 / (voxa_store::audio::RATE as f32 * 2.0);
+                }
+            }
             changed = true;
         }
         (changed, ())

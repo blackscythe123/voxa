@@ -292,3 +292,19 @@ fn a_waiting_take_is_never_stuck_behind_the_keyboard() {
     flow.handle(FlowEvent::Stop);
     assert!(!flow.owns(entry), "waiting for the network: anyone may send it");
 }
+
+/// A take cut off by a process death keeps its length (from the recording), so stats count it.
+#[test]
+fn a_recovered_take_keeps_its_length() {
+    let dir = tmp("recovered-secs");
+    let entry = {
+        let flow = VoxaFlow::new(dir.clone(), ready());
+        let (_, entry) = record(&flow, "Notes"); // 2 s of audio, never stopped
+        entry
+    };
+    let _next = VoxaFlow::new(dir.clone(), ready());
+    let core = VoxaCore::new(dir);
+    let e = core.entry(entry).unwrap();
+    assert_eq!(e.status, EntryStatus::Waiting("Not sent".into()));
+    assert!((e.secs - 2.0).abs() < 0.01, "secs {}", e.secs);
+}
