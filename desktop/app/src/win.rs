@@ -583,7 +583,16 @@ fn place_now(hw: HWND) {
     if let Some((x, y, w, h)) = PENDING_RECT.lock().unwrap_or_else(|e| e.into_inner()).take() {
         unsafe { SetWindowPos(hw, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE) };
     }
-    let Some((cx_, cy_, w, h)) = rect_of(hw) else { return };
+    let Some((cx_, cy_, mut w, mut h)) = rect_of(hw) else { return };
+    // A strip created hidden can come out at Windows' default window size (1920 x 1118 on a
+    // 1.5x screen) instead of its own: it then hangs mostly below the screen and looks invisible.
+    // The strip always has one size, so it is put back here, from the message loop.
+    let dpi_scale = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(hw) } as f32 / 96.0;
+    if let Some((sw, sh)) = crate::strip_rules::fix_size((w, h), dpi_scale) {
+        log(&format!("strip resized from {w}x{h} to its own {sw}x{sh}"));
+        unsafe { SetWindowPos(hw, HWND_TOPMOST, 0, 0, sw, sh, SWP_NOMOVE | SWP_NOACTIVATE) };
+        (w, h) = (sw, sh);
+    }
     unsafe {
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;

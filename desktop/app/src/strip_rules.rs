@@ -94,6 +94,16 @@ pub fn home_position(monitor: (i32, i32, i32, i32), size: (i32, i32), scale: f32
 /// Whether the strip must be moved to `home`: only when it is really out of place (a screen
 /// change, or a rebuilt window carrying an old rectangle that is now off screen). A needless move
 /// while GPUI handles the shortcut made it log "RefCell already borrowed" and skip the show.
+/// The strip's one size in logical pixels (main.rs strip_options).
+pub const STRIP_SIZE: (f32, f32) = (760.0, 84.0);
+
+/// The strip's size in physical pixels when the window has another size (more than a few pixels
+/// off, so a frame or rounding never causes a resize), else None.
+pub fn fix_size(now: (i32, i32), scale: f32) -> Option<(i32, i32)> {
+    let want = ((STRIP_SIZE.0 * scale).round() as i32, (STRIP_SIZE.1 * scale).round() as i32);
+    ((now.0 - want.0).abs() > 16 || (now.1 - want.1).abs() > 16).then_some(want)
+}
+
 pub fn needs_move(now: (i32, i32), home: (i32, i32)) -> bool {
     (now.0 - home.0).abs() > 8 || (now.1 - home.1).abs() > 8
 }
@@ -238,5 +248,18 @@ mod tests {
         let body = &win[start..end];
         assert!(body.contains("WOKE.mark()"), "the window procedure marks the strip");
         assert!(!body.contains("open_window") && !body.contains("rebuild_strip"), "the window procedure never rebuilds");
+    }
+
+    #[test]
+    fn a_strip_that_came_out_at_the_default_window_size_is_put_back_to_its_own() {
+        // Seen on the owner's laptop: 1280 x 745 logical (1920 x 1118 at 1.5x), mostly off screen.
+        assert_eq!(fix_size((1920, 1118), 1.5), Some((1140, 126)));
+        assert_eq!(fix_size((1280, 745), 1.0), Some((760, 84)));
+        // The right size, give or take a frame or rounding, is left alone.
+        assert_eq!(fix_size((1140, 126), 1.5), None);
+        assert_eq!(fix_size((762, 90), 1.0), None);
+        // The size in main.rs is the one fix_size restores.
+        let main = include_str!("main.rs");
+        assert!(main.contains("size(px(760.), px(84.))"), "STRIP_SIZE matches strip_options");
     }
 }
