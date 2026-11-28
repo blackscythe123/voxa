@@ -51,6 +51,36 @@ pub fn show_command(show: bool) -> i32 {
     if show { SW_SHOWNOACTIVATE } else { SW_HIDE }
 }
 
+/// The strip's own posted message (WM_APP + 0x156): a move, show or hide asked from inside GPUI,
+/// carried out from the message loop (win.rs post_strip).
+pub const WM_STRIP: u32 = 0x8000 + 0x156;
+
+/// What a posted strip message asks for (its wParam).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StripAsk {
+    Place = 0,
+    Show = 1,
+    Hide = 2,
+}
+
+impl StripAsk {
+    pub fn visibility(show: bool) -> Self {
+        if show { StripAsk::Show } else { StripAsk::Hide }
+    }
+}
+
+/// From the message loop, for a posted strip message `code` and whether the strip is visible
+/// now: (move it home first, the ShowWindowAsync command). A show of a hidden strip places it
+/// first, so it never appears at an old spot; a hide never moves it.
+pub fn on_strip_message(code: usize, visible: bool) -> (bool, Option<i32>) {
+    match code {
+        c if c == StripAsk::Place as usize => (true, None),
+        c if c == StripAsk::Show as usize => (!visible, Some(show_command(true))),
+        c if c == StripAsk::Hide as usize => (false, Some(show_command(false))),
+        _ => (false, None),
+    }
+}
+
 /// The strip's home: bottom centre of the main screen, 64 logical px above its bottom edge.
 /// `monitor` is (left, top, right, bottom), `size` the outer (w, h) in physical px, frame included.
 pub fn home_position(monitor: (i32, i32, i32, i32), size: (i32, i32), scale: f32) -> (i32, i32) {
@@ -135,6 +165,41 @@ mod tests {
         assert!(!needs_move(home, home));
         assert!(!needs_move((home.0 + 8, home.1 - 8), home), "rounding wobble is not a move");
         assert!(needs_move((home.0 + 9, home.1), home));
+    }
+
+    /// "RefCell already borrowed" at 1.0.0 startup: the strip's moves and shows are posted and
+    /// decided from the message loop. A hidden strip is placed before it shows, a hide never
+    /// moves, and every show is a no-activate one.
+    #[test]
+    fn the_strip_is_placed_before_it_shows_and_never_activates() {
+        assert_eq!(on_strip_message(StripAsk::Place as usize, false), (true, None));
+        assert_eq!(on_strip_message(StripAsk::Place as usize, true), (true, None));
+        assert_eq!(on_strip_message(StripAsk::Show as usize, false), (true, Some(SW_SHOWNOACTIVATE)));
+        assert_eq!(on_strip_message(StripAsk::Show as usize, true), (false, Some(SW_SHOWNOACTIVATE)));
+        assert_eq!(on_strip_message(StripAsk::Hide as usize, true), (false, Some(SW_HIDE)));
+        assert_eq!(on_strip_message(StripAsk::Hide as usize, false), (false, Some(SW_HIDE)));
+        assert_eq!(on_strip_message(7, true), (false, None), "an unknown code does nothing");
+        assert_eq!(StripAsk::visibility(true), StripAsk::Show);
+        assert_eq!(StripAsk::visibility(false), StripAsk::Hide);
+        assert!((0x8000..=0xBFFF).contains(&WM_STRIP), "WM_STRIP is in the WM_APP range");
+    }
+
+    /// The same bug, structurally: win.rs's public strip calls only post; the synchronous
+    /// SetWindowPos and ShowWindowAsync on the strip run only from the posted message.
+    #[test]
+    fn strip_moves_and_shows_are_posted_never_synchronous() {
+        let win = include_str!("win.rs").replace("\r\n", "\n");
+        let body = |name: &str| {
+            let start = win.find(&format!("fn {name}(")).unwrap_or_else(|| panic!("fn {name}"));
+            let end = start + win[start..].find("\n}\n").expect("end of fn");
+            win[start..end].to_string()
+        };
+        for f in ["strip_visible", "place_strip", "move_strip"] {
+            let b = body(f);
+            assert!(b.contains("post_strip("), "{f} posts");
+            assert!(!b.contains("SetWindowPos") && !b.contains("ShowWindow"), "{f} never moves or shows synchronously");
+        }
+        assert!(body("no_activate_proc").contains("strip_message(hwnd, wparam)"), "the window procedure carries the message out");
     }
 
     /// A rebuilt strip carrying an old rectangle that is now off screen (a monitor unplugged, the

@@ -85,6 +85,10 @@ unsafe extern "system" fn no_activate_proc(
     if msg == WM_MOUSEACTIVATE {
         return MA_NOACTIVATE as LRESULT;
     }
+    if msg == crate::strip_rules::WM_STRIP {
+        strip_message(hwnd, wparam);
+        return 0;
+    }
     // Woken from sleep or standby: the strip's graphics may be gone (it stayed invisible after
     // Modern Standby; a charger plugged in or out on a laptop with two graphics chips), so the
     // strip is rebuilt. These messages only set a flag: the rebuild happens at the user's next
@@ -524,12 +528,62 @@ pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
 }
 
 /// Put the strip at the bottom centre of the main screen as it is now (resolution, scaling and
-/// monitors change while Voxa runs). Keeps its size; never shows or activates it.
+/// monitors change while Voxa runs). Keeps its size; never shows or activates it. Posted, not
+/// done here: see [`post_strip`].
 pub fn place_strip() {
+    post_strip(crate::strip_rules::StripAsk::Place);
+}
+
+/// Place the strip (physical pixels) without showing or activating it. Posted like `place_strip`.
+pub fn move_strip(x: i32, y: i32, w: i32, h: i32) {
+    *PENDING_RECT.lock().unwrap_or_else(|e| e.into_inner()) = Some((x, y, w, h));
+    post_strip(crate::strip_rules::StripAsk::Place);
+}
+
+/// A rectangle `move_strip` asked for, applied by the next strip message.
+static PENDING_RECT: std::sync::Mutex<Option<(i32, i32, i32, i32)>> = std::sync::Mutex::new(None);
+
+/// Every move, show and hide of the strip goes through the strip's own message queue: the caller
+/// is usually inside a GPUI update (the shortcut press, an effect, `main()`'s startup callback),
+/// and a synchronous SetWindowPos or ShowWindow there makes Windows call GPUI's window procedure
+/// re-entrantly, which logs "RefCell already borrowed" and drops the move or size message (the
+/// 1.0.0 startup error). The message is handled by [`strip_message`] from the message loop, with
+/// nothing borrowed, in the order asked.
+fn post_strip(ask: crate::strip_rules::StripAsk) -> bool {
+    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    if h.is_null() {
+        return false;
+    }
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(h, crate::strip_rules::WM_STRIP, ask as usize, 0) != 0 }
+}
+
+/// The strip's posted move, show or hide (see [`post_strip`]), run from the message loop.
+fn strip_message(hwnd: HWND, code: usize) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindowVisible, ShowWindowAsync};
+    let visible = unsafe { IsWindowVisible(hwnd) } != 0;
+    let (place, show) = crate::strip_rules::on_strip_message(code, visible);
+    if place {
+        place_now(hwnd);
+    }
+    if let Some(cmd) = show {
+        unsafe { ShowWindowAsync(hwnd, cmd) };
+    }
+}
+
+fn rect_of(hw: HWND) -> Option<(i32, i32, i32, i32)> {
+    let mut r = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    (unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(hw, &mut r) } != 0).then(|| (r.left, r.top, r.right - r.left, r.bottom - r.top))
+}
+
+/// Only from [`strip_message`]: a rectangle `move_strip` asked for, then the bottom centre of the
+/// main screen if the strip is out of place.
+fn place_now(hw: HWND) {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint};
-    let Some((_, _, w, h)) = strip_rect() else { return };
-    let hw = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    if let Some((x, y, w, h)) = PENDING_RECT.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        unsafe { SetWindowPos(hw, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE) };
+    }
+    let Some((cx_, cy_, w, h)) = rect_of(hw) else { return };
     unsafe {
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
@@ -540,21 +594,11 @@ pub fn place_strip() {
         let scale = windows_sys::Win32::UI::HiDpi::GetDpiForWindow(hw) as f32 / 96.0;
         // Same spot as at startup: 64 px (logical) above the bottom edge, centred.
         let (x, y) = crate::strip_rules::home_position((m.left, m.top, m.right, m.bottom), (w, h), scale);
-        // Only when it's really out of place (a screen change): a needless move makes GPUI log
-        // "RefCell already borrowed" while it's busy with the shortcut press.
-        let Some((cx_, cy_, _, _)) = strip_rect() else { return };
+        // Only when it's really out of place (a screen change): no needless moves.
         if crate::strip_rules::needs_move((cx_, cy_), (x, y)) {
             log(&format!("strip moved to the main screen's bottom centre ({cx_},{cy_} -> {x},{y})"));
             SetWindowPos(hw, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         }
-    }
-}
-
-/// Place the strip (physical pixels) without showing or activating it.
-pub fn move_strip(x: i32, y: i32, w: i32, h: i32) {
-    let hw = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
-    if !hw.is_null() {
-        unsafe { SetWindowPos(hw, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE) };
     }
 }
 
@@ -574,15 +618,10 @@ pub fn strip_shown() -> bool {
 }
 
 pub fn strip_visible(show: bool) {
-    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
-    if h.is_null() { return; }
-    if show && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) } == 0 {
-        place_strip();
+    // Posted (see post_strip): never a synchronous show, hide or move from inside GPUI.
+    if post_strip(crate::strip_rules::StripAsk::visibility(show)) {
+        log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
     }
-    // Async: GPUI may be mid-way through handling the shortcut press; a synchronous show makes it
-    // log "RefCell already borrowed" and skip the size and position messages.
-    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(h, crate::strip_rules::show_command(show)) };
-    log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
 }
 
 /// The caption bar in the nav colour (0xRRGGBB), so the window reads as one surface; `dark` also
