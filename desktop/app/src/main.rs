@@ -16,6 +16,7 @@ mod talk;
 mod store;
 mod recover;
 mod rules;
+mod strip_rules;
 mod uploads;
 mod audio;
 mod stand_in;
@@ -2184,8 +2185,11 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
             v
         })
     });
-    let Ok(Ok(new)) = opened else {
-        // Keep using the old strip.
+    let live = voxa.update(cx, |v, _| !matches!(v.flow.state(), State::Idle)).unwrap_or(false);
+    let opened = opened.ok().and_then(|r| r.ok());
+    let plan = strip_rules::after_open(opened.is_some(), live);
+    let Some(new) = opened.filter(|_| plan != strip_rules::AfterOpen::KeepOld) else {
+        // Keep using the old strip, never blanked.
         os::STRIP.store(old_strip, std::sync::atomic::Ordering::Relaxed);
         return None;
     };
@@ -2194,8 +2198,7 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
         os::move_strip(x, y, w, h);
     }
     os::place_strip();
-    let wanted = voxa.update(cx, |v, _| !matches!(v.flow.state(), State::Idle)).unwrap_or(false);
-    if wanted {
+    if plan == strip_rules::AfterOpen::Show {
         os::strip_visible(true);
     } else {
         // Paint once, unseen, so it isn't blank when it's shown later.
@@ -2459,5 +2462,14 @@ mod tests {
         assert!(super::is_window_close_noise(r#"Error { code: HRESULT(0x80040102), message: "Invalid window handle" }"#));
         assert!(super::is_window_close_noise(r#"Error { code: HRESULT(0x80070578), message: "Invalid window handle." }"#));
         assert!(!super::is_window_close_noise("DirectX device lost"));
+    }
+
+    /// The strip window never takes focus when it opens (Voxa never steals focus).
+    #[test]
+    fn the_strip_window_opens_without_focus() {
+        let o = super::strip_options(gpui::point(gpui::px(0.), gpui::px(0.)));
+        assert!(!o.focus, "the strip must open without focus");
+        assert!(matches!(o.kind, gpui::WindowKind::PopUp));
+        assert!(!o.is_movable && !o.is_resizable);
     }
 }

@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowTextW,
     HWND_TOPMOST, MA_NOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SW_HIDE, SW_SHOWNOACTIVATE, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WS_EX_NOACTIVATE,
+    SW_HIDE, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 
@@ -93,15 +93,11 @@ unsafe extern "system" fn no_activate_proc(
     // Modern Standby; a charger plugged in or out on a laptop with two graphics chips), so the
     // strip is rebuilt. These messages only set a flag: the rebuild happens at the user's next
     // shortcut press, never on its own (full-screen games change the display mode constantly).
-    const WM_POWERBROADCAST: u32 = 0x0218;
-    const WM_DISPLAYCHANGE: u32 = 0x007E;
-    const PBT_APMRESUMESUSPEND: usize = 0x0007;
-    const PBT_APMPOWERSTATUSCHANGE: usize = 0x000A;
-    const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
+    use crate::strip_rules::{graphics_maybe_lost, WM_DISPLAYCHANGE};
     // GPUI answers a display change by showing (and activating) its windows, the hidden strip
     // too: undo that at once and hand focus back, so nothing pops up and no app loses focus.
     if msg == WM_DISPLAYCHANGE {
-        WOKE.store(true, std::sync::atomic::Ordering::Relaxed);
+        WOKE.mark();
         let was_visible = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) } != 0;
         let fg = foreground();
         let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
@@ -115,14 +111,9 @@ unsafe extern "system" fn no_activate_proc(
         }
         return r;
     }
-    let why = match (msg, wparam) {
-        (WM_POWERBROADCAST, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC) => Some("woke from sleep"),
-        (WM_POWERBROADCAST, PBT_APMPOWERSTATUSCHANGE) => Some("power source changed"),
-        (WM_DISPLAYCHANGE, _) => Some("display changed"),
-        _ => None,
-    };
+    let why = graphics_maybe_lost(msg, wparam);
     if let Some(why) = why {
-        if !WOKE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if WOKE.mark() {
             log(&format!("strip will be rebuilt at the next shortcut: {why}"));
         }
     }
@@ -507,11 +498,11 @@ pub fn switch_to(hwnd: HWND) {
 }
 
 pub static STRIP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-static WOKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static WOKE: crate::strip_rules::WakeFlag = crate::strip_rules::WakeFlag::new();
 
 /// True once after the PC woke up or the screens changed (the strip should be rebuilt).
 pub fn take_woke() -> bool {
-    WOKE.swap(false, std::sync::atomic::Ordering::Relaxed)
+    WOKE.take()
 }
 
 
@@ -546,14 +537,11 @@ pub fn place_strip() {
         let m = mi.rcMonitor;
         let scale = windows_sys::Win32::UI::HiDpi::GetDpiForWindow(hw) as f32 / 96.0;
         // Same spot as at startup: 64 px (logical) above the bottom edge, centred.
-        let inner_h = (84.0 * scale).round() as i32;
-        let frame = ((h - inner_h) / 2).max(0);
-        let x = m.left + (m.right - m.left - w) / 2;
-        let y = m.bottom - (64.0 * scale).round() as i32 - inner_h - frame;
+        let (x, y) = crate::strip_rules::home_position((m.left, m.top, m.right, m.bottom), (w, h), scale);
         // Only when it's really out of place (a screen change): a needless move makes GPUI log
         // "RefCell already borrowed" while it's busy with the shortcut press.
         let Some((cx_, cy_, _, _)) = strip_rect() else { return };
-        if (cx_ - x).abs() > 8 || (cy_ - y).abs() > 8 {
+        if crate::strip_rules::needs_move((cx_, cy_), (x, y)) {
             log(&format!("strip moved to the main screen's bottom centre ({cx_},{cy_} -> {x},{y})"));
             SetWindowPos(hw, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         }
@@ -581,7 +569,7 @@ pub fn strip_visible(show: bool) {
     }
     // Async: GPUI may be mid-way through handling the shortcut press; a synchronous show makes it
     // log "RefCell already borrowed" and skip the size and position messages.
-    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(h, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(h, crate::strip_rules::show_command(show)) };
     log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
 }
 
