@@ -102,7 +102,7 @@ class VoxaKeyboard : InputMethodService() {
         super.onCreate()
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
-        recorder = Recorder(this, onLevel = { panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
+        recorder = Recorder(this, onLevel = { if (!destroyed && !isPaused()) panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
         app.historyChanged()
         scope.launch {
             combine(app.session, app.online) { _, _ -> }.collect { pushReadiness() }
