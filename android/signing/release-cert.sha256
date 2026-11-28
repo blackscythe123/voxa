@@ -4,6 +4,6 @@
 #   keytool -list -v -keystore <voxa-release.jks> -alias voxa
 # prints as "SHA256" (without colons, lowercase) on the next line and commit it.
 #
-# Once set: every release build (verifyReleaseSigner) and the android-feed workflow refuse an
+# Once set: every release build (verifyReleaseSigner) and the android-release workflow refuse an
 # APK signed by anything else. `python tools/lint/run.py --release` fails while it is empty.
 b049e5208787e82b9ff8cc18bb50649f70f7f888a97507b28d9a4b9dbbec7d57

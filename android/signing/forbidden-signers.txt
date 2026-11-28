@@ -1,6 +1,6 @@
 # Signing certificates (SHA-256 of the certificate, lowercase hex) that may NEVER sign a Voxa
 # release. Public certificate hashes, not keys. Checked by app/build.gradle.kts
-# (verifyReleaseSigner), .github/workflows/android-feed.yml and the lint release-android-signing.
+# (verifyReleaseSigner), .github/workflows/android-release.yml and the lint release-android-signing.
 #
 # The owner's Android debug key. It signed every pre-1.0 test build, including the published
 # Voxa-Android-0.3.0.apk (versionCode 5), checked 2026-11-28 with apksigner against

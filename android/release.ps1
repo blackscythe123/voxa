@@ -1,5 +1,7 @@
-# Builds the Android release APKs the owner uploads by hand (spec 9.2), and prints the publish
-# steps. It never publishes anything itself. docs/release-runbook.md has the whole order.
+# LOCAL FALLBACK ONLY. Android releases are normally built in CI: push the tag android-vX.Y.Z and
+# .github/workflows/android-release.yml builds, publishes and signs the feed
+# (docs/release-runbook.md B5 to B7). Use this script only when CI cannot build. It builds the
+# same two APKs on the owner's PC and prints the publish steps; it never publishes anything itself.
 #
 #   powershell -File android/release.ps1
 #
@@ -8,7 +10,7 @@
 # the build refuses (app/build.gradle.kts). After signing, verifyReleaseSigner checks the APKs
 # against android/signing/release-cert.sha256.
 #
-# Output (android/build/release/), the exact names README.md links and android-feed.yml expects:
+# Output (android/build/release/), the exact names README.md links and android-release.yml expects:
 #   Voxa-Android-<ver>-arm64-v8a.apk   most phones (per ABI, smallest)
 #   Voxa-Android-<ver>-universal.apk   any phone (arm64, 32-bit ARM, x86_64)
 
@@ -41,7 +43,8 @@ python ../tools/lint/run.py --release --require-apk --apk (Join-Path $out "Voxa-
 if ($LASTEXITCODE -ne 0) { throw "guardrails failed (size budget, keys or release certificate?)" }
 
 Write-Host ""
-Write-Host "Built Voxa for Android $ver from $commit in $out. To publish (yourself, docs/release-runbook.md):"
+Write-Host "Built Voxa for Android $ver from $commit in $out. The CI fallback, to publish (yourself, docs/release-runbook.md):"
 Write-Host "  git push origin $commit"
-Write-Host "  gh release create android-v$ver $out/Voxa-Android-$ver-arm64-v8a.apk $out/Voxa-Android-$ver-universal.apk --target $commit --latest=false --title `"Voxa for Android $ver`""
-Write-Host "  gh workflow run android-feed.yml --ref android-v$ver -f tag=android-v$ver"
+Write-Host "  gh release create android-v$ver $out/Voxa-Android-$ver-arm64-v8a.apk $out/Voxa-Android-$ver-universal.apk --target $commit --prerelease --latest=false --title `"Voxa for Android $ver`""
+Write-Host "  (the new tag starts android-release.yml: reject its build approval, these APKs are the release)"
+Write-Host "  gh workflow run android-release.yml --ref android-v$ver -f prebuilt=true    (then approve the feed job)"
