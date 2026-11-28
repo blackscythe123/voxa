@@ -20,14 +20,22 @@ class NotifyReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_COPY -> {
                 val id = intent.getLongExtra(EXTRA_ENTRY, 0L).toULong()
-                val text = app.core.history("").firstOrNull { it.id == id }?.text.orEmpty()
-                if (text.isNotEmpty()) {
-                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Dictation", text))
-                    Diag.log("notify", "copy: dictation copied (${text.length} chars)")
-                } else {
-                    Diag.log("notify", "copy: entry gone or empty")
-                }
-                Notifier.clearDictations(context)
+                // History is read off the main thread.
+                val done = goAsync()
+                Thread {
+                    try {
+                        val text = app.core.entry(id)?.text.orEmpty()
+                        if (text.isNotEmpty()) {
+                            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Dictation", text))
+                            Diag.log("notify", "copy: dictation copied (${text.length} chars)")
+                        } else {
+                            Diag.log("notify", "copy: entry gone or empty")
+                        }
+                        Notifier.clearDictations(context)
+                    } finally {
+                        done.finish()
+                    }
+                }.start()
             }
             ACTION_RETRY -> {
                 Diag.log("notify", "retry: sending again")

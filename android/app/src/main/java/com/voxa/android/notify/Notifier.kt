@@ -46,16 +46,52 @@ object Notifier {
 
     /** The Voxa keyboard is on screen (set by the keyboard). */
     @Volatile var keyboardShowing = false
+        set(v) {
+            field = v
+            if (!v) flush()
+        }
 
     /** One of the app's screens is in front (set by MainActivity). */
     @Volatile var activityResumed = false
+        set(v) {
+            field = v
+            if (!v) flush()
+        }
 
-    /** Never post while the user can see Voxa: they already see what the notification would say. */
+    /** Never post while the user can see Voxa: they already see what the notification would say.
+     *  What comes up meanwhile is held back and posted once they stop looking, never dropped. */
     private val looking get() = keyboardShowing || activityResumed
+
+    private var appCtx: Context? = null
+    private val pending = Any()
+    private var pendingSignIn = false
+    private val pendingReady = mutableListOf<Pair<List<ULong>, String>>()
+    private var pendingNotSent = 0
+
+    /** Post what was held back while the user was looking. Off the main thread (History is read). */
+    private fun flush() {
+        val ctx = appCtx ?: return
+        if (looking) return
+        val (signIn, ready, notSent) = synchronized(pending) {
+            val r = Triple(pendingSignIn, pendingReady.toList(), pendingNotSent)
+            pendingSignIn = false
+            pendingReady.clear()
+            pendingNotSent = 0
+            r
+        }
+        if (!signIn && ready.isEmpty() && notSent == 0) return
+        Thread {
+            Diag.log("notify", "posting what was held back while Voxa was on screen")
+            if (signIn) (ctx as? VoxaApp)?.let { signedOut(it) }
+            for ((entries, app) in ready) ready(ctx, entries, app)
+            if (notSent > 0) notSent(ctx, notSent)
+        }.start()
+    }
 
     private const val CONFIRM_MS = 2 * 60_000L
 
     fun createChannels(ctx: Context) {
+        appCtx = ctx.applicationContext
         val nm = ctx.getSystemService(NotificationManager::class.java)
         for (c in CHANNELS) nm.createNotificationChannel(NotificationChannel(c.id, c.name, c.importance).apply { description = c.description })
     }
@@ -106,6 +142,11 @@ object Notifier {
     }
 
     private fun signedOut(app: VoxaApp) {
+        if (looking) {
+            Diag.log("notify", "SIGN_IN held back: Voxa is on screen")
+            synchronized(pending) { pendingSignIn = true }
+            return
+        }
         val waiting = app.core.waitingForSignIn()
         post(app, NoticeKind.SIGN_IN, ID_SIGN_IN) { silent -> signInNotice(app, waiting, silent) }
     }
@@ -131,6 +172,7 @@ object Notifier {
 
     /** The session is good again: the sign-in notification goes. */
     fun clearSignIn(ctx: Context) {
+        synchronized(pending) { pendingSignIn = false }
         NotificationManagerCompat.from(ctx).cancel(ID_SIGN_IN)
     }
 
@@ -145,6 +187,11 @@ object Notifier {
     /** A2: dictations that weren't on screen were written out and wait in History. */
     fun ready(ctx: Context, entries: List<ULong>, app: String) {
         if (entries.isEmpty()) return
+        if (looking) {
+            Diag.log("notify", "DICTATIONS held back: Voxa is on screen")
+            synchronized(pending) { pendingReady += entries to app }
+            return
+        }
         val p = prefs(ctx)
         // Still showing "ready": add to its count; otherwise (gone, or a "couldn't send") start over.
         val before = if (showing(ctx, ID_DICTATIONS) && p.getString("dict_kind", "") == "ready") ids(p.getString("ready_ids", "")) else emptyList()
@@ -165,6 +212,11 @@ object Notifier {
     /** A3: background sends that gave up. Most recent wins over a "ready" notice. */
     fun notSent(ctx: Context, count: Int) {
         if (count <= 0) return
+        if (looking) {
+            Diag.log("notify", "DICTATIONS held back: Voxa is on screen")
+            synchronized(pending) { pendingNotSent += count }
+            return
+        }
         val p = prefs(ctx)
         val before = if (showing(ctx, ID_DICTATIONS) && p.getString("dict_kind", "") == "failed") p.getInt("failed_count", 0) else 0
         val n = before + count
@@ -180,6 +232,10 @@ object Notifier {
 
     /** History or the entry was opened, it was copied, deleted or sent: the dictations notice goes. */
     fun clearDictations(ctx: Context) {
+        synchronized(pending) {
+            pendingReady.clear()
+            pendingNotSent = 0
+        }
         NotificationManagerCompat.from(ctx).cancel(ID_DICTATIONS)
         prefs(ctx).edit().remove("dict_kind").remove("ready_ids").remove("failed_count").apply()
     }

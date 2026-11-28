@@ -31,7 +31,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.voxa.android.notify.VoxaJobs
 import uniffi.voxa_ffi.DeliveryResult
+import uniffi.voxa_ffi.EntryStatus
 import uniffi.voxa_ffi.FfiTarget
 import uniffi.voxa_ffi.FieldKind
 import uniffi.voxa_ffi.FlowEffect
@@ -84,6 +86,11 @@ class VoxaKeyboard : InputMethodService() {
 
     // Mic key: press-and-hold over 400 ms then release stops (hold to talk); a quick tap stays on.
     private var pressStarted = false
+    /** A finger is on the mic key now. */
+    private var pressActive = false
+    /** A rebuild of the keyboard view waits until no take is live and no key is held: a rebuild
+     *  removes the mic view, and the release of a hold-to-talk press would never arrive. */
+    private var rebuildPending = false
 
     /** Set first thing in onDestroy: nothing may use the Rust flow after that. */
     private var destroyed = false
@@ -208,8 +215,7 @@ class VoxaKeyboard : InputMethodService() {
         // build it again, so the change shows now and not only after the keyboard restarts.
         val p = panel
         if (p != null && KeyboardLook.stamp(this) != builtStamp) {
-            Diag.log("look", "look changed: keyboard view rebuilt")
-            setInputView(onCreateInputView())
+            rebuildWhenQuiet("look changed")
         } else if (p != null && p.colors.photo && !p.hasPhoto && photoJob?.isActive != true) {
             attachPhoto(p)
         }
@@ -237,6 +243,23 @@ class VoxaKeyboard : InputMethodService() {
         Notifier.keyboardShowing = false
         stopIfRecording("window hidden")
         super.onWindowHidden()
+    }
+
+    /** Rebuild the keyboard view now, or once the take on screen is over and no key is held. */
+    private fun rebuildWhenQuiet(why: String) {
+        if (busyForRebuild()) {
+            if (!rebuildPending) Diag.log("look", "$why: keyboard view rebuilt after this take")
+            rebuildPending = true
+            return
+        }
+        rebuildPending = false
+        Diag.log("look", "$why: keyboard view rebuilt")
+        setInputView(onCreateInputView())
+    }
+
+    private fun busyForRebuild(): Boolean = pressActive || when (flow.state()) {
+        is FlowState.Recording, is FlowState.Transcribing, is FlowState.Delivering -> true
+        else -> false
     }
 
     private fun stopIfRecording(why: String) {
@@ -276,6 +299,7 @@ class VoxaKeyboard : InputMethodService() {
         for (e in effects) run(e)
         app.historyChanged()
         render()
+        if (rebuildPending && !busyForRebuild()) main.post { if (!destroyed && rebuildPending && !busyForRebuild()) rebuildWhenQuiet("deferred") }
     }
 
     private fun run(effect: FlowEffect) {
@@ -310,7 +334,9 @@ class VoxaKeyboard : InputMethodService() {
                     main.post(timerTick)
                     Diag.log("mic", "resumed")
                 } else {
-                    // Like an interruption: finish and send what was recorded.
+                    // Like an interruption: finish and send what was recorded. The clock restarts
+                    // now so the timer doesn't count the pause for the moment before the stop.
+                    recordingSince = SystemClock.elapsedRealtime()
                     Diag.log("mic", "resume failed: $err; sending what was recorded")
                     main.post { if (!destroyed && flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop) }
                 }
@@ -361,6 +387,8 @@ class VoxaKeyboard : InputMethodService() {
     private fun transcribe(effect: FlowEffect.Transcribe) {
         val job = effect.job
         scope.launch {
+            // A cold start reads the saved sign-in off the main thread: wait for it.
+            app.awaitSession()
             val event = withContext(Dispatchers.IO) {
                 try {
                     val canned = app.debugTranscript
@@ -383,18 +411,30 @@ class VoxaKeyboard : InputMethodService() {
                 if (event.error is TranscribeFailure.Blocked) app.blocked.value = true
             }
             // Not the dictation on screen (sent when the network came back): it finishes unseen.
+            if (destroyed) return@launch
             val current = (flow.state() as? FlowState.Transcribing)?.job == job
             dispatch(event)
             if (!current && !destroyed) notifyBackground(job, event)
         }
     }
 
-    /** A2 / A3 for a dictation that finished off screen. Never for incognito takes (no entry). */
+    /** A2 / A3 for a dictation that finished off screen, by what History now says (a take the user
+     *  cancelled meanwhile has no entry, so nothing is posted). Never for incognito takes. A3 comes
+     *  only after the core's three tries, never for Cloudflare blocking, and its Retry sends this
+     *  entry again (it is added to the Retry list). */
     private fun notifyBackground(job: ULong, event: FlowEvent) {
         val entry = flow.entryForJob(job) ?: return
-        when {
-            event is FlowEvent.Transcribed && event.text.isNotBlank() -> Notifier.ready(this, listOf(entry), app.core.history("").firstOrNull { it.id == entry }?.app.orEmpty())
-            event is FlowEvent.TranscribeFailed && (event.error is TranscribeFailure.Timeout || event.error is TranscribeFailure.Server) -> Notifier.notSent(this, 1)
+        val unreachable = event is FlowEvent.TranscribeFailed && (event.error is TranscribeFailure.Timeout || event.error is TranscribeFailure.Server)
+        if (event !is FlowEvent.Transcribed && !unreachable) return
+        scope.launch {
+            val e = withContext(Dispatchers.IO) { app.core.entry(entry) } ?: return@launch
+            when {
+                event is FlowEvent.Transcribed && e.status is EntryStatus.Ready -> Notifier.ready(this@VoxaKeyboard, listOf(entry), e.app)
+                unreachable && e.status is EntryStatus.Failed -> {
+                    VoxaJobs.addFailed(this@VoxaKeyboard, listOf(entry))
+                    Notifier.notSent(this@VoxaKeyboard, 1)
+                }
+            }
         }
     }
 
@@ -405,6 +445,17 @@ class VoxaKeyboard : InputMethodService() {
             // No field bound (keyboard closed): nothing is inserted; the next field decides.
             Diag.log("insert", "no field bound; waiting for the next field")
             pendingPaste = effect
+            // The keyboard went away (a paused take stopped when the user switched apps): if no
+            // field comes back soon, say it's ready in History.
+            main.postDelayed({
+                if (!destroyed && pendingPaste === effect && !Notifier.keyboardShowing) {
+                    val entry = flow.entryForJob(effect.job) ?: return@postDelayed
+                    scope.launch {
+                        val e = withContext(Dispatchers.IO) { app.core.entry(entry) } ?: return@launch
+                        if (e.status is EntryStatus.Ready && pendingPaste === effect) Notifier.ready(this@VoxaKeyboard, listOf(entry), e.app)
+                    }
+                }
+            }, PASTE_GRACE_MS)
             return
         }
         val result = if (now == effect.target) {
@@ -446,7 +497,7 @@ class VoxaKeyboard : InputMethodService() {
         val key = "${file.path}:${file.lastModified()}:$w:$h:${look.position}:${look.soften}"
         val have = photo
         if (key == photoKey && have != null && !have.isRecycled) {
-            p.setPhoto(have)
+            p.setPhoto(have, cropped = true)
             return
         }
         photoJob?.cancel()
@@ -464,14 +515,14 @@ class VoxaKeyboard : InputMethodService() {
             if (destroyed) return@launch
             if (bmp == null) {
                 KeyboardLook.fallback(this@VoxaKeyboard, "photo decode")
-                if (panel === p) setInputView(onCreateInputView())
+                if (panel === p) rebuildWhenQuiet("photo could not be decoded")
                 return@launch
             }
             val old = photo
             photo = bmp
             photoKey = key
             if (old != null && old !== bmp) old.recycle()
-            panel?.takeIf { it.colors.photo }?.setPhoto(bmp)
+            panel?.takeIf { it.colors.photo }?.setPhoto(bmp, cropped = true)
             Diag.memory("photo decoded ${bmp.width} x ${bmp.height} ${bmp.config}")
         }
     }
@@ -495,6 +546,7 @@ class VoxaKeyboard : InputMethodService() {
                     // Only the circle itself, not its glow.
                     if (!p.mic.hit(ev.x, ev.y) || !v.isEnabled) return@setOnTouchListener false
                     v.isPressed = true
+                    pressActive = true
                     tap(v)
                     // Only a press that starts the recording can be a hold-to-talk press; a tap
                     // while recording always stops it (on release).
@@ -508,6 +560,7 @@ class VoxaKeyboard : InputMethodService() {
                 }
                 MotionEvent.ACTION_UP -> {
                     v.isPressed = false
+                    pressActive = false
                     // From the touch itself, not from when it is handled: starting the mic can
                     // block the main thread for a few hundred ms, which must not turn a tap into a hold.
                     val held = ev.eventTime - ev.downTime
@@ -517,7 +570,19 @@ class VoxaKeyboard : InputMethodService() {
                     if (stop) dispatch(FlowEvent.Stop)
                     v.performClick()
                 }
-                MotionEvent.ACTION_CANCEL -> v.isPressed = false
+                MotionEvent.ACTION_CANCEL -> {
+                    // The press was taken away (the view went, or a parent took the touch): a
+                    // hold-to-talk press ends as if released, so the mic never keeps recording.
+                    v.isPressed = false
+                    pressActive = false
+                    val held = ev.eventTime - ev.downTime
+                    if (pressStarted && holdToTalk && held > HOLD_MS && flow.state() is FlowState.Recording) {
+                        Diag.log("ime", "mic press cancelled after $held ms: stop")
+                        dispatch(FlowEvent.Stop)
+                    } else if (rebuildPending && !busyForRebuild()) {
+                        main.post { if (!destroyed && rebuildPending && !busyForRebuild()) rebuildWhenQuiet("deferred") }
+                    }
+                }
             }
             true
         }
@@ -738,5 +803,8 @@ class VoxaKeyboard : InputMethodService() {
         const val HOLD_MS = 400L
         /** How long "Pasted in X" stays before the keyboard is back to idle. */
         const val DONE_MS = 1500L
+        /** How long a finished text waits for a field after the keyboard went away before the
+         *  "ready" notification says it's in History. */
+        const val PASTE_GRACE_MS = 3000L
     }
 }
