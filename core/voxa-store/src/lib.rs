@@ -65,6 +65,12 @@ impl Entry {
 /// before it is renamed over `path` (a power cut right after the rename can't leave an empty
 /// file). A failure removes the temporary file and is reported.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_atomic_then(path, bytes, || Ok(()))
+}
+
+/// [`write_atomic`], running `before_rename` once the new data is safely on disk and just before
+/// it replaces `path`.
+fn write_atomic_then(path: &Path, bytes: &[u8], before_rename: impl FnOnce() -> std::io::Result<()>) -> std::io::Result<()> {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -81,7 +87,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     })();
     // Windows refuses a rename over a file another writer is renaming at the same moment; a
     // few short tries settle it.
-    let mut result = written.and_then(|()| std::fs::rename(&tmp, path));
+    let mut result = written.and_then(|()| before_rename()).and_then(|()| std::fs::rename(&tmp, path));
     for _ in 0..20 {
         if result.is_ok() || !tmp.exists() {
             break;
@@ -99,11 +105,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// the two renames, `path` is missing and `keep` holds the version before (`History::load`
 /// reads it then).
 fn write_atomic_keeping(path: &Path, bytes: &[u8], keep: Option<&Path>) -> std::io::Result<()> {
-    let Some(keep) = keep else { return write_atomic(path, bytes) };
-    let tmp = path.with_extension("next");
-    write_atomic(&tmp, bytes)?;
-    std::fs::rename(path, keep)?;
-    std::fs::rename(&tmp, path)
+    match keep {
+        Some(keep) => write_atomic_then(path, bytes, || std::fs::rename(path, keep)),
+        None => write_atomic(path, bytes),
+    }
 }
 
 /// Keep a copy of a file that can't be read as expected next to it, as `<stem>.broken-<ms>.json`,
