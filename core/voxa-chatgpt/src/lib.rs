@@ -596,6 +596,30 @@ mod timeout_tests {
     }
 }
 
+/// The manual tests that read the owner's REAL desktop sign-in (APPDATA\voxa-next) do nothing
+/// unless VOXA_MANUAL_REAL_SESSION=1 is set, so `cargo test -- --ignored` never touches it by
+/// accident. They print cookie names only, never values.
+#[cfg(test)]
+fn manual_real_session() -> bool {
+    let on = std::env::var_os("VOXA_MANUAL_REAL_SESSION").is_some_and(|v| v == "1");
+    if !on {
+        eprintln!("skipped: set VOXA_MANUAL_REAL_SESSION=1 to read the real desktop sign-in");
+    }
+    on
+}
+
+#[cfg(test)]
+mod manual_gate_tests {
+    /// Every test that reads the real desktop session is gated (1.0.0 review N4).
+    #[test]
+    fn manual_tests_never_read_the_real_session_without_the_env_flag() {
+        let src = include_str!("lib.rs");
+        let reads = src.matches(concat!("std::env::var(\"APP", "DATA\")")).count();
+        let gates = src.matches(concat!("if !manual_real_", "session() {")).count();
+        assert!(reads > 0 && gates >= reads, "{reads} reads, {gates} gates");
+    }
+}
+
 #[cfg(test)]
 mod cookie_probe {
     use super::*;
@@ -606,6 +630,9 @@ mod cookie_probe {
     #[test]
     #[ignore]
     fn what_chatgpt_sends_back() {
+        if !manual_real_session() {
+            return;
+        }
         let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("voxa-next");
         let s = Session::from_voxa_dir(&dir).expect("signed in on desktop");
         let stored: Vec<&str> = s.cookie_header.split("; ").filter_map(|c| c.split('=').next()).collect();
@@ -682,6 +709,9 @@ mod refresh_live {
     #[test]
     #[ignore]
     fn refreshed_sign_in_works_for_the_next_request() {
+        if !manual_real_session() {
+            return;
+        }
         let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("voxa-next");
         let s = Session::from_voxa_dir(&dir).expect("signed in on desktop");
         let gpt = ChatGpt::new();
