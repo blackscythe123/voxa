@@ -385,6 +385,18 @@ object Notifier {
         return true
     }
 
+    /** Debug builds only: post a reminder's real wording the way the reminder feature will (quiet:
+     *  no banner, no sound), to preview it. Release builds return at once. */
+    fun debugReminder(ctx: Context, style: uniffi.voxa_ffi.ReminderStyle) {
+        if (!com.voxa.android.BuildConfig.DEBUG) return
+        val ch = Channel("reminders", "Reminders", "Now and then, a tip if you haven't used Voxa for a while", NotificationManager.IMPORTANCE_LOW)
+        ctx.getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(NotificationChannel(ch.id, ch.name, ch.importance).apply { description = ch.description })
+        val r = uniffi.voxa_ffi.reminderMessage(style, 2u * 3600u + 10u * 60u, java.time.LocalDate.now().toEpochDay())
+        val ok = NotificationManagerCompat.from(ctx).safeNotify(ctx, 5, builder(ctx, ch, r.title, r.body, true).build())
+        Diag.log("notify", "REMINDER preview: ${if (ok) "POST" else "not posted"}")
+    }
+
     private fun builder(ctx: Context, ch: Channel, title: String, body: String, silent: Boolean): NotificationCompat.Builder {
         val public = NotificationCompat.Builder(ctx, ch.id)
             .setSmallIcon(R.drawable.ic_notify)

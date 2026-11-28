@@ -34,6 +34,20 @@ impl From<vn::Style> for ReminderStyle {
     }
 }
 
+/// The wording of a reminder in `style`, without the rules: for debug previews of how each one
+/// looks. `saved_secs_month`: time saved this month; `day`: picks the tip.
+#[uniffi::export]
+pub fn reminder_message(style: ReminderStyle, saved_secs_month: u32, day: i64) -> Reminder {
+    let s = match style {
+        ReminderStyle::Plain => vn::Style::Plain,
+        ReminderStyle::Progress => vn::Style::Progress,
+        ReminderStyle::Tip => vn::Style::Tip,
+        ReminderStyle::Quiet => vn::Style::Quiet,
+    };
+    let (title, body) = vn::messages::message(s, saved_secs_month, day);
+    Reminder { style, title, body }
+}
+
 /// A reminder to post on the "Reminders" channel.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Reminder {

@@ -155,6 +155,13 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putBoolean("ready", intent.getBooleanExtra("debug_ready", false)).apply()
             voxa.checkSession(force = true)
         }
+        // --es debug_reminder plain|progress|tip|quiet: post that "come back" reminder now (preview).
+        intent.getStringExtra("debug_reminder")?.let { name ->
+            runCatching { uniffi.voxa_ffi.ReminderStyle.valueOf(name.uppercase()) }.getOrNull()?.let {
+                moveTaskToBack(true)
+                com.voxa.android.notify.Notifier.debugReminder(this, it)
+            }
+        }
         // --es debug_now 2026-12-02T13:05: Home greets as if it were then ("" to use the clock).
         if (intent.hasExtra("debug_now")) prefs.edit().putString("now", intent.getStringExtra("debug_now").orEmpty()).apply()
         // --es debug_name Alexandria: greet with this first name when no account is known ("" clears).
