@@ -1077,7 +1077,7 @@ impl Voxa {
         let jobs: Vec<voxa_core::Job> = self.flow.jobs().cloned().collect();
         for job in jobs {
             let Some(&id) = self.job_entries.get(&job.id) else { continue };
-            if self.job_synced.get(&job.id) == Some(&job.state) {
+            if !rules::sync_needed(self.job_synced.get(&job.id), &job.state) {
                 continue;
             }
             let secs = self.job_secs.get(&job.id).copied().unwrap_or(0.0);

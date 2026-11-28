@@ -235,6 +235,12 @@ pub fn esc_wanted(state: &State) -> bool {
     matches!(state, State::Recording { paused: false, .. })
 }
 
+/// History is written from a job only when the job's state changed since the last write: a
+/// rewrite on every tick undid the user's edits and brought deleted dictations back.
+pub fn sync_needed(last_synced: Option<&JobState>, now: &JobState) -> bool {
+    last_synced != Some(now)
+}
+
 /// Start with Windows (macOS: open at login) is the real user's setting: a test copy never changes it.
 pub fn changes_login_item(test_copy: bool) -> bool {
     !test_copy
@@ -243,6 +249,15 @@ pub fn changes_login_item(test_copy: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Edits and deletes came back: an unchanged job is never written to History again.
+    #[test]
+    fn an_unchanged_job_is_not_written_to_history_again() {
+        let pasted = JobState::Delivered("hello".into());
+        assert!(sync_needed(None, &pasted), "first time");
+        assert!(!sync_needed(Some(&pasted), &pasted), "same state: the user's edit or delete stays");
+        assert!(sync_needed(Some(&JobState::Transcribing), &pasted));
+    }
 
     /// Finishing the tour in a test copy switched the real Start with Windows on.
     #[test]
