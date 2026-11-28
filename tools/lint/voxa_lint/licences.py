@@ -44,10 +44,11 @@ VERSIONS_TOML = "android/gradle/libs.versions.toml"
 APP_GRADLE = "android/app/build.gradle.kts"
 
 # SPDX identifiers Voxa may ship under Apache-2.0. MPL-2.0 is file-level copyleft: fine for
-# unmodified use. OFL-1.1 is for fonts.
+# unmodified use. OFL-1.1 is for fonts. CDLA-Permissive-2.0 is a permissive data licence (Mozilla's
+# root certificates in webpki-roots), approved by the owner on 2026-11-28.
 ALLOWED = {
     "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016",
-    "MPL-2.0", "CC0-1.0", "OFL-1.1", "BSL-1.0", "0BSD", "Unlicense",
+    "MPL-2.0", "CC0-1.0", "OFL-1.1", "BSL-1.0", "0BSD", "Unlicense", "CDLA-Permissive-2.0",
 }
 # Exceptions that only add permissions.
 ALLOWED_EXCEPTIONS = {"LLVM-exception"}
