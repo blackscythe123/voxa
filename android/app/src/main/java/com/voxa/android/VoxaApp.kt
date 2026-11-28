@@ -12,9 +12,11 @@ import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import com.voxa.android.data.SessionVault
+import com.voxa.android.data.hasSessionToken
 import com.voxa.android.diag.Diag
 import com.voxa.android.notify.Notifier
 import com.voxa.android.notify.VoxaJobs
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +24,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import uniffi.voxa_ffi.AccountInfo
 import uniffi.voxa_ffi.LogSink
@@ -43,6 +47,11 @@ class VoxaApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val core: VoxaCore by lazy { VoxaCore(filesDir.path) }
     private val vault by lazy { SessionVault(this) }
+    /** Held around every read and write of the vault, so a take, load and save is one step and
+     *  an older sign-in is never saved over a newer one or over a sign-out. */
+    private val vaultLock = Mutex()
+    /** The saved session was read (off the main thread) and handed to the core. */
+    private val sessionLoaded = CompletableDeferred<Unit>()
 
     val session = MutableStateFlow(SessionState.UNKNOWN)
     val account = MutableStateFlow<AccountInfo?>(null)
@@ -66,14 +75,23 @@ class VoxaApp : Application() {
         Log.i(TAG, "voxa core ${coreVersion()} loaded")
         Diag.log("app", "start: Voxa ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE}), core ${coreVersion()}, Android ${android.os.Build.VERSION.RELEASE} on ${android.os.Build.MODEL}")
         Diag.memory("app start")
-        val saved = vault.load()
-        if (saved != null) core.useSession(saved.cookieHeader, saved.userAgent)
-        Diag.log("app", "saved session: ${if (saved != null) "yes" else "none"}; mic ${if (micGranted()) "granted" else "not granted"}")
-        session.value = if (saved != null) SessionState.UNKNOWN else SessionState.EXPIRED
-        account.value = core.cachedAccount()
         holdToTalkOnByDefault()
         watchNetwork()
-        checkSession(force = true)
+        // The vault is decrypted with the Keystore: off the main thread.
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                vaultLock.withLock {
+                    val s = vault.load()
+                    if (s != null) core.useSession(s.cookieHeader, s.userAgent)
+                    s
+                }
+            }
+            Diag.log("app", "saved session: ${if (saved != null) "yes" else "none"}; mic ${if (micGranted()) "granted" else "not granted"}")
+            if (session.value == SessionState.UNKNOWN) session.value = if (saved != null) SessionState.UNKNOWN else SessionState.EXPIRED
+            account.value = withContext(Dispatchers.IO) { core.cachedAccount() }
+            sessionLoaded.complete(Unit)
+            checkSession(force = true)
+        }
         // Notifications (docs/notifications.md): channels, the 12 h session check, and the
         // background send of dictations recorded offline, checked whenever History changes.
         Notifier.createChannels(this)
@@ -81,6 +99,9 @@ class VoxaApp : Application() {
         scope.launch {
             historyVersion.collectLatest {
                 delay(1500)
+                // Every send changes History: any sign-in ChatGPT refreshed on the way is saved
+                // here too, so no caller can forget it.
+                keepRefreshedCookies()
                 withContext(Dispatchers.IO) { VoxaJobs.scheduleSendIfWaiting(this@VoxaApp) }
             }
         }
@@ -89,7 +110,12 @@ class VoxaApp : Application() {
     /** The live keyboard's flow, so background work never sends a dictation the keyboard owns. */
     @Volatile var keyboardFlow: VoxaFlow? = null
 
-    fun keyboardOwns(entryId: ULong): Boolean = runCatching { keyboardFlow?.isLive(entryId) == true }.getOrDefault(false)
+    /** The keyboard will send this entry itself (recording, being written out, or waiting for the
+     *  network in its live flow). A failed or ready take is not the keyboard's any more. */
+    fun keyboardOwns(entryId: ULong): Boolean = runCatching { keyboardFlow?.owns(entryId) == true }.getOrDefault(false)
+
+    /** Wait until the saved session is in the core (background jobs on a cold start). */
+    suspend fun awaitSession() = sessionLoaded.await()
 
     /** On a phone, hold to talk has always been on (hold the mic, let go to stop); the shared
      *  settings default it off (the desktop's hotkey mode). Turn it on once, then the user decides. */
@@ -125,24 +151,42 @@ class VoxaApp : Application() {
         else -> null
     }
 
-    /** A check that may lead to "You're signed out": ChatGPT's session call said so for a session
-     *  we had (not "nothing saved"), and it wasn't Cloudflare. Never a failed transcription. */
-    fun definiteExpiry(r: SessionCheck) = r.session == SessionState.EXPIRED && !r.blocked && (core.hasSession() || debugCheck != null)
+    /** A check that may lead to "You're signed out": ChatGPT's session call answered with no token
+     *  for a session we had (not a 401 or 403, not "nothing saved", not Cloudflare). Never a
+     *  failed transcription. */
+    fun definiteExpiry(r: SessionCheck) = r.session == SessionState.EXPIRED && !r.blocked && (r.definite || debugCheck != null)
 
-    /** Check the session now and wait for the answer (network; for the background jobs too). */
     /** ChatGPT re-issues the sign-in (90 days from now) as it's used: save it, or the saved sign-in
-     *  expires 90 days after the original sign-in however much Voxa is used. Logs no values. */
-    suspend fun keepRefreshedCookies() {
-        val header = core.takeRefreshedCookies() ?: return
-        vault.load()?.let { old -> withContext(Dispatchers.IO) { vault.save(SessionVault.Saved(header, old.userAgent)) } }
-        Diag.log("signin", "sign-in refreshed by ChatGPT: saved")
+     *  expires 90 days after the original sign-in however much Voxa is used. Take, load and save
+     *  are one step under [vaultLock], off the main thread; the core hands out only cookies
+     *  refreshed from the live session, and nothing after a sign-out or a new sign-in. Logs no values. */
+    suspend fun keepRefreshedCookies() = withContext(Dispatchers.IO) {
+        vaultLock.withLock {
+            val generation = core.sessionGeneration()
+            val header = core.takeRefreshedCookies() ?: return@withLock
+            val old = vault.load()
+            if (old == null || generation != core.sessionGeneration() || !hasSessionToken(header)) {
+                Diag.log("signin", "sign-in refreshed by ChatGPT: not saved (signed out or changed meanwhile)")
+                return@withLock
+            }
+            vault.save(SessionVault.Saved(header, old.userAgent))
+            Diag.log("signin", "sign-in refreshed by ChatGPT: saved")
+        }
     }
 
+    /** Check the session now and wait for the answer (network; for the background jobs too). */
     suspend fun checkSessionNow(): SessionCheck {
+        awaitSession()
         lastCheckMs = System.currentTimeMillis()
+        val generation = core.sessionGeneration()
         val fake = debugCheck
-        val r = if (fake != null) SessionCheck(fake, NetworkState.UP, core.cachedAccount(), false) else withContext(Dispatchers.IO) { core.checkSession() }
+        val r = if (fake != null) SessionCheck(fake, NetworkState.UP, withContext(Dispatchers.IO) { core.cachedAccount() }, false, fake == SessionState.EXPIRED) else withContext(Dispatchers.IO) { core.checkSession() }
         keepRefreshedCookies()
+        // Signed out or in while this check ran: its answer is about a session that is gone.
+        if (generation != core.sessionGeneration()) {
+            Diag.log("readiness", "session check outlived a sign-in or sign-out: ignored")
+            return r.copy(session = SessionState.UNKNOWN, definite = false)
+        }
         withContext(Dispatchers.Main) {
             Log.i(TAG, "session check: ${r.session}, network ${r.network}, blocked ${r.blocked}")
             Diag.log("readiness", "session ${r.session}, network ${r.network}, blocked ${r.blocked}${if (fake != null) " (debug answer)" else ""}")
@@ -176,18 +220,24 @@ class VoxaApp : Application() {
 
     /** The sign-in WebView captured a session. */
     fun signedIn(cookieHeader: String, userAgent: String) {
-        vault.save(SessionVault.Saved(cookieHeader, userAgent))
+        // In memory now (this also drops cookies refreshed for an older session); saved off the
+        // main thread, under the same lock as every refresh.
         core.useSession(cookieHeader, userAgent)
         Log.i(TAG, "session captured (${cookieHeader.length} bytes of cookies)")
         Diag.log("signin", "success: session captured")
-        checkSession(force = true)
+        scope.launch {
+            withContext(Dispatchers.IO) { vaultLock.withLock { vault.save(SessionVault.Saved(cookieHeader, userAgent)) } }
+            checkSession(force = true)
+        }
     }
 
     fun signOut() {
         Diag.log("signin", "signed out")
         Notifier.signedOutOnPurpose(this)
-        vault.clear()
+        // First the core (a new generation: nothing still running may save this session again),
+        // then the file, under the lock every save holds.
         core.signOut()
+        scope.launch(Dispatchers.IO) { vaultLock.withLock { vault.clear() } }
         CookieManager.getInstance().removeAllCookies(null)
         session.value = SessionState.EXPIRED
         account.value = null
