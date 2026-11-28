@@ -17,6 +17,34 @@ that guard it: `docs/guardrails.md` sections 6, 7 and 10. Notifications: `docs/n
 | Feeds | `.github/workflows/desktop.yml` job `feed`, `.github/workflows/android-feed.yml`, both on the `update-feed` prerelease |
 | Local TEST feeds | `tools/update/make_test_feed.py` (signs with the TEST key in `core/voxa-update/tests/fixtures/`) |
 
+## Since the 1.0.0 release review (2026-11-28)
+
+The release order is [release-runbook.md](release-runbook.md); its real-hardware gate must pass
+before friends get 1.0.0. What changed in the updater (each with its test, regressions.md):
+
+- A build with placeholder update keys says "Updates are off in this build" (desktop Settings,
+  Android "Off in this build") and never checks; every release build refuses placeholder keys.
+- Unreadable settings.json counts as "Update automatically" off.
+- After a failed install the next automatic attempt waits 6 hours (`RETRY_BACKOFF_MS`), and a
+  start made by Setup (`--updated`) never installs again at once.
+- Right before Setup starts (desktop) or the install is committed (Android), one quick
+  conditional request confirms the feed still offers the staged file. A paused feed (the
+  `feed-pause.yml` kill switch) or a replaced file drops it. No network: the verified file installs.
+- "Restart and update" asks the window to close itself first (live.json `close_for_update`), then
+  starts Setup with `/VOXAOPEN=1`, so Voxa comes back with its window.
+- The first strip at every start is created hidden and painted empty, and Setup relaunches with
+  `SW_SHOWNOACTIVATE` instead of `SW_HIDE`.
+- A Windows version that exits within a minute twice in a row checks the feed for a fixed release
+  before anything else starts (`start.json`).
+- Redirect hops may reach any HTTPS `*.githubusercontent.com` host (the first request is always
+  github.com).
+- Android remembers files it refused (wrong signer or package) and never fetches them again; a
+  manual-only offer (`min_auto_from`) points to the release page instead of downloading.
+- The update notification is `VISIBILITY_PRIVATE`: the lock screen shows only "Voxa update ready".
+- CI: both feed jobs run `voxa-update-tool guard-forward` (the version only moves forward, the
+  serial always goes up); android-feed runs from its tag ref only and requires the pinned release
+  certificate.
+
 ## Cheap checks (owner rule, 2026-11-28)
 
 - At most one automatic check per 24 hours per device, at this install's own time of day (a random
@@ -76,6 +104,6 @@ Engines: Rust unit tests on Windows 11; the desktop release exe as a test copy; 
 | Android onboarding step: Allow, Not now, resume after the process restart | Emulator: system "Install unknown apps" screen, then "Updates allowed" and Continue (`onboarding_ask=granted`); Not now moved to "Switch to Voxa and try it" (`skipped`); revoking killed the process and setup resumed on the step | Rendered |
 | Android full flow from a local signed feed | Server log: feed then APK; `files/updates/...apk` staged; Home card "Voxa 0.3.1 is ready to install"; A5 held while on screen and posted after Home (id 4, channel updates, importance 2, public title "Voxa update ready"); tap showed the system "Do you want to update this app?" dialog; Cancel gave "Voxa wasn't updated. You're still on 0.3.0." with Try again; Update installed 0.3.1 in place; jobs 7101 and 7104 rescheduled; Home "Voxa was updated to 0.3.1." | Rendered |
 | Android instrumented tests (UpdateFfiTest, UpdateNotificationTest, UpdateJobTest, UpdateInstallTest, SetupUpdateStepTest) | `connectedDebugAndroidTest` on the emulator, after the merge with main: 60 of 61 pass; the one failure is main's `RegressionsTest.theBirthdayIsDayAndMonthOnlyAndStaysOnThePhone` (a `birthday_wish` pref left on the emulator, not update code) | Tested |
-| Android API 29, Play Protect, the v3 lineage update from a 0.3.0 debug-signed install | Only an API 35 emulator here; no release key yet | Not verified (manual) |
+| Android API 29, Play Protect, the first update between two release-key-signed builds (1.0.0 to 1.0.1) | Only an API 35 emulator here; no release key yet. No lineage any more: test builds are uninstalled once (owner decision 2026-11-28) | Not verified (manual, runbook D10, D11) |
 | Android cleanup of `filesDir/updates` after `MY_PACKAGE_REPLACED` | The "updated" note is written after the cleanup; the folder couldn't be listed on the release build | Inferred |
 | macOS feed check, "is out" bar, Accessibility bar, CI signing and the designated requirement guard | Code only, not compiled | Not verified |

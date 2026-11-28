@@ -95,6 +95,9 @@ Notifications never contain transcript text: they name the app or a count.
   `core/voxa-ffi/src/notices.rs`, Android `Notifier.kt`): no function takes a `text` or
   `transcript` parameter, and Android's `setContentTitle` / `setContentText` / `bigText` /
   `setTicker` never get such a value.
+- Window descriptions (`describe()` in `desktop/app/src/win.rs` and `mac.rs`, logged on every
+  take) never read the window title (`GetWindowTextW`, `title`): they name the program file and
+  the window class only. Titles carry email subjects, chat and document names (1.0.0 review S15).
 
 ## 4. Focus
 
@@ -236,8 +239,9 @@ the middle of a dictation would hurt every user at once.
   or `release-assets.githubusercontent.com` / `objects.githubusercontent.com`.
 - `update-key-present`: `core/voxa-update/src/keys.rs` holds at least 2 keys of 64 hex characters
   with unique ids. All-zero placeholders are a note in everyday runs and a violation with
-  `--release` (`python tools/lint/run.py --release`, what a tagged release runs); the crate's
-  `build.rs` also fails a `VOXA_RELEASE_BUILD=1` build with placeholders.
+  `--release` (`python tools/lint/run.py --release`; CI passes it on every `v*` and `android-v*`
+  tag in `desktop.yml` and `guardrails.yml`). The crate's `build.rs` also fails a
+  `VOXA_RELEASE_BUILD=1` build with placeholders (section 12 has every release guard).
 - `update-secret`: no PEM private key block, no Ed25519 PKCS#8 prefix (base64 of
   `302e020100300506032b6570`) and no `.jks`, `.keystore`, `.p12` or `.pfx` file in the tree, outside
   the labelled TEST fixtures (`core/voxa-update/tests/fixtures/`, `tools/lint/fixtures/`).
@@ -247,9 +251,8 @@ the middle of a dictation would hurt every user at once.
   every PackageInstaller `commit(` in `Updater.kt` comes after `dictationLive()` in the same
   function.
 - `android-release-key`: `buildTypes.release` never names `signingConfigs.getByName("debug")`; the debug
-  fallback (until the owner creates the release key) lives in a helper gated on the release key
-  being absent, with a loud build warning, and the gradle build fails a debug-signed release once
-  the lineage exists.
+  fallback lives in a helper that only a dev release (`-Pvoxa.devRelease=true`) reaches. The gradle
+  build itself refuses every other release without the release key (section 12).
 - `android-onboarding-permissions`: `SetupScreen.kt` only routes to the microphone permission, the
   keyboard settings and `ACTION_MANAGE_UNKNOWN_APP_SOURCES`; never `POST_NOTIFICATIONS`.
 
@@ -311,12 +314,45 @@ kotlin-stdlib, JNA under Apache-2.0, uniffi and Manrope are listed; Settings ope
 library's licence text shows; passes on the debug build and the R8 release build). Screenshots:
 `docs/verification/licences/`.
 
+## 12. Release pipeline
+
+**Decision.** The Voxa 1.0.0 final release review (2026-11-28): no build that could strand its
+users ever ships, Android 1.0.0 on is signed with one permanent release key (no lineage from the
+debug key; test builds are uninstalled once), the update feeds only move forward and can be
+paused, and every release follows `docs/release-runbook.md` with its real-hardware gate.
+
+**Why.** 1.0.0's updater is the only update path users will have; a stranded build, a wrong signer
+or an older feed can only be repaired by each friend reinstalling by hand.
+
+**Checks** (`pipeline.py`):
+
+- `release-placeholder-guard`: `core/voxa-update/build.rs` calls `release_refused()`,
+  `android/app/build.gradle.kts` refuses a release with placeholder keys (`releaseRefusal`), and
+  `desktop/windows/voxa.iss` reads `keys.rs` and stops ISCC with `#error` unless
+  `/DAllowPlaceholderKeys`.
+- `release-android-signing`: no `--lineage` / `--next-signer` / `apksigner rotate` in the build;
+  `releaseKeyIsDebug()` and `verifyReleaseSigner` exist; `android/signing/forbidden-signers.txt`
+  lists the test-build signer `e648aa43...`; `android-feed.yml` checks the pinned and forbidden
+  certificates. With `--release`, `android/signing/release-cert.sha256` must hold a digest that is
+  not forbidden.
+- `release-feed-guard`: `android-feed.yml` refuses a run that is not from `refs/tags/$TAG`; both
+  feed jobs run `voxa-update-tool guard-forward`; every job that writes `k.pem` has
+  `trap 'rm -f k.pem' EXIT` and an empty-secret check; `feed-pause.yml` (the kill switch) exists.
+- `release-readme-links`: every README download link names a file the release uploads for the
+  workspace version, under the right tag (or a version-free `latest` copy).
+- `release-runbook`: `docs/release-runbook.md` has the REAL-HARDWARE RELEASE GATE and the README
+  links it.
+
+Tests: `voxa-update` `keys::tests::guard::a_release_build_with_placeholder_keys_fails_unless_the_dev_flag_is_set`,
+`policy::tests::the_feed_version_only_moves_forward_when_publishing`, the desktop
+`update::tests::a_build_with_placeholder_keys_says_updates_are_off`, the Android instrumented
+`UpdateSafetyTest`. The ISCC and Gradle refusals were run by hand on 2026-11-28 (both fail with
+placeholder keys; both build with the dev flag).
+
 ## Open items found when the guardrails were added
 
 These are on the allow-list with their reasons and should be fixed, then deleted from it:
 
 - Desktop app badges: white letters on several brand colours (WhatsApp, Gmail, YouTube, ...) are
   under 4.5:1; the Settings avatar fallback (white on `#10A37F`) is 3.2:1.
-- `account.json` (desktop `save_account`) and `notify.json` (desktop `Notifier::save`) are written
-  with a bare `fs::write`.
-- Desktop `store.rs` `write_atomic` uses a fixed `.tmp` name.
+- (Fixed since, see regressions.md: `notify.json` and the fixed `.tmp` name in `write_atomic`.)

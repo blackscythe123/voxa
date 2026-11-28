@@ -250,6 +250,49 @@ tools/lint.
 | Every bug gets a test and every decision a lint | owner, 11-28 | this file, `--self-test` (every rule has a fixture) |
 | HTML mockup first for a new UI direction; never name the owner's personal apps in the repo; a Mac change never alters Windows | owner | process rules: reviewed by hand (no automated check is possible without naming the private apps) |
 
+## Voxa 1.0.0 final release review (11-28)
+
+Findings of the release review (5 blockers, 22 shoulds, the cheap nits) and what now guards them.
+`vU` is core/voxa-update/src, `dUp` desktop/app/src/update.rs, `aUS` the Android instrumented
+UpdateSafetyTest.
+
+| Finding | Guarding test or lint | Kind |
+|---|---|---|
+| B1 a hand-built 1.0.0 with placeholder update keys could never update | vU keys::tests::guard::a_release_build_with_placeholder_keys_fails_unless_the_dev_flag_is_set, lint:release-placeholder-guard (build.rs, Gradle releaseRefusal, voxa.iss #error), dUp::a_build_with_placeholder_keys_says_updates_are_off, aUS::a_build_with_placeholder_keys_says_updates_are_off_and_never_checks | automated; ISCC and assembleRelease refusals run by hand |
+| B2 README Android link was a 404 | lint:release-readme-links | automated |
+| B3/B4 README said uninstall; Android signing undecided (decision: one release key from 1.0.0, test builds uninstalled once, no lineage) | lint:release-android-signing (forbidden test-build signer e648aa43..., pinned release-cert.sha256 with --release, no lineage step), Gradle releaseRefusal + verifyReleaseSigner | automated; the release key itself is an owner step |
+| B5 the updater never ran on real hardware | docs/release-runbook.md REAL-HARDWARE RELEASE GATE, lint:release-runbook | manual gate |
+| S1 android-feed dispatched from main is refused by the release environment | lint:release-feed-guard (refs/tags/$TAG check) | automated |
+| S2 a rollback's relaunch retried at once and burnt the 2-attempt cap | vU policy::tests::a_failed_install_waits_hours_before_the_second_attempt, dUp::a_start_by_setup_never_installs_again_at_once | automated |
+| S3 auto-update treated as on when settings.json was unreadable | dUp::auto_update_counts_as_off_when_settings_cannot_be_read | automated |
+| S4 "Restart and update" left a frozen window that Setup killed after 20 s | dUp::restart_and_update_closes_the_window_first_and_reopens_it | partly manual (the window closing on real hardware) |
+| S5 no kill switch; a staged file installed after a paused feed | vU policy::tests::a_paused_or_changed_feed_withdraws_the_staged_file_before_install, vU fetch::tests::a_paused_feed_stops_a_staged_install_at_the_last_check, ffi update::tests::no_network_at_the_last_look_never_withdraws_a_verified_file, lint:release-feed-guard (feed-pause.yml) | automated; the drill is manual (runbook D17) |
+| S6 feed publishing could move the version backwards | vU policy::tests::the_feed_version_only_moves_forward_when_publishing, lint:release-feed-guard (guard-forward) | automated |
+| S7 a version that crashes at start could never update | dUp::a_version_that_dies_at_start_twice_looks_for_a_fixed_one_first | partly manual (a real crashing build) |
+| S8 a renamed GitHub asset host would break every client | vU lib::tests::a_redirect_to_a_renamed_github_asset_host_still_works | automated |
+| S9 Android re-downloaded a refused APK every day | aUS::a_download_the_phone_refused_is_never_fetched_again | emulator |
+| S10 key rotation only on Android 13+ | obsolete: no rotation (owner decision), lint:release-android-signing | automated |
+| S11 Android ignored the manual-only flag | aUS::a_manual_only_offer_is_never_downloaded_and_points_to_the_release_page | emulator |
+| S12 words.json reset to empty when locked or damaged | dSt::a_damaged_word_list_is_kept_and_never_overwritten_by_an_edit | automated |
+| S13 0.4.x History compatibility unproven (Status enum is unchanged since v0.4.0) | dSt::a_0_4_x_history_file_loads_with_every_entry | automated |
+| S14 instrumented tests could wipe a real phone | Gradle refuses connected*AndroidTest unless ANDROID_SERIAL=emulator-* | automated |
+| S15 full window titles in voxa-desktop.log | lint:privacy-log (describe() never reads the title) | automated |
+| S16 the strip showed and could activate at every start and after an update | dM::the_strip_never_flashes_or_activates_at_start_or_after_an_update | partly manual (focus on real hardware, runbook D2) |
+| S17 known main-flow bugs (paste loss, "Pasted" without a text box) | runbook D8 | manual, still open below |
+| S18 no ordered release runbook | lint:release-runbook | automated |
+| S19 macOS always signed ad hoc | package.sh uses VOXA_MAC_SIGN_IDENTITY and runs check-signature.sh | manual (no Mac CI run yet, runbook D18) |
+| S20 README Android install guidance | lint:release-readme-links (names), README text | partly manual |
+| S21/S22 docs and CI disagreed; rotation steps | --release lint on tags in desktop.yml and guardrails.yml; update-keys.md rewritten | automated (the lint run) |
+| N1 a damaged update.json silently reset | dUp::a_damaged_update_state_is_kept_aside_not_silently_reset | automated |
+| N2 a stale offer survived a manual install | dUp::an_offer_for_the_installed_version_or_older_is_dropped | automated |
+| N3 cargo test wrote into the real desktop log | desktop/app/src/common.rs log_path_tests::cargo_test_never_writes_the_real_desktop_log | automated |
+| N8 uninstall left updates and install logs | dUp::install_logs_and_broken_state_files_are_capped | automated |
+| N9 versionCode collision at minor or patch 100 | vU version::tests::minor_or_patch_above_99_is_rejected_so_version_codes_never_collide | automated |
+| N10 asset name matched a version substring | vU feed::tests::an_asset_name_must_carry_the_exact_version_not_a_substring | automated |
+| N12 the update notification was public on the lock screen | Android UpdateNotificationTest::a4_has_the_title_and_the_public_lock_screen_text (VISIBILITY_PRIVATE) | emulator |
+| N15/N16 k.pem left on failure; no empty-secret check on desktop | lint:release-feed-guard | automated |
+| N20 greeting ledger written with a bare fs::write | desktop/app/src/greet.rs tests::the_greeting_ledger_is_written_atomically | automated |
+
 ## Open items found by this audit
 
 Not fixed; each needs a fix with its test (and was reported to the owner):
