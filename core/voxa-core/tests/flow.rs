@@ -105,7 +105,7 @@ fn json_403_is_an_expired_session() {
 fn offline_still_records_and_sends_itself_when_back_online() {
     let mut f = Flow::new(Readiness { network: Network::Down, ..ready() });
     let job = started(&mut f);
-    assert_eq!(f.state(), &State::Recording { job, offline: true });
+    assert_eq!(f.state(), &State::Recording { job, offline: true, paused: false });
     assert_eq!(strip_text(&f).unwrap().title, "Offline, keeping it");
     let fx = f.handle(Event::Stop);
     assert!(!fx.iter().any(|e| matches!(e, Effect::Transcribe { .. })));
@@ -158,7 +158,7 @@ fn history_retry_never_interrupts_a_recording() {
     let now = started(&mut f);
     let fx = f.handle(Event::Retry { job: old });
     assert!(fx.iter().all(|e| !matches!(e, Effect::Transcribe { .. })));
-    assert_eq!(f.state(), &State::Recording { job: now, offline: false });
+    assert_eq!(f.state(), &State::Recording { job: now, offline: false, paused: false });
 }
 
 #[test]
@@ -340,4 +340,167 @@ fn a_full_disk_offers_to_free_up_space() {
     f.handle(Event::Hotkey { target: whatsapp() });
     assert_eq!(strip_text(&f).unwrap().action.as_deref(), Some("Free up space"));
     assert!(f.handle(Event::Action).contains(&Effect::OpenStorage));
+}
+
+// Pause / resume (spec approved 2026-11-28): one take, mic off while paused, no new state.
+
+fn captures(fx: &[Effect]) -> usize {
+    fx.iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Effect::StartCapture { .. }
+                    | Effect::StopCapture { .. }
+                    | Effect::PauseCapture { .. }
+                    | Effect::ResumeCapture { .. }
+                    | Effect::DiscardCapture { .. }
+            )
+        })
+        .count()
+}
+
+#[test]
+fn pause_then_resume_keeps_one_take() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    let fx = f.handle(Event::Pause);
+    assert_eq!(fx, vec![Effect::PauseCapture { job }]);
+    assert_eq!(f.state(), &State::Recording { job, offline: false, paused: true });
+    assert_eq!(f.job(job).unwrap().state, JobState::Recording, "crash recovery keeps the audio");
+    let fx = f.handle(Event::Resume);
+    assert_eq!(fx, vec![Effect::ResumeCapture { job }]);
+    assert_eq!(f.state(), &State::Recording { job, offline: false, paused: false });
+    assert_eq!(strip_text(&f).unwrap().title, "Listening");
+    let fx = f.handle(Event::Stop);
+    assert!(has(&fx, &Effect::Transcribe { job }));
+    assert_eq!(f.jobs().count(), 1, "still one take");
+}
+
+#[test]
+fn pause_and_resume_are_idempotent() {
+    let mut f = Flow::new(ready());
+    assert!(f.handle(Event::Pause).is_empty(), "nothing to pause in Idle");
+    assert!(f.handle(Event::Resume).is_empty());
+    let job = started(&mut f);
+    assert!(f.handle(Event::Resume).is_empty(), "Resume when not paused does nothing");
+    assert_eq!(f.handle(Event::Pause).len(), 1);
+    assert!(f.handle(Event::Pause).is_empty(), "Pause twice gives one effect");
+    assert_eq!(f.handle(Event::Resume).len(), 1);
+    assert!(f.handle(Event::Resume).is_empty());
+    f.handle(Event::Stop);
+    assert_eq!(f.state(), &State::Transcribing { job });
+    assert!(f.handle(Event::Pause).is_empty(), "nothing to pause while writing it out");
+    f.handle(Event::Transcribed { job, result: Ok("   ".into()) });
+    assert!(matches!(f.state(), State::NeedsYou(_)));
+    assert!(f.handle(Event::Pause).is_empty(), "nothing to pause on a needs-you state");
+    assert!(f.handle(Event::Resume).is_empty());
+}
+
+#[test]
+fn stop_while_paused_sends() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Pause);
+    let fx = f.handle(Event::Stop);
+    assert!(has(&fx, &Effect::StopCapture { job }), "the shell closes the paused capture");
+    assert!(has(&fx, &Effect::Transcribe { job }));
+    assert_eq!(f.state(), &State::Transcribing { job });
+
+    // The network went down during the pause: decided at Stop, so it waits.
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Pause);
+    f.handle(Event::Readiness(Readiness { network: Network::Down, ..ready() }));
+    let fx = f.handle(Event::Stop);
+    assert!(has(&fx, &Effect::StopCapture { job }));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Transcribe { .. })));
+    assert_eq!(f.state(), &State::NeedsYou(Problem::WaitingForNetwork { job }));
+}
+
+#[test]
+fn hotkey_while_paused_stops() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Pause);
+    let fx = f.handle(Event::Hotkey { target: slack() });
+    assert!(has(&fx, &Effect::StopCapture { job }));
+    assert!(has(&fx, &Effect::Transcribe { job }));
+    assert_eq!(f.jobs().count(), 1, "no second take");
+}
+
+#[test]
+fn cancel_while_paused_discards_whole_take() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Pause);
+    let fx = f.handle(Event::Cancel);
+    assert!(has(&fx, &Effect::DiscardCapture { job }));
+    assert!(has(&fx, &Effect::HideStrip { after_ms: 0 }));
+    assert_eq!(f.job(job).unwrap().state, JobState::Discarded);
+    assert_eq!(f.state(), &State::Idle);
+}
+
+#[test]
+fn retry_is_refused_while_paused() {
+    let mut f = Flow::new(ready());
+    let old = started(&mut f);
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job: old, result: Err(TranscribeError::Server(500)) });
+    f.handle(Event::Dismiss);
+    let now = started(&mut f);
+    f.handle(Event::Pause);
+    let fx = f.handle(Event::Retry { job: old });
+    assert!(fx.is_empty());
+    assert_eq!(f.state(), &State::Recording { job: now, offline: false, paused: true });
+}
+
+#[test]
+fn readiness_changes_while_paused_keep_it_paused() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Pause);
+    let paused = State::Recording { job, offline: false, paused: true };
+    for r in [
+        Readiness { network: Network::Down, ..ready() },
+        Readiness { session: Session::Expired, ..ready() },
+        Readiness { mic: Mic::Stopped, ..ready() },
+        ready(),
+    ] {
+        let fx = f.handle(Event::Readiness(r));
+        assert_eq!(captures(&fx), 0, "no capture effects on {r:?}");
+        assert_eq!(f.state(), &paused);
+    }
+    // An expired sign-in shows up after Stop, as sign in to send.
+    f.handle(Event::Readiness(Readiness { session: Session::Expired, ..ready() }));
+    f.handle(Event::Stop);
+    f.handle(Event::Transcribed { job, result: Err(TranscribeError::SessionExpired) });
+    assert_eq!(f.state(), &State::NeedsYou(Problem::SignInToSend { job }));
+}
+
+#[test]
+fn paused_copy() {
+    for network in [Network::Up, Network::Down] {
+        let mut f = Flow::new(Readiness { network, ..ready() });
+        started(&mut f);
+        f.handle(Event::Pause);
+        let t = strip_text(&f).unwrap();
+        assert_eq!(t.title, "Paused", "online and offline takes");
+        assert_eq!(t.detail.as_deref(), Some("The microphone is off"));
+        assert_eq!(t.action.as_deref(), Some("Stop"));
+        assert!(!t.dismissable);
+    }
+    assert_eq!(voxa_core::copy::PAUSE_LABEL, "Pause");
+    assert_eq!(voxa_core::copy::RESUME_LABEL, "Resume");
+}
+
+#[test]
+fn focus_while_paused_is_ignored() {
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    f.handle(Event::Pause);
+    assert!(f.handle(Event::Focus { target: slack() }).is_empty());
+    assert_eq!(f.state(), &State::Recording { job, offline: false, paused: true });
+    f.handle(Event::Stop);
+    let fx = f.handle(Event::Transcribed { job, result: Ok("hi".into()) });
+    assert!(has(&fx, &Effect::Paste { job, target: whatsapp(), text: "hi".into() }), "pastes where it started");
 }

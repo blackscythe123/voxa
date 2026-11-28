@@ -12,7 +12,9 @@ pub enum State {
     Idle,
     /// The hotkey was pressed but recording did not start. Nothing was recorded.
     Blocked(Blocker),
-    Recording { job: JobId, offline: bool },
+    /// `paused`: the mic is off and paused time is left out of the take. Still one take: every
+    /// "in a take" check (Stop, Cancel, Hotkey, Retry's busy guard) treats it as recording.
+    Recording { job: JobId, offline: bool, paused: bool },
     Transcribing { job: JobId },
     Delivering { job: JobId },
     Delivered { job: JobId },
@@ -64,6 +66,10 @@ pub enum Event {
     Hotkey { target: Target },
     Stop,
     Cancel,
+    /// Turn the mic off mid-take without ending it (someone is talking to the user).
+    Pause,
+    /// Turn the mic back on and keep adding to the same take.
+    Resume,
     /// The strip's one primary action.
     Action,
     /// The strip's close button, or Esc on a needs-you state.
@@ -85,6 +91,10 @@ pub enum Effect {
     HideStrip { after_ms: u32 },
     StartCapture { job: JobId },
     StopCapture { job: JobId },
+    /// Close the mic but keep the take open; paused time is left out of the recording.
+    PauseCapture { job: JobId },
+    /// Reopen the mic and keep writing to the same take (after a short silence).
+    ResumeCapture { job: JobId },
     DiscardCapture { job: JobId },
     Transcribe { job: JobId },
     /// Paste into the original target; the shell must check it is still in front.
@@ -142,6 +152,8 @@ impl Flow {
             Event::Hotkey { target } => self.on_hotkey(target, &mut fx),
             Event::Stop => self.on_stop(&mut fx),
             Event::Cancel => self.on_cancel(&mut fx),
+            Event::Pause => self.on_pause(true, &mut fx),
+            Event::Resume => self.on_pause(false, &mut fx),
             Event::Action => self.on_action(&mut fx),
             Event::Dismiss => self.on_dismiss(&mut fx),
             Event::Transcribed { job, result } => self.on_transcribed(job, result, &mut fx),
@@ -175,7 +187,7 @@ impl Flow {
                 self.next_id += 1;
                 self.jobs.insert(id, Job { id, target, started_in: None, state: JobState::Recording });
                 let offline = self.readiness.network == Network::Down;
-                self.state = State::Recording { job: id, offline };
+                self.state = State::Recording { job: id, offline, paused: false };
                 fx.extend([Effect::SaveJob { job: id }, Effect::StartCapture { job: id }, Effect::ShowStrip]);
             }
         }
@@ -193,6 +205,17 @@ impl Flow {
             self.state = State::Transcribing { job };
             fx.push(Effect::Transcribe { job });
         }
+    }
+
+    /// Pause and Resume only flip the flag of the take on screen; repeating one does nothing.
+    /// The job stays Recording either way, so crash recovery keeps the audio.
+    fn on_pause(&mut self, pause: bool, fx: &mut Vec<Effect>) {
+        let State::Recording { job, offline, paused } = self.state else { return };
+        if paused == pause {
+            return;
+        }
+        self.state = State::Recording { job, offline, paused: pause };
+        fx.push(if pause { Effect::PauseCapture { job } } else { Effect::ResumeCapture { job } });
     }
 
     fn on_cancel(&mut self, fx: &mut Vec<Effect>) {
