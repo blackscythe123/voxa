@@ -440,6 +440,8 @@ impl Voxa {
                             v.keep_unfinished_takes(cx);
                             // A ready update installs now, without starting Voxa again.
                             v.update_on_quit(cx);
+                            // A normal Quit is not a start that died early.
+                            update::end_start();
                             cx.quit();
                         } else if ev.id == v.menu_check {
                             v.check_for_updates(true, cx);
@@ -2355,10 +2357,18 @@ fn main() {
     // Never delete the log at start: the previous run's (a failed update, a crash) is kept aside.
     os::rotate_log();
     os::log(&format!("voxa-desktop {} starting{}", env!("CARGO_PKG_VERSION"), if updated { " after an update" } else { "" }));
+    // A version that died early twice in a row can't run its own updater later: look for a
+    // fixed, signed release first, before anything else starts.
+    if update::begin_start() && update::recover_by_updating() {
+        update::end_start();
+        os::log("handing over to the update installer (recovery)");
+        return;
+    }
     // At Windows sign-in, before the shortcut exists or anything shows: a verified, staged update
     // installs now if its gate holds, and Setup starts Voxa again in the background. Never when
     // Setup itself just started this process (`--updated`, also after a rollback).
     if background && update::apply_at_background_start(updated) {
+        update::end_start();
         os::log("handing over to the update installer");
         return;
     }

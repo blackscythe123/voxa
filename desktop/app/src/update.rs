@@ -379,6 +379,120 @@ pub fn prune_logs(dir: &Path, keep: usize) {
     }
 }
 
+// ── recovery from a version that can't start (start.json) ────────────────
+
+/// How long the tray must run before a start counts as healthy.
+pub const HEALTHY_AFTER: Duration = Duration::from_secs(60);
+/// Starts in a row that died before HEALTHY_AFTER before Voxa looks for a fixed version first.
+pub const FAILED_STARTS_TO_RECOVER: u32 = 2;
+
+/// start.json: written at every tray start, cleared once the start was healthy or Voxa quit
+/// normally. A start that finds it still set means the last one died early.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StartRecord {
+    pub version: String,
+    pub pending: bool,
+    pub failed_starts: u32,
+}
+
+/// The record for this start, and whether to look for a fixed version before anything else
+/// (the same version died early twice in a row). A new version starts counting from zero.
+pub fn note_start(prev: &StartRecord, running: &str) -> (StartRecord, bool) {
+    let same = prev.version == running;
+    let failed = if same && prev.pending { prev.failed_starts.saturating_add(1) } else if same { prev.failed_starts } else { 0 };
+    let rec = StartRecord { version: running.to_string(), pending: true, failed_starts: failed };
+    (rec, failed >= FAILED_STARTS_TO_RECOVER)
+}
+
+fn start_path(dir: &Path) -> PathBuf {
+    dir.join("start.json")
+}
+
+/// Tray start: record it; true when Voxa should first try to recover by updating.
+pub fn begin_start() -> bool {
+    let dir = updates_dir();
+    let prev: StartRecord = std::fs::read(start_path(&dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let (rec, recover) = note_start(&prev, env!("CARGO_PKG_VERSION"));
+    if let Ok(b) = serde_json::to_vec(&rec) {
+        let _ = crate::store::write_atomic(&start_path(&dir), &b);
+    }
+    if recover {
+        ulog(&dir, &format!("{} stopped early {} times in a row: looking for a fixed version first", rec.version, rec.failed_starts));
+    }
+    recover
+}
+
+/// The start was healthy (ran HEALTHY_AFTER) or Voxa is quitting normally.
+pub fn end_start() {
+    let dir = updates_dir();
+    let rec = StartRecord { version: env!("CARGO_PKG_VERSION").into(), pending: false, failed_starts: 0 };
+    if let Ok(b) = serde_json::to_vec(&rec) {
+        let _ = crate::store::write_atomic(&start_path(&dir), &b);
+    }
+}
+
+/// A version that keeps dying at start can't run its own updater, so before anything else
+/// (no window, no audio, no hotkey) check the feed, download a newer verified version and hand
+/// it to Setup. Only a strictly newer, signed release; the usual gate (test copy, installed copy,
+/// "Update automatically", attempts) still applies. True: Setup was started, exit now.
+pub fn recover_by_updating() -> bool {
+    if !INSTALLS || updates_off() {
+        return false;
+    }
+    let dir = updates_dir();
+    let mut st = UpdateState::load(&dir);
+    let (result, check) = check_feed(st.check.clone(), true);
+    st.check = check;
+    let Ok(m) = result else {
+        ulog(&dir, "recovery: couldn't check the feed");
+        st.save(&dir);
+        return false;
+    };
+    let Some(offer) = policy::offer(&m, current(), ASSET) else {
+        ulog(&dir, "recovery: no newer version yet");
+        st.save(&dir);
+        return false;
+    };
+    let path = match download_offer(&offer, &dir) {
+        Ok(p) => p,
+        Err(e) => {
+            ulog(&dir, &format!("recovery: download failed: {}", e.code()));
+            st.save(&dir);
+            return false;
+        }
+    };
+    st.offer = Some(offer.clone());
+    st.staged_path = Some(path);
+    st.last_result = "ready".into();
+    let auto_update = auto_update_setting(&crate::store::Settings::try_load(&crate::data_dir()));
+    let inputs = Inputs {
+        moment: Moment::BackgroundStart,
+        flow: policy::Flow::Idle,
+        uploads_busy: false,
+        signing_in: false,
+        mic_testing: false,
+        signin_running: os::process_running("voxa-signin.exe"),
+        window_open: os::window_process_running(),
+        strip_visible: false,
+        since_hotkey_ms: u64::MAX,
+        auto_update,
+        paused: m.paused,
+        auto_allowed: offer.auto,
+        test_copy: std::env::var_os("VOXA_DATA").is_some(),
+        installed_copy: installed_copy(),
+        attempts: if st.target == offer.version { st.attempts } else { 0 },
+        since_attempt_ms: since_attempt(&st, &offer.version),
+    };
+    match launch_installer(&mut st, &dir, &inputs, false, Relaunch::Background) {
+        Ok(()) => true,
+        Err(why) => {
+            ulog(&dir, &format!("recovery: not installing: {why}"));
+            false
+        }
+    }
+}
+
 /// Milliseconds since the last install attempt at `version` (u64::MAX when there was none).
 fn since_attempt(st: &UpdateState, version: &str) -> u64 {
     if st.target != version || st.attempts == 0 || st.last_attempt_ms == 0 {
@@ -472,6 +586,8 @@ pub struct Updater {
     pub mac_access_bar: bool,
     /// "Restart and update" was pressed: the window was asked to close; Setup starts once it has.
     restart_requested: Option<Instant>,
+    /// This start ran HEALTHY_AFTER: start.json was cleared.
+    healthy: bool,
 }
 
 /// An automatic check goes to the network only when this install's daily slot (or a backoff
@@ -528,6 +644,7 @@ impl Updater {
             started_ms: crate::now_ms(),
             mac_access_bar,
             restart_requested: None,
+            healthy: false,
         }
     }
 
@@ -609,6 +726,10 @@ pub const UPDATES_OFF: &str = "Updates are off in this build. Download Voxa from
 impl Voxa {
     /// From the tray's tick loop, about once a second.
     pub(crate) fn update_tick(&mut self, cx: &mut Context<Self>) {
+        if !self.updater.healthy && self.updater.started.elapsed() >= HEALTHY_AFTER {
+            self.updater.healthy = true;
+            end_start();
+        }
         // "Restart and update": the window was asked to close; start Setup once it has.
         if let Some(asked) = self.updater.restart_requested {
             if restart_ready(os::window_process_running(), asked.elapsed()) {
@@ -705,6 +826,7 @@ impl Voxa {
         let dir = self.updater.dir.clone();
         match launch_installer(&mut self.updater.state, &dir, &inputs, on_request, relaunch) {
             Ok(()) => {
+                end_start();
                 cx.quit();
                 true
             }
@@ -953,6 +1075,28 @@ mod tests {
     }
 
     #[test]
+    fn a_version_that_dies_at_start_twice_looks_for_a_fixed_one_first() {
+        let fresh = StartRecord::default();
+        let (r1, recover) = note_start(&fresh, "1.0.1");
+        assert!(!recover && r1.pending && r1.failed_starts == 0);
+        // It died before the minute was up: the next start finds pending still set.
+        let (r2, recover) = note_start(&r1, "1.0.1");
+        assert!(!recover && r2.failed_starts == 1);
+        let (r3, recover) = note_start(&r2, "1.0.1");
+        assert!(recover && r3.failed_starts == 2, "two early deaths in a row");
+        // A healthy start (or a normal quit) clears it.
+        let healthy = StartRecord { version: "1.0.1".into(), pending: false, failed_starts: 0 };
+        assert!(!note_start(&healthy, "1.0.1").1);
+        // A new version starts counting again.
+        assert_eq!(note_start(&r3, "1.0.2").0.failed_starts, 0);
+        // main() records the start before anything else, and the tray clears it once healthy or at Quit.
+        let main = include_str!("main.rs");
+        assert!(main.contains("update::begin_start()") && main.contains("update::recover_by_updating()"));
+        assert!(main.contains("update::end_start()"), "a normal Quit is not an early death");
+        assert!(include_str!("update.rs").contains("self.updater.started.elapsed() >= HEALTHY_AFTER"));
+    }
+
+    #[test]
     fn auto_update_counts_as_off_when_settings_cannot_be_read() {
         assert!(!auto_update_setting(&Err("locked".into())), "an unreadable file never means on");
         assert!(auto_update_setting(&Ok(None)), "no file yet: the default");
@@ -1140,6 +1284,7 @@ mod tests {
             started_ms: 0,
             mac_access_bar: false,
             restart_requested: None,
+            healthy: false,
         }
     }
 
