@@ -15,7 +15,10 @@
 # replaces the APKs only while the release is still a prerelease. `force` publishes an older
 # version on purpose (a deliberate rollback).
 #
-# The local fallback (owner's PC, only if CI is unavailable) is android/release.ps1.
+# Local fallback, only when CI cannot build: android/release.ps1 on the owner's PC, the prerelease
+# created by hand, then this workflow with `prebuilt` (it skips build and release, checks the
+# APKs already in the release and signs the feed):
+#   gh workflow run android-release.yml --ref android-vX.Y.Z -f prebuilt=true
 #
 # The feed lists one entry per ABI APK in the release (android-arm64-v8a is required;
 # android-armeabi-v7a and android-x86_64 when present) and the universal APK as the fallback for
@@ -29,6 +32,10 @@ on:
     inputs:
       force:
         description: "Publish the feed even if it already offers a newer version (a deliberate rollback)"
+        type: boolean
+        default: false
+      prebuilt:
+        description: "Fallback: the APKs were built by android/release.ps1 and are already in the release; only sign the feed"
         type: boolean
         default: false
 
@@ -49,6 +56,7 @@ env:
 
 jobs:
   build:
+    if: ${{ !inputs.prebuilt }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: release
@@ -208,6 +216,7 @@ jobs:
   # promotes it after the real-hardware gate (docs/release-runbook.md B10).
   release:
     needs: build
+    if: ${{ !inputs.prebuilt }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -238,6 +247,8 @@ jobs:
   # the APKs from the published release, so the feed describes exactly the bytes phones download.
   feed:
     needs: [build, release]
+    # After a successful release, or alone in the prebuilt fallback (build and release skipped).
+    if: ${{ !cancelled() && (inputs.prebuilt || needs.release.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
@@ -249,6 +260,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Check the tag and the ref
+        # Again here: in the prebuilt fallback the build job, which checks it first, is skipped.
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^android-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the tag must look like android-v1.0.0, got $TAG"; exit 1; }
+          [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "::error::run this workflow from the tag ref (got $GITHUB_REF)"; exit 1; }
 
       - name: Download the APKs from the release
         run: |
