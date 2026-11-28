@@ -86,7 +86,8 @@ fun afterInstallGrant(activity: MainActivity) {
 fun checkNow(activity: MainActivity) {
     activity.voxa.scope.launch {
         val r = Updater.check(activity, manual = true)
-        if (r !is Updater.Checked.Offer || Updater.staged(activity) != null) return@launch
+        // A manual-only offer is never downloaded: the row opens its release page instead.
+        if (r !is Updater.Checked.Offer || !r.offer.auto || Updater.staged(activity) != null) return@launch
         val bytes = r.offer.size.toLong()
         if (!r.metered) return@launch VoxaJobs.scheduleUpdateDownload(activity, bytes, anyNetwork = true)
         val mb = ((bytes + 500_000) / 1_000_000).coerceAtLeast(1)
@@ -143,7 +144,7 @@ fun UpdateHomeCard(activity: MainActivity) {
         ) { Updater.openNotes(activity, "https://github.com/blackscythe123/voxa/releases/tag/android-v$updated") }
         notUpdated && ready != null -> UpdateCard(
             "Voxa wasn't updated. You're still on ${BuildConfig.VERSION_NAME}.",
-            "If Play Protect asks to scan Voxa, scanning is fine.", "Try again",
+            "If you tapped Cancel, tap Try again. If Play Protect asks to scan Voxa, scanning is fine.", "Try again",
             onDismiss = { Updater.dismissNotUpdated(activity); notUpdated = false },
         ) {
             Updater.dismissNotUpdated(activity)
@@ -209,14 +210,20 @@ fun UpdateRows(activity: MainActivity) {
     OptionRow(
         R.drawable.ic_refresh, "Check for updates",
         onClick = {
-            if (ready != null) installTapped(activity) else if (status != Updater.Status.CHECKING) {
-                manual = true
-                checkNow(activity)
+            when {
+                ready != null -> installTapped(activity)
+                // Manual only (below min_auto_from) or a build that can't update: the release page.
+                status == Updater.Status.MANUAL || status == Updater.Status.OFF -> Updater.openNotes(activity)
+                status != Updater.Status.CHECKING -> {
+                    manual = true
+                    checkNow(activity)
+                }
             }
         },
     ) { OptionValue(Updater.rowValue(status, ready, percent)) }
     // The sentence after a manual check: a polite live region, so TalkBack reads the result once.
-    if (manual) {
+    // "Off in this build" and "download it yourself" are always explained.
+    if (manual || status == Updater.Status.OFF || status == Updater.Status.MANUAL) {
         val line = when (status) {
             Updater.Status.UP_TO_DATE -> "You have the latest version. Last checked ${lastChecked(Updater.lastCheckMs(activity))}."
             else -> Updater.statusLine(status, Updater.offer(activity)?.version, ((Updater.offer(activity)?.size?.toLong() ?: 0L) / 1_000_000 + 1) * 2)

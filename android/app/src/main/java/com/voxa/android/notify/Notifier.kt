@@ -336,7 +336,7 @@ object Notifier {
         val n = builder(ctx, UPDATES, t.title, t.body, true)
             .setContentIntent(open)
             .addAction(0, t.action ?: "Install", open)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(public)
             .build()
         if (!NotificationManagerCompat.from(ctx).safeNotify(ctx, ID_UPDATE, n)) return false

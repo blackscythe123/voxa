@@ -198,6 +198,42 @@ pub fn update_verify_file(path: String, offer: UpdateOffer) -> Result<(), Update
     Ok(voxa_update::stage::verify_file(std::path::Path::new(&path), &(&offer).into())?)
 }
 
+/// False while the compiled update keys are the all-zero placeholders: this build can never verify
+/// a feed, so the app says "Updates are off in this build" and never checks (a release build
+/// refuses to compile that way unless VOXA_ALLOW_PLACEHOLDER_KEYS=1).
+#[uniffi::export]
+pub fn update_keys_ready() -> bool {
+    !keys::placeholders()
+}
+
+/// The last look at the feed right before PackageInstaller (see [`update_confirm`]).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct UpdateConfirm {
+    /// The feed is paused (the kill switch), offers another file, or isn't Voxa's: drop the
+    /// staged file and don't install.
+    pub withdrawn: bool,
+    /// The check state with the new validators and serial (store it like `UpdateCheck.state`).
+    pub state: String,
+}
+
+/// Right before the install is committed: one quick conditional request (3 s to connect, 6 s in
+/// all) to confirm the feed still offers this exact file. No network is not a withdrawal (the
+/// staged file was verified against a signed feed). `test_feed`/`test_key`: as for [`update_check`].
+#[uniffi::export]
+pub fn update_confirm(offer: UpdateOffer, state_json: String, test_feed: Option<String>, test_key: Option<String>) -> UpdateConfirm {
+    let mut state: CheckState = serde_json::from_str(&state_json).unwrap_or_default();
+    let test = test_feed.and_then(|url| Some((Origin::test(&url)?, test_key_bytes(test_key.as_deref()?).ok()?)));
+    let (origin, keyset): (Origin, Vec<(u8, [u8; 32])>) = match test {
+        Some((o, k)) => (o, vec![(1, k)]),
+        None => (Origin::github(Channel::Android), keys::KEYS.to_vec()),
+    };
+    let withdrawn = match Client::quick(origin, &version_name(offer.version_code), PLATFORM) {
+        Ok(c) => c.confirm_offer(&keyset, Channel::Android, &mut state, &(&offer).into()) == voxa_update::fetch::Confirm::Withdrawn,
+        Err(_) => false,
+    };
+    UpdateConfirm { withdrawn, state: serde_json::to_string(&state).unwrap_or_default() }
+}
+
 fn test_key_bytes(hex: &str) -> Result<[u8; 32], UpdateFailure> {
     voxa_update::hex_decode(hex.trim()).and_then(|v| v.try_into().ok()).ok_or(UpdateFailure::Refused)
 }
@@ -222,6 +258,30 @@ pub fn update_verify_feed_bytes(feed: Vec<u8>, key_hex: String, abis: Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_build_with_placeholder_keys_reports_updates_off() {
+        assert_eq!(update_keys_ready(), !keys::placeholders());
+    }
+
+    #[test]
+    fn no_network_at_the_last_look_never_withdraws_a_verified_file() {
+        let offer = UpdateOffer {
+            version: "1.0.1".into(),
+            version_code: 10001,
+            abi: "android-arm64-v8a".into(),
+            url: format!("{}://127.0.0.1:1/f/Voxa-Android-1.0.1-arm64-v8a.apk", "http"),
+            sha256: "a".repeat(64),
+            size: 10,
+            notes_url: String::new(),
+            serial: 1,
+            signer_sha256: String::new(),
+            auto: true,
+        };
+        let r = update_confirm(offer, String::new(), Some(format!("{}://127.0.0.1:1/f/android.json", "http")), Some("01".repeat(32)));
+        assert!(!r.withdrawn);
+        assert!(serde_json::from_str::<CheckState>(&r.state).is_ok());
+    }
 
     #[test]
     fn version_names_come_from_the_version_code() {
