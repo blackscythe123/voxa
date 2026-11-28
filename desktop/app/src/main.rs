@@ -13,6 +13,9 @@ mod redact;
 mod remote;
 mod talk;
 mod store;
+mod recover;
+mod rules;
+mod uploads;
 mod audio;
 mod stand_in;
 mod common;
@@ -43,6 +46,7 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, 
 use home::{Home, Page};
 use remote::Backend;
 use store::{Entry, History, Settings, Status};
+use uploads::{Key, Outcome, Pushed, Why};
 use voxa_core::copy::strip_text;
 use voxa_core::flow::Delivery;
 use voxa_chatgpt::{ChatGpt, Session as GptSession};
@@ -242,8 +246,20 @@ pub(crate) struct Voxa {
     rec_started: Instant,
     /// Talking time in this take; paused time is left out, also when stopped while paused.
     talk: talk::TalkClock,
-    /// History entries being resent now, so one recording is never uploaded twice at once.
-    sending: std::collections::HashSet<u64>,
+    /// Every upload goes through here: the strip's take at once, the rest one at a time, and
+    /// what Voxa sends on its own waits longer after each failure (uploads.rs).
+    uploads: uploads::Uploads,
+    /// Jobs the user just asked to send (History), so their upload skips the line's waits.
+    user_asked: std::collections::HashSet<JobId>,
+    /// History entries asked to be sent before the first sign-in check answered.
+    after_check: Vec<u64>,
+    /// The paste of this job was refused by an admin window: the strip says so.
+    paste_refused: Option<JobId>,
+    /// Why the mic wouldn't open, when the core's words aren't enough.
+    mic_note: Option<rules::MicNote>,
+    rebuild: rules::Rebuild,
+    /// The commands folder is read only when the window process says it wrote one (or now and then).
+    command_tick: u32,
     frame: u64,
     tray: Option<TrayIcon>,
     hotkeys: GlobalHotKeyManager,
@@ -260,7 +276,7 @@ pub(crate) struct Voxa {
     peaks: HashMap<JobId, f32>,
     pub(crate) levels: VecDeque<f32>,
     gpt: Arc<ChatGpt>,
-    session: Option<GptSession>,
+    session: rules::SessionSlot<GptSession>,
     last_check: Instant,
     /// Toasts (docs/notifications.md).
     notifier: notify::Notifier,
@@ -278,15 +294,14 @@ impl Voxa {
             Session::Unknown
         };
         let built = audio::Mic::with_preferred(Settings::load(&data_dir()).mic_device);
-        let mic = match &built {
+        let (mic, mic_note) = match &built {
             Ok(m) => {
                 os::log(&format!("microphone ready (paused): {}", m.device_name()));
-                Mic::Granted
+                (Mic::Granted, None)
             }
-            Err(audio::MicError::NoDevice) => Mic::Missing,
             Err(e) => {
                 os::log(&format!("microphone unavailable: {e:?}"));
-                Mic::Denied
+                rules::mic_failure(e)
             }
         };
         let flow = Flow::new(Readiness { session, network: Network::Up, mic });
@@ -300,6 +315,15 @@ impl Voxa {
             }
         };
         let mut history = History::load(&data_dir());
+        // Takes cut off by a forced end (update, shutdown, power cut, crash) come back as "Not
+        // sent". Only when History was read cleanly: otherwise every recording looks orphaned.
+        if history.read_cleanly() {
+            let n = recover::recover(&mut history, &data_dir().join("audio"));
+            if n > 0 {
+                os::log(&format!("recovered {n} takes cut off when Voxa last stopped"));
+                history.save();
+            }
+        }
         if settings_ok {
             if let Some(n) = import::run_once(&electron_dir(), &data_dir(), &mut history, &mut settings) {
                 os::log(&format!("imported {n} dictations from the old Voxa"));
@@ -393,9 +417,13 @@ impl Voxa {
                             v.open_home(None, cx);
                         }
                     }
-                    for cmd in link::take_commands() {
-                        v.on_command(cmd, cx);
+                    v.command_tick = v.command_tick.wrapping_add(1);
+                    if link::commands_due(v.command_tick) {
+                        for cmd in link::take_commands() {
+                            v.on_command(cmd, cx);
+                        }
                     }
+                    v.pump_uploads(cx);
                     for click in notify::take_clicks() {
                         v.on_notification(click, cx);
                     }
@@ -449,12 +477,22 @@ impl Voxa {
                                 match audio::Mic::with_preferred(v.settings.mic_device.clone()) {
                                     Ok(m) => {
                                         os::log(&format!("microphone found again: {}", m.device_name()));
+                                        v.mic_note = None;
                                         v.mic_name = m.device_name().to_string();
                                         v.mic = Some(m);
                                         let r = Readiness { mic: Mic::Granted, ..v.flow.readiness() };
                                         v.handle(Event::Readiness(r), cx);
                                     }
-                                    Err(e) => os::log(&format!("microphone still unavailable: {e:?}")),
+                                    Err(e) => {
+                                        os::log(&format!("microphone still unavailable: {e:?}"));
+                                        // The reason may have changed (privacy turned on, another app took it).
+                                        let (mic, note) = rules::mic_failure(&e);
+                                        v.mic_note = note;
+                                        if mic != v.flow.readiness().mic {
+                                            let r = Readiness { mic, ..v.flow.readiness() };
+                                            v.handle(Event::Readiness(r), cx);
+                                        }
+                                    }
                                 }
                             }
                             let browser = os::browser_name(fg);
@@ -548,7 +586,13 @@ impl Voxa {
             menu_quit: quit_item.id().clone(),
             rec_started: Instant::now(),
             talk: talk::TalkClock::default(),
-            sending: std::collections::HashSet::new(),
+            uploads: uploads::Uploads::default(),
+            user_asked: Default::default(),
+            after_check: Vec::new(),
+            paste_refused: None,
+            mic_note,
+            rebuild: rules::Rebuild::default(),
+            command_tick: 0,
             frame: 0,
             tray,
             hotkeys,
@@ -563,7 +607,7 @@ impl Voxa {
             peaks: HashMap::new(),
             levels: VecDeque::new(),
             gpt: Arc::new(ChatGpt::new()),
-            session: None,
+            session: rules::SessionSlot::default(),
             last_check: Instant::now(),
             notifier: notify::Notifier::new(),
             session_known: None,
@@ -580,6 +624,7 @@ impl Voxa {
         self.last_check = Instant::now();
         let gpt = self.gpt.clone();
         let generation = session_gen();
+        let version = self.session.version();
         cx.spawn(async move |this, cx| {
             let (session, state, network, definite) = cx.background_executor().spawn(async move { ask_session(&gpt, generation) }).await;
             let _ = this.update(cx, |v, cx| {
@@ -588,15 +633,46 @@ impl Voxa {
                     return;
                 }
                 os::log(&format!("session check: {state:?}, network {network:?}"));
-                v.session = session;
+                // Never put back an older cookie than one an upload adopted meanwhile.
+                v.session.adopt_checked(version, session);
                 v.watch_expiry(state, definite, cx);
                 let r = Readiness { session: state, network, ..v.flow.readiness() };
                 if r != v.flow.readiness() {
                     v.handle(Event::Readiness(r), cx);
                 }
+                v.after_session_check(state, network, cx);
             });
         })
         .detach();
+    }
+
+    /// After every check: Send now asked for before the first check answered, and takes from
+    /// earlier runs that wait for the network or the sign-in ("Sends when you're back online").
+    fn after_session_check(&mut self, state: Session, network: Network, cx: &mut Context<Self>) {
+        let asked = std::mem::take(&mut self.after_check);
+        if state == Session::Valid {
+            for id in asked {
+                self.resend(id, uploads::Why::User, cx);
+            }
+            if network == Network::Up {
+                let mine: std::collections::HashSet<u64> = self.job_entries.values().copied().collect();
+                let ids: Vec<u64> = self
+                    .history
+                    .entries
+                    .iter()
+                    .filter(|e| matches!(&e.status, Status::Waiting(w) if w == store::WAITING_NETWORK || w == store::WAITING_SIGN_IN))
+                    .filter(|e| !mine.contains(&e.id) && !self.uploads.contains(Key::Entry(e.id)) && e.audio.as_ref().is_some_and(|a| a.exists()))
+                    .map(|e| e.id)
+                    .collect();
+                for id in ids {
+                    self.resend(id, uploads::Why::Auto, cx);
+                }
+            }
+        } else if !asked.is_empty() && state == Session::Expired {
+            self.sign_in(cx);
+        } else {
+            self.after_check = asked;
+        }
     }
 
     /// D1: say "You're signed out" only for a definite answer (ChatGPT's session call returned no
@@ -670,9 +746,17 @@ impl Voxa {
             }
             notify::Click::SendNow => {
                 self.notifier.clear_dictations();
-                // A dictation of this run that failed is retried by the flow; older ones are resent.
-                let failed = self.job_entries.keys().copied().find(|j| self.flow.job(*j).is_some_and(|j| matches!(j.state, voxa_core::JobState::Failed(_))));
-                if let Some(job) = failed {
+                // Every dictation of this run that failed is retried by the flow (one on the strip,
+                // the rest in the background line); older ones are resent.
+                let mut failed: Vec<JobId> = self
+                    .job_entries
+                    .keys()
+                    .copied()
+                    .filter(|j| self.flow.job(*j).is_some_and(|j| matches!(&j.state, voxa_core::JobState::Failed(e) if *e != TranscribeError::Server(204))))
+                    .collect();
+                failed.sort();
+                for job in failed {
+                    self.user_asked.insert(job);
                     self.handle(Event::Retry { job }, cx);
                 }
                 self.resend_all(cx);
@@ -711,6 +795,9 @@ impl Voxa {
         }
         let effects = self.flow.handle(event);
         os::log(&format!("  -> {:?} | effects {}", self.flow.state(), redact::effects(&effects)));
+        // Only an answer that changed the job is worth a toast (a cancelled retry's late
+        // answer changes nothing and must not say "couldn't send").
+        let background = background.filter(|j| rules::answer_changed_job(&effects, *j));
         for e in effects {
             self.run(e, cx);
         }
@@ -776,11 +863,9 @@ impl Voxa {
                         // The mic would not open: undo the recording and show the blocker instead.
                         os::log(&format!("  mic failed: {e:?}"));
                         let target = self.flow.job(job).map(|j| j.target.clone());
-                        let mic = match e {
-                            audio::MicError::NoDevice => Mic::Missing,
-                            audio::MicError::Disk(_) => Mic::CantSave,
-                            audio::MicError::Blocked(_) => Mic::Denied,
-                        };
+                        // Only a refused access is "microphone access is off".
+                        let (mic, note) = rules::mic_failure(&e);
+                        self.mic_note = note;
                         self.handle(Event::Cancel, cx);
                         let r = Readiness { mic, ..self.flow.readiness() };
                         self.handle(Event::Readiness(r), cx);
@@ -838,76 +923,37 @@ impl Voxa {
                 }
             }
             Effect::Transcribe { job } if !fake_mode() => {
-                // The mic gave nothing or the file couldn't be written: say so (never "no speech").
-                if let Some(t) = self.trouble.remove(&job).filter(|_| self.peaks.get(&job).is_none_or(|p| *p < SILENCE)) {
-                    let mic = match t {
-                        audio::Trouble::Disk => Mic::CantSave,
-                        audio::Trouble::MicStopped => Mic::Stopped,
-                    };
-                    let target = self.flow.job(job).map(|j| j.target.clone());
-                    self.handle(Event::Cancel, cx);
-                    let r = Readiness { mic, ..self.flow.readiness() };
-                    self.handle(Event::Readiness(r), cx);
-                    if let Some(target) = target {
-                        self.handle(Event::Hotkey { target }, cx);
+                // Every Transcribe gets its answer (Transcribed or MicTrouble), or the job would be
+                // stuck as uploading for the rest of the run.
+                let trouble = self.trouble.remove(&job);
+                match rules::transcribe_plan(trouble, self.peaks.get(&job).copied(), SILENCE) {
+                    // The mic gave nothing or the file couldn't be written: say so (never "no
+                    // speech"), about this take only, never the one being recorded.
+                    rules::Plan::Trouble(mic) => return self.handle(Event::MicTrouble { job, mic }, cx),
+                    rules::Plan::Silence => {
+                        os::log("  silence: not sending");
+                        return self.handle(Event::Transcribed { job, result: Ok(String::new()) }, cx);
                     }
-                    return;
+                    rules::Plan::Upload => {}
                 }
-                if self.peaks.get(&job).is_some_and(|p| *p < SILENCE) {
-                    os::log("  silence: not sending");
-                    self.handle(Event::Transcribed { job, result: Ok(String::new()) }, cx);
-                    return;
-                }
-                let path = self.audio_paths.get(&job).cloned();
-                let peak = self.peaks.get(&job).copied().unwrap_or(1.0);
-                let app = self.flow.job(job).map(|j| j.target.app.clone()).unwrap_or_default();
-                let session = self.session.clone();
-                let gpt = self.gpt.clone();
-                let generation = session_gen();
-                cx.spawn(async move |this, cx| {
-                    let (result, refreshed) = cx
-                        .background_executor()
-                        .spawn(async move {
-                            let Some(session) = session else { return (Err(TranscribeError::SignedOut), None) };
-                            let Some(audio) = path.and_then(|p| prepare::audio_for_upload(&p)) else { return (Err(TranscribeError::Server(0)), None) };
-                            // A dropped connection is common on flaky Wi-Fi: try twice more before
-                            // calling it offline.
-                            let mut result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
-                            // A big recording that timed out would only time out again (and block new
-                            // dictations meanwhile): keep it for Retry instead.
-                            let small = audio.len() < 2_000_000;
-                            for wait in [1500u64, 4000] {
-                                let again = match &result {
-                                    Err(TranscribeError::Offline) => true,
-                                    Err(TranscribeError::Timeout) => small,
-                                    _ => false,
-                                };
-                                if !again {
-                                    break;
-                                }
-                                os::log(&format!("  upload failed ({:?}); retrying in {wait} ms", result.as_ref().err()));
-                                std::thread::sleep(Duration::from_millis(wait));
-                                result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
-                            }
-                            let sent = session.cookie_header.clone();
-                            let kept = keep_refreshed_cookies(&gpt, session, generation);
-                            let refreshed = (kept.cookie_header != sent).then_some((sent, kept));
-                            (result.map(|t| prepare::finish_text(t, &data_dir(), &app)), refreshed)
-                        })
-                        .await;
-                    if let Some((sent, kept)) = refreshed {
-                        let _ = this.update(cx, |v, _| v.adopt_refreshed(generation, &sent, kept));
+                let asked = self.user_asked.remove(&job);
+                let why = if matches!(self.flow.state(), State::Transcribing { job: on } if *on == job) {
+                    Why::Strip
+                } else if asked {
+                    Why::User
+                } else {
+                    Why::Auto
+                };
+                let key = Key::Job(job.0);
+                match self.uploads.push(key, why, Instant::now()) {
+                    Pushed::StartNow => self.start_upload(key, true, cx),
+                    Pushed::Queued => self.pump_uploads(cx),
+                    Pushed::Already => os::log("  already uploading"),
+                    Pushed::GiveUp => {
+                        os::log("  tried too often on its own: kept for Send now");
+                        self.handle(Event::Transcribed { job, result: Err(TranscribeError::Timeout) }, cx);
                     }
-                    let result = match result {
-                        Ok(t) if invented_for_silence(&t, peak) => {
-                            os::log(&format!("  dropped {}: near-silent take (peak {peak:.4})", redact::text(&t)));
-                            Ok(String::new())
-                        }
-                        other => other,
-                    };
-                    let _ = this.update(cx, |v, cx| v.handle(Event::Transcribed { job, result }, cx));
-                })
-                .detach();
+                }
             }
             Effect::Transcribe { job } => {
                 cx.spawn(async move |this, cx| {
@@ -928,7 +974,7 @@ impl Voxa {
                 }
                 let same_tab = !os::browser_name(fg).is_some() || os::app_name(fg) == target.app;
                 let result = if fg as u64 == target.window && same_tab {
-                    if os::paste_here(&text, self.settings.keep_on_clipboard) { Delivery::Pasted } else { Delivery::Failed }
+                    self.paste(job, &text)
                 } else {
                     let app = os::app_name(fg);
                     os::cache_app_icon(fg, os::icon_owner(fg));
@@ -938,7 +984,7 @@ impl Voxa {
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::PasteHere { job, text } => {
-                let result = if os::paste_here(&text, self.settings.keep_on_clipboard) { Delivery::Pasted } else { Delivery::Failed };
+                let result = self.paste(job, &text);
                 self.handle(Event::Delivered { job, result }, cx);
             }
             Effect::OpenSignIn if !fake_mode() => {
@@ -949,6 +995,15 @@ impl Voxa {
                 };
                 if self.signing_in {
                     return;
+                }
+                // Whatever opened it (Settings, a toast, the strip): nothing refreshed for the
+                // session before this sign-in may be saved after it, and a deliberate sign-out
+                // no longer applies (the sign-in window also clears its marker when it saves).
+                {
+                    let _g = lock_session_file();
+                    SESSION_GEN.fetch_add(1, Ordering::SeqCst);
+                    self.gpt.clear_refreshed();
+                    let _ = std::fs::remove_file(data_dir().join("signed-out"));
                 }
                 os::log("sign-in: opening the sign-in window");
                 self.signing_in = true;
@@ -1029,19 +1084,22 @@ impl Voxa {
                         .or_else(|| self.history.get(id).and_then(|e| e.via.clone()))
                 },
             };
-            let next = match &job.state {
-                JobState::Recording | JobState::Transcribing => continue,
-                JobState::WaitingForNetwork => Some(entry(String::new(), Status::Waiting("Sends when you're back online".into()))),
-                JobState::Ready(t) | JobState::Delivered(t) if t.trim().is_empty() => None,
-                JobState::Ready(t) => Some(entry(t.clone(), Status::Ready)),
-                JobState::Delivered(t) => Some(entry(t.clone(), Status::Pasted)),
-                JobState::Failed(e) if e.needs_sign_in() => Some(entry(String::new(), Status::Waiting("Sign in to send".into()))),
-                JobState::Failed(_) => Some(entry(String::new(), Status::Failed("Couldn't reach ChatGPT".into()))),
-                JobState::Discarded => None,
-            };
+            // In History from the first moment (recording, writing it out), so a forced end
+            // never loses a take: the next start recovers it as "Not sent".
+            let text_now = self.history.get(id).map(|e| e.text.clone()).unwrap_or_default();
+            let held = self.uploads.held(Key::Job(job.id.0), Instant::now());
+            let next = rules::history_row(&job.state, &text_now, held).map(|(text, status)| entry(text, status));
             changed |= match next {
                 Some(e) => self.history.upsert(e),
-                None => self.history.remove(id),
+                None => {
+                    // A cancelled take: its recording goes too, never left behind on disk.
+                    if job.state == JobState::Discarded {
+                        if let Some(a) = self.audio_paths.remove(&job.id) {
+                            let _ = std::fs::remove_file(a);
+                        }
+                    }
+                    self.history.remove(id)
+                }
             };
             self.job_synced.insert(job.id, job.state.clone());
         }
@@ -1088,9 +1146,124 @@ impl Voxa {
     }
 
     /// Whether a history entry belongs to a dictation the core is still handling.
+    /// Recording, being written out or uploaded, or on the strip. A finished one (ready, failed,
+    /// no speech, dismissed) is not: it can be deleted like any other.
     pub(crate) fn is_live(&self, id: u64) -> bool {
-        use voxa_core::JobState;
-        self.job_entries.iter().any(|(job, e)| *e == id && self.flow.job(*job).is_some_and(|j| !matches!(j.state, JobState::Delivered(_) | JobState::Discarded)))
+        self.job_entries.iter().any(|(job, e)| *e == id && self.flow.in_progress(*job)) || self.uploads.contains(Key::Entry(id))
+    }
+
+    fn job_of(&self, id: u64) -> Option<JobId> {
+        self.job_entries.iter().find(|(_, e)| **e == id).map(|(j, _)| *j)
+    }
+
+    fn paste(&mut self, job: JobId, text: &str) -> Delivery {
+        match os::paste_here(text, self.settings.keep_on_clipboard) {
+            rules::PasteResult::Pasted => Delivery::Pasted,
+            rules::PasteResult::Refused => {
+                self.paste_refused = Some(job);
+                Delivery::Failed
+            }
+            rules::PasteResult::Failed => Delivery::Failed,
+        }
+    }
+
+    /// Start the next background upload when its turn comes (called every tick).
+    fn pump_uploads(&mut self, cx: &mut Context<Self>) {
+        while let Some(key) = self.uploads.next(Instant::now()) {
+            self.start_upload(key, false, cx);
+        }
+    }
+
+    /// Upload one recording: a job of this run, or a History entry from an earlier run.
+    fn start_upload(&mut self, key: Key, strip: bool, cx: &mut Context<Self>) {
+        let (path, app, peak) = match key {
+            Key::Job(j) => {
+                let job = JobId(j);
+                let app = self.flow.job(job).map(|j| j.target.app.clone()).unwrap_or_default();
+                (self.audio_paths.get(&job).cloned(), app, self.peaks.get(&job).copied().unwrap_or(1.0))
+            }
+            Key::Entry(id) => {
+                let Some(e) = self.history.get(id).cloned() else {
+                    self.uploads.finished(key, Outcome::Other, Instant::now());
+                    return;
+                };
+                self.history.upsert(Entry { status: Status::Waiting(store::WRITING.into()), ..e.clone() });
+                self.history.save();
+                (e.audio.clone(), e.app.clone(), 1.0)
+            }
+        };
+        let session = self.session.session.clone();
+        let gpt = self.gpt.clone();
+        let generation = session_gen();
+        cx.spawn(async move |this, cx| {
+            let (result, refreshed) = cx
+                .background_executor()
+                .spawn(async move {
+                    let Some(session) = session else { return (Err(TranscribeError::SignedOut), None) };
+                    let Some(path) = path else { return (Err(TranscribeError::Server(0)), None) };
+                    let Some(audio) = prepare::audio_for_upload(&path) else { return (Err(TranscribeError::Server(0)), None) };
+                    let (name, mime) = if path.extension().is_some_and(|e| e == "webm") { ("recording.webm", "audio/webm") } else { ("recording.wav", "audio/wav") };
+                    let mut result = gpt.transcribe(&session, audio.clone(), name, mime);
+                    // A dropped connection is common on flaky Wi-Fi: the take on the strip tries
+                    // twice more. Never after a timeout (ChatGPT may be writing it out already).
+                    for wait in [1500u64, 4000] {
+                        if !rules::quick_retry(&result, strip) {
+                            break;
+                        }
+                        os::log(&format!("  upload failed ({:?}); retrying in {wait} ms", result.as_ref().err()));
+                        std::thread::sleep(Duration::from_millis(wait));
+                        result = gpt.transcribe(&session, audio.clone(), name, mime);
+                    }
+                    let sent = session.cookie_header.clone();
+                    let kept = keep_refreshed_cookies(&gpt, session, generation);
+                    let refreshed = (kept.cookie_header != sent).then_some((sent, kept));
+                    (result.map(|t| prepare::finish_text(t, &data_dir(), &app)), refreshed)
+                })
+                .await;
+            let _ = this.update(cx, |v, cx| v.upload_finished(key, result, refreshed, generation, peak, cx));
+        })
+        .detach();
+    }
+
+    fn upload_finished(&mut self, key: Key, result: Result<String, TranscribeError>, refreshed: Option<(String, GptSession)>, generation: u64, peak: f32, cx: &mut Context<Self>) {
+        if let Some((sent, kept)) = refreshed {
+            self.adopt_refreshed(generation, &sent, kept);
+        }
+        let outcome = match &result {
+            Ok(_) => Outcome::Sent,
+            Err(TranscribeError::Offline | TranscribeError::Timeout) => Outcome::Unreachable,
+            Err(_) => Outcome::Other,
+        };
+        self.uploads.finished(key, outcome, Instant::now());
+        match key {
+            Key::Job(j) => {
+                let result = match result {
+                    Ok(t) if invented_for_silence(&t, peak) => {
+                        os::log(&format!("  dropped {}: near-silent take (peak {peak:.4})", redact::text(&t)));
+                        Ok(String::new())
+                    }
+                    other => other,
+                };
+                self.handle(Event::Transcribed { job: JobId(j), result }, cx);
+            }
+            Key::Entry(id) => {
+                os::log(&format!("resend {id}: {}", if result.is_ok() { "ok" } else { "failed" }));
+                // Deleted while it was being sent: leave it deleted.
+                let Some(entry) = self.history.get(id).cloned() else { return };
+                let next = match result {
+                    Ok(t) if !t.trim().is_empty() => Entry { text: t, status: Status::Ready, ..entry },
+                    Ok(_) => Entry { status: Status::Failed(store::NO_SPEECH.into()), ..entry },
+                    Err(e) if e.needs_sign_in() => Entry { status: Status::Waiting(store::WAITING_SIGN_IN.into()), ..entry },
+                    Err(TranscribeError::Offline) => Entry { status: Status::Waiting(store::WAITING_NETWORK.into()), ..entry },
+                    Err(_) => Entry { status: Status::Failed(store::NOT_REACHED.into()), ..entry },
+                };
+                self.history.upsert(next);
+                self.history.save();
+                self.publish();
+                cx.notify();
+            }
+        }
+        self.pump_uploads(cx);
     }
 
     /// Open the Voxa window (or bring it forward), optionally on a page.
@@ -1182,16 +1355,35 @@ impl Voxa {
                     self.history.save();
                 }
             }
-            Resend(id) => match self.job_entries.iter().find(|(_, e)| **e == id).map(|(j, _)| *j) {
-                Some(job) => self.handle(Event::Retry { job }, cx),
-                None => self.resend(id, cx),
+            // History's Send now / Write it out again always does something, or says why not.
+            Resend(id) => match self.job_of(id) {
+                Some(job) => match rules::resend_route(&self.flow, job) {
+                    rules::Route::Retry => {
+                        self.user_asked.insert(job);
+                        self.handle(Event::Retry { job }, cx);
+                    }
+                    rules::Route::Rewrite => {
+                        self.user_asked.insert(job);
+                        self.handle(Event::Rewrite { job }, cx);
+                    }
+                    rules::Route::Busy => {
+                        os::log("resend: that dictation is still being worked on");
+                        // Touch History so the window drops its own "Writing it out".
+                        self.history.save();
+                    }
+                },
+                None => self.resend(id, Why::User, cx),
             },
             ResendAll => self.resend_all(cx),
             DeleteEntry(id) => self.delete_entry(id, cx),
             EditEntry(id, text) => {
                 if let Some(e) = self.history.get(id).cloned() {
-                    self.history.upsert(Entry { text, ..e });
+                    self.history.upsert(Entry { text: text.clone(), ..e });
                     self.history.save();
+                }
+                // Not pasted yet: the corrected text is what gets pasted.
+                if let Some(job) = self.job_of(id) {
+                    self.handle(Event::Edit { job, text }, cx);
                 }
             }
             DeleteAll => self.delete_history(cx),
@@ -1205,22 +1397,16 @@ impl Voxa {
         self.publish();
     }
 
+    /// The same path as the strip's "Sign in" (Effect::OpenSignIn), which does the bookkeeping.
     pub(crate) fn sign_in(&mut self, cx: &mut Context<Self>) {
-        {
-            let _g = lock_session_file();
-            // Nothing refreshed for the session before this sign-in may be saved after it.
-            SESSION_GEN.fetch_add(1, Ordering::SeqCst);
-            self.gpt.clear_refreshed();
-            let _ = std::fs::remove_file(data_dir().join("signed-out"));
-        }
         self.run(Effect::OpenSignIn, cx);
     }
 
     /// An upload or check refreshed the sign-in: use it in memory too, unless the user signed
     /// out or in since it started, or the session changed meanwhile.
     fn adopt_refreshed(&mut self, generation: u64, sent: &str, refreshed: GptSession) {
-        if session_gen() == generation && self.session.as_ref().is_some_and(|s| s.cookie_header == sent) {
-            self.session = Some(refreshed);
+        if session_gen() == generation && self.session.session.as_ref().is_some_and(|s| s.cookie_header == sent) {
+            self.session.adopt_refreshed(refreshed);
         }
     }
 
@@ -1237,7 +1423,7 @@ impl Voxa {
         drop(g);
         let _ = std::fs::remove_file(dir.join("account.json"));
         let _ = std::fs::remove_file(dir.join("avatar.png"));
-        self.session = None;
+        self.session.reset(None);
         // On purpose: never a "signed out" toast, and any showing one goes.
         self.session_known = None;
         self.notifier.clear_signin();
@@ -1270,19 +1456,31 @@ impl Voxa {
             let _ = self.hotkeys.register(self.main_key);
             return Err(format!("{s} is already used by another app. Try a different one."));
         }
+        if let Err(e) = self.update_settings(|st| st.hotkey = s.to_string(), cx) {
+            // Not saved: keep the shortcut that is saved.
+            let _ = self.hotkeys.unregister(new);
+            let _ = self.hotkeys.register(self.main_key);
+            return Err(e);
+        }
         os::log(&format!("shortcut changed to {s}"));
         self.main_key = new;
-        self.update_settings(|st| st.hotkey = s.to_string(), cx);
         Ok(())
     }
 
-    pub(crate) fn update_settings(&mut self, f: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
-        f(&mut self.settings);
-        self.settings.save(&data_dir());
+    /// Change a setting on disk. Refused while settings.json can't be read: the user's file is
+    /// never replaced by defaults, and History is never pruned by a default keep-days.
+    pub(crate) fn update_settings(&mut self, f: impl FnOnce(&mut Settings), cx: &mut Context<Self>) -> Result<(), String> {
+        let s = Settings::update(&data_dir(), f).map_err(|e| {
+            os::log(&format!("FAIL reading settings ({e}): not saving"));
+            "Voxa can't read its settings file right now, so nothing was changed. Try again in a moment.".to_string()
+        })?;
+        self.settings = s;
+        self.settings_ok = true;
         if self.history.prune(self.settings.keep_days, now_ms()) > 0 {
             self.history.save();
         }
         cx.notify();
+        Ok(())
     }
 
     pub(crate) fn delete_history(&mut self, cx: &mut Context<Self>) {
@@ -1297,57 +1495,44 @@ impl Voxa {
 
     /// Send a kept recording that wasn't written out (from an earlier run). The text is kept in
     /// History, ready to copy; it is never pasted into whatever app happens to be open now.
-    pub(crate) fn resend(&mut self, id: u64, cx: &mut Context<Self>) {
+    /// It joins the upload line (one at a time); what the user asks for goes first.
+    pub(crate) fn resend(&mut self, id: u64, why: Why, cx: &mut Context<Self>) {
         let Some(entry) = self.history.get(id).cloned() else { return };
-        let Some(audio) = entry.audio.clone().filter(|a| a.exists()) else { return };
-        let Some(session) = self.session.clone() else {
-            self.sign_in(cx);
-            return;
-        };
-        if !self.sending.insert(id) {
-            os::log(&format!("resend {id}: already being sent"));
+        if !entry.audio.as_ref().is_some_and(|a| a.exists()) {
             return;
         }
-        self.history.upsert(Entry { status: Status::Waiting("Writing it out".into()), ..entry.clone() });
+        if self.session.session.is_none() {
+            match rules::without_session(self.flow.readiness().session) {
+                // The first sign-in check hasn't answered yet: send it after, never open sign-in.
+                rules::NoSession::WaitForCheck => {
+                    if !self.after_check.contains(&id) {
+                        self.after_check.push(id);
+                    }
+                    // Touch History so the window drops its own "Writing it out" meanwhile.
+                    self.history.save();
+                }
+                rules::NoSession::SignIn if why != Why::Auto => self.sign_in(cx),
+                rules::NoSession::SignIn => {}
+            }
+            return;
+        }
+        match self.uploads.push(Key::Entry(id), why, Instant::now()) {
+            Pushed::StartNow => self.start_upload(Key::Entry(id), false, cx),
+            Pushed::Queued => {
+                if why == Why::User {
+                    self.history.upsert(Entry { status: Status::Waiting(store::WRITING.into()), ..entry });
+                    self.history.save();
+                }
+                self.pump_uploads(cx);
+            }
+            Pushed::Already => os::log(&format!("resend {id}: already being sent")),
+            Pushed::GiveUp => {
+                os::log(&format!("resend {id}: tried too often on its own, kept for Send now"));
+                self.history.upsert(Entry { status: Status::Failed(store::NOT_REACHED.into()), ..entry });
+                self.history.save();
+            }
+        }
         cx.notify();
-        let gpt = self.gpt.clone();
-        let app = entry.app.clone();
-        let generation = session_gen();
-        cx.spawn(async move |this, cx| {
-            let (result, refreshed) = cx
-                .background_executor()
-                .spawn(async move {
-                    let Some(bytes) = prepare::audio_for_upload(&audio) else { return (Err(TranscribeError::Server(0)), None) };
-                    let (name, mime) = if audio.extension().is_some_and(|e| e == "webm") { ("recording.webm", "audio/webm") } else { ("recording.wav", "audio/wav") };
-                    let r = gpt.transcribe(&session, bytes, name, mime);
-                    let sent = session.cookie_header.clone();
-                    let kept = keep_refreshed_cookies(&gpt, session, generation);
-                    let refreshed = (kept.cookie_header != sent).then_some((sent, kept));
-                    (r.map(|t| prepare::finish_text(t, &data_dir(), &app)), refreshed)
-                })
-                .await;
-            let _ = this.update(cx, |v, cx| {
-                v.sending.remove(&id);
-                if let Some((sent, kept)) = refreshed {
-                    v.adopt_refreshed(generation, &sent, kept);
-                }
-                os::log(&format!("resend {id}: {}", if result.is_ok() { "ok" } else { "failed" }));
-                let next = match result {
-                    Ok(t) if !t.trim().is_empty() => Entry { text: t, status: Status::Ready, ..entry },
-                    Ok(_) => Entry { status: Status::Failed("No speech in the recording".into()), ..entry },
-                    Err(e) if e.needs_sign_in() => Entry { status: Status::Waiting("Sign in to send".into()), ..entry },
-                    Err(_) => Entry { status: Status::Failed("Couldn't reach ChatGPT".into()), ..entry },
-                };
-                // Deleted while it was being sent: leave it deleted.
-                if v.history.get(id).is_none() {
-                    return;
-                }
-                v.history.upsert(next);
-                v.history.save();
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     pub(crate) fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -1358,21 +1543,33 @@ impl Voxa {
             self.history.save();
             os::log("history entry deleted");
         }
+        self.uploads.drop_key(Key::Entry(id));
         // Forget it for good: nothing from this run may write it back.
         self.job_entries.retain(|_, e| *e != id);
         cx.notify();
     }
 
+    /// Every kept recording that wasn't written out: this run's through the flow, earlier
+    /// runs' through the upload line. Never a take with no speech in it.
     pub(crate) fn resend_all(&mut self, cx: &mut Context<Self>) {
         let ids: Vec<u64> = self
             .history
             .entries
             .iter()
-            .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && e.audio.as_ref().is_some_and(|a| a.exists()) && !self.is_live(e.id) && !self.sending.contains(&e.id))
+            .filter(|e| e.unsent() && e.audio.as_ref().is_some_and(|a| a.exists()) && !self.is_live(e.id))
             .map(|e| e.id)
             .collect();
+        if !ids.is_empty() && self.session.session.is_none() && rules::without_session(self.flow.readiness().session) == rules::NoSession::SignIn {
+            return self.sign_in(cx);
+        }
         for id in ids {
-            self.resend(id, cx);
+            match self.job_of(id) {
+                Some(job) => {
+                    self.user_asked.insert(job);
+                    self.handle(Event::Retry { job }, cx);
+                }
+                None => self.resend(id, Why::User, cx),
+            }
         }
     }
 
@@ -1418,20 +1615,29 @@ impl Voxa {
 
     /// After sleep, a charger or a display change the strip's graphics may be gone: build a fresh
     /// one now, hidden and without taking focus; it replaces the old one as this dictation's strip.
+    /// One rebuild at a time: a second wake while one runs waits for the next shortcut press (its
+    /// wake flag stays set), so the window being replaced is always the one in use.
     fn rebuild_strip_if_woke(&mut self, cx: &mut Context<Self>) {
-        if os::take_woke() {
-            let me = cx.entity();
-            let old = self.strip_window;
-            cx.spawn(async move |_, cx| {
-                match rebuild_strip(&me, old, cx).await {
-                    Some(h) => {
-                        let _ = me.update(cx, |v, _| v.strip_window = Some(h));
-                    }
+        if !self.rebuild.begin() {
+            return;
+        }
+        if !os::take_woke() {
+            self.rebuild.end();
+            return;
+        }
+        let me = cx.entity();
+        let old = self.strip_window;
+        cx.spawn(async move |_, cx| {
+            let made = rebuild_strip(&me, old, cx).await;
+            let _ = me.update(cx, |v, _| {
+                match made {
+                    Some(h) => v.strip_window = Some(h),
                     None => os::log("FAIL rebuilding the strip"),
                 }
-            })
-            .detach();
-        }
+                v.rebuild.end();
+            });
+        })
+        .detach();
     }
 
     /// Esc is bound only while recording, so Voxa never steals Esc from other apps. Not while
@@ -1710,7 +1916,8 @@ impl Voxa {
             .child("v");
 
         let mut row: Vec<AnyElement> = vec![mark.into_any_element(), glyph(&state, self.frame)];
-        let text = strip_text(flow);
+        // The desktop knows more than the core about an admin window or a mic held by another app.
+        let text = rules::strip_override(&state, self.paste_refused, self.mic_note).filter(|_| self.strip_preview.is_none()).or_else(|| strip_text(flow));
 
         match &state {
             State::Recording { job, paused, .. } => {
