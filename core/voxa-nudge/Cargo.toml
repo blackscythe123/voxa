@@ -1,0 +1,14 @@
+[package]
+name = "voxa-nudge"
+description = "Voxa's come back reminder engine: a tiny evolved network decides when to remind and which wording, a Thompson sampling bandit personalises it on the device, and hard rules outside the model keep it polite."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# src/bin/train.rs evolves the model in the simulator:
+#   cargo run -p voxa-nudge --release --bin train
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
