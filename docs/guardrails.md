@@ -7,7 +7,7 @@ calls), so they catch a broken decision the moment it is committed, not in revie
 ```
 python tools/lint/run.py                 # every rule on the repo; exit 1 on any violation
 python tools/lint/run.py --self-test     # prove every rule still catches its fixture violations
-python tools/lint/run.py --only copy     # one group: contrast copy privacy focus android isolation release robust
+python tools/lint/run.py --only copy     # one group: contrast copy privacy focus android isolation release robust licence licences update
 python tools/lint/run.py --apk PATH      # also check an APK's size (a locally built one is found by itself)
 python tools/lint/run.py --keys          # show each violation's allow-list key
 cargo test --workspace                   # the Rust tests (desktop on Windows/macOS; core everywhere)
@@ -255,6 +255,61 @@ the middle of a dictation would hurt every user at once.
 
 The existing copy, privacy, focus, robustness, contrast and APK size rules apply to the update
 code unchanged.
+
+## 11. Licences
+
+**Decision (owner, 2026-11-28):** both apps carry the licences of everything they ship, under
+Settings, Open source licences: Voxa's own NOTICE first, then every library (name, version,
+licence) with its licence text. Every shipped licence must allow distributing Voxa under
+Apache-2.0.
+
+**How it is built.** `python tools/licences/generate.py` reads the real dependency graph and writes,
+all committed:
+
+- `THIRD_PARTY_NOTICES.txt` (repo root): every component of every app, a per-app summary by licence,
+  and each licence or NOTICE text once, numbered (T1, T2, ...).
+- `tools/licences/inventory.tsv`: kind, name, version, licence (SPDX), apps. The lint reads this.
+- `desktop/app/assets/licences-windows.json.gz` and `licences-macos.json.gz` (the desktop embeds its
+  platform's copy and decompresses it with flate2, already in GPUI's tree), and
+  `android/app/src/main/assets/licences.json.gzip` (read with `GZIPInputStream`; not `.gz`, which the Android build unpacks and stores twice as large).
+
+Sources: Rust crates linked into each artefact (`cargo tree -e normal,no-proc-macro` per target:
+voxa-desktop and voxa-signin for Windows and macOS, voxa-ffi for the three Android ABIs; build
+scripts and proc macros never ship), licences from `cargo metadata`, texts from each crate's
+LICENSE, COPYING and NOTICE files in the cargo registry (every NOTICE verbatim, Apache-2.0 section
+4(d)), plus the Rust standard library. Android: the release runtime classpath, stored in
+`tools/licences/android-deps.txt` (`--gradle` re-resolves it; needs the Android SDK), licences
+from each POM. Assets: the `ASSETS` table in `tools/lint/voxa_lint/licences.py` (fonts, the Silero
+model, ONNX Runtime with its own third-party notices). Licence texts that do not come with a package
+live in `tools/licences/texts/`. JNA is dual licensed; Voxa uses it under Apache-2.0, and the page
+says so.
+
+After any dependency change: `python tools/licences/generate.py` (add `--gradle` when the Android
+dependencies changed), commit the outputs.
+
+**Checks** (`licences.py`, no network and no Android SDK, so CI runs them):
+
+- `licences-stale`: the notices, the inventory and the three app copies carry the dependency
+  fingerprint of the checkout: Cargo.lock (Voxa's own version numbers blanked), the dependency
+  sections of the workspace's Cargo.toml files, `android-deps.txt`, NOTICE, LICENSE, the assets,
+  the onnxruntime pin and the stored texts. `android-deps.txt` itself records the digest of
+  `libs.versions.toml` and the app's `dependencies { }` block it was resolved from.
+- `licences-allowed`: every inventory licence passes the allow-list: MIT, MIT-0, Apache-2.0,
+  BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, Unicode-DFS-2016, MPL-2.0 (file level, fine
+  unmodified), CC0-1.0, OFL-1.1, BSL-1.0, 0BSD, Unlicense, with `WITH LLVM-exception`. An `OR`
+  passes when one side does, an `AND` when both do. GPL, AGPL, LGPL-only, SSPL and anything unknown
+  fail. One exception is on the allow-list with its reason: webpki-roots (CDLA-Permissive-2.0, the
+  root certificate data).
+- `licences-asset`: every font, sound, model and native library in the app trees (`res/font`,
+  `res/raw`, Android `assets`, desktop `assets/*.ttf`, `core/*/model/*.onnx`, `vendor/`) is listed in
+  `ASSETS`.
+
+Tests: the desktop's `licences::tests` (`the_embedded_licences_decompress_and_start_with_voxas_notice`:
+the embedded copy decompresses and its NOTICE is today's NOTICE; every library has a licence and a
+text) and the Android instrumented `LicencesTest` (the asset loads, NOTICE first, androidx.core,
+kotlin-stdlib, JNA under Apache-2.0, uniffi and Manrope are listed; Settings opens the page and a
+library's licence text shows; passes on the debug build and the R8 release build). Screenshots:
+`docs/verification/licences/`.
 
 ## Open items found when the guardrails were added
 
