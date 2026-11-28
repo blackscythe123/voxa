@@ -10,8 +10,8 @@ Native, fast and light: the strip appears in about 30 ms and Voxa uses about 65 
 
 | Platform | Get it |
 |---|---|
-| **Windows 10/11** | [Voxa-Setup-0.4.6.exe](https://github.com/blackscythe123/voxa/releases/download/v0.4.6/Voxa-Setup-0.4.6.exe) |
-| **Mac** (Apple Silicon and Intel) | [Voxa-0.4.6-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v0.4.6/Voxa-0.4.6-mac.dmg) |
+| **Windows 10/11** | [Voxa-Setup-0.4.7.exe](https://github.com/blackscythe123/voxa/releases/download/v0.4.7/Voxa-Setup-0.4.7.exe) |
+| **Mac** (Apple Silicon and Intel) | [Voxa-0.4.7-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v0.4.7/Voxa-0.4.7-mac.dmg) |
 | **Android** (voice keyboard, Android 10+) | [Voxa-Android-0.2.1.apk](https://github.com/blackscythe123/voxa/releases/download/android-v0.2.1/Voxa-Android-0.2.1.apk) |
 
 Always the newest version: [Windows](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-Setup.exe)
