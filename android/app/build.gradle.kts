@@ -163,6 +163,9 @@ android {
     }
 
     buildTypes {
+        // -Pvoxa.preview=true: a debug copy that installs next to the real Voxa (own app id and data),
+        // for previewing debug-only things on a phone without touching the installed release.
+        if (findProperty("voxa.preview") == "true") getByName("debug") { applicationIdSuffix = ".preview"; versionNameSuffix = "-preview" }
         release {
             // R8 (keep rules for JNA and the UniFFI bindings in proguard-rules.pro).
             isMinifyEnabled = true
