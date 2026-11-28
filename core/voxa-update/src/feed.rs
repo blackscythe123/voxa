@@ -134,7 +134,15 @@ pub fn asset_url_ok(url: &str, version: &Version, origin: &Origin) -> bool {
         return false;
     }
     let file = path.rsplit('/').next().unwrap_or("");
-    file.contains(&version.to_string())
+    names_version(file, version)
+}
+
+/// The file name carries exactly this version: `-1.0.1.` or `-1.0.1-` ("Voxa-Setup-1.0.1.exe",
+/// "Voxa-1.0.1-mac.dmg", "Voxa-Android-1.0.1-arm64-v8a.apk"), never as part of another version
+/// ("11.0.12" contains "1.0.1").
+fn names_version(file: &str, version: &Version) -> bool {
+    let v = version.to_string();
+    file.contains(&format!("-{v}.")) || file.contains(&format!("-{v}-"))
 }
 
 fn is_sha256_hex(s: &str) -> bool {
@@ -303,6 +311,19 @@ pub(crate) mod tests {
         let mut v = desktop_payload("1.0.1", 5);
         v["assets"]["windows-x64"]["sha256"] = "abc".into();
         assert_eq!(check(&sign(TEST_SEED_K1, 1, &bytes(&v))), Err(UpdateError::BadManifest));
+    }
+
+    #[test]
+    fn an_asset_name_must_carry_the_exact_version_not_a_substring() {
+        let v = Version::parse("1.0.1").unwrap();
+        let o = gh();
+        let url = |f: &str| format!("https://github.com/blackscythe123/voxa/releases/download/v1.0.1/{f}");
+        for good in ["Voxa-Setup-1.0.1.exe", "Voxa-1.0.1-mac.dmg", "Voxa-Android-1.0.1-arm64-v8a.apk", "Voxa-Android-1.0.1-universal.apk"] {
+            assert!(asset_url_ok(&url(good), &v, &o), "{good}");
+        }
+        for bad in ["Voxa-Setup-11.0.12.exe", "Voxa-11.0.1-mac.dmg", "Voxa-Setup-1.0.10.exe", "Voxa-Setup-1.0.1x.exe", "Voxa1.0.1.exe"] {
+            assert!(!asset_url_ok(&url(bad), &v, &o), "{bad}");
+        }
     }
 
     #[test]
