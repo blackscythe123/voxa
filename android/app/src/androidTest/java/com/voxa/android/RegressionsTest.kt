@@ -182,8 +182,13 @@ class RegressionsTest {
         try {
             com.voxa.android.ui.Birthday.set(ctx, 2, 29)
             assertEquals(2 to 29, com.voxa.android.ui.Birthday.get(ctx))
-            val keys = ctx.getSharedPreferences("ui", 0).all.keys.filter { it.contains("birth", ignoreCase = true) }
-            assertEquals(setOf("birthday_month", "birthday_day"), keys.toSet())
+            // Day and month only, never a year: the only other birthday key is the on/off switch
+            // "Wish me on my birthday" (a yes/no, not personal data).
+            val stored = ctx.getSharedPreferences("ui", 0).all.filterKeys { it.contains("birth", ignoreCase = true) }
+            assertTrue(stored.keys.toString(), stored.keys.containsAll(setOf("birthday_month", "birthday_day")))
+            assertTrue(stored.keys.toString(), (stored.keys - setOf("birthday_month", "birthday_day", "birthday_wish")).isEmpty())
+            assertTrue("the switch is a yes/no", stored["birthday_wish"]?.let { it is Boolean } ?: true)
+            assertEquals(2, stored["birthday_month"]); assertEquals(29, stored["birthday_day"])
             val flags = ctx.applicationInfo.flags
             assertEquals("app data is never backed up", 0, flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP)
         } finally {
