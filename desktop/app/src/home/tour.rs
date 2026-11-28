@@ -301,7 +301,7 @@ impl Home {
             .child(div().mt(px(14.)).flex().items_center().gap(px(8.)).when(advancing, |d| d.child(icon(I_CHECK, 14.).text_color(rgb(p().good)))).child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).child(title)))
             .child(div().mt(px(6.)).text_size(px(14.)).line_height(px(20.)).text_color(rgb(p().body)).child(body))
             .when(!extra.is_empty(), |d| d.child(div().mt(px(12.)).flex().flex_col().gap(px(8.)).children(extra)))
-            .when(waiting, |d| d.child(div().mt(px(10.)).flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(rgb(p().accent)).child(icon('\u{E916}', 11.)).child("Waiting for you")))
+            .when(waiting, |d| d.child(div().mt(px(10.)).flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(rgb(p().accent)).child(icon(I_WAIT, 11.)).child("Waiting for you")))
             .child(footer);
 
         // Dim everything but the target; the target stays clickable.

@@ -25,37 +25,47 @@ fn open_accessibility() {
 }
 
 
-// Segoe Fluent Icons code points.
-const I_HISTORY: char = '\u{E81C}';
-const I_HOME: char = '\u{E80F}';
-const I_WORDS: char = '\u{E82D}';
-const I_EDIT: char = '\u{E70F}';
-const I_BACK: char = '\u{E72B}';
-const I_ARROW: char = '\u{E72A}';
-const I_PREV: char = '\u{E76B}';
-const I_NEXT: char = '\u{E76C}';
-const I_INSIGHTS: char = '\u{E9D2}';
-const I_SETTINGS: char = '\u{E713}';
-const I_COPY: char = '\u{E8C8}';
-const I_SEARCH: char = '\u{E721}';
-const I_ACCOUNT: char = '\u{E77B}';
-const I_KEYBOARD: char = '\u{E765}';
-const I_MIC: char = '\u{E720}';
-const I_KEEP: char = '\u{E72E}';
-const I_DELETE: char = '\u{E74D}';
-const I_POWER: char = '\u{E7E8}';
-const I_CLOSE: char = '\u{E711}';
-const I_CHECK: char = '\u{E73E}';
-const I_DOWN: char = '\u{E70D}';
-const I_UP: char = '\u{E70E}';
-const I_TEXT: char = '\u{E8D2}';
-const I_SEND: char = '\u{E724}';
-const I_PLAY: char = '\u{E768}';
-const I_STOP: char = '\u{E71A}';
-const I_RETRY: char = '\u{E72C}';
-const I_FOLDER: char = '\u{E838}';
-const I_SORT: char = '\u{E8CB}';
-const I_GIFT: char = '\u{E88C}';
+// Segoe Fluent Icons code points, each followed by Microsoft's name for its glyph. The pair is
+// checked (the test below and the icons lint): E88C, LanguageCht, drew a Chinese character, not a gift.
+const I_HISTORY: char = '\u{E81C}'; // History
+const I_HOME: char = '\u{E80F}'; // Home
+const I_WORDS: char = '\u{E82D}'; // Dictionary
+const I_EDIT: char = '\u{E70F}'; // Edit
+const I_BACK: char = '\u{E72B}'; // Back
+const I_ARROW: char = '\u{E72A}'; // Forward
+const I_PREV: char = '\u{E76B}'; // ChevronLeft
+const I_NEXT: char = '\u{E76C}'; // ChevronRight
+const I_INSIGHTS: char = '\u{E9D2}'; // AreaChart
+const I_SETTINGS: char = '\u{E713}'; // Settings
+const I_COPY: char = '\u{E8C8}'; // Copy
+const I_SEARCH: char = '\u{E721}'; // Search
+const I_ACCOUNT: char = '\u{E77B}'; // Contact
+const I_KEYBOARD: char = '\u{E765}'; // KeyboardClassic
+const I_MIC: char = '\u{E720}'; // Microphone
+const I_KEEP: char = '\u{E72E}'; // Lock
+const I_DELETE: char = '\u{E74D}'; // Delete
+const I_POWER: char = '\u{E7E8}'; // PowerButton
+const I_CLOSE: char = '\u{E711}'; // Cancel
+const I_CHECK: char = '\u{E73E}'; // CheckMark
+const I_DOWN: char = '\u{E70D}'; // ChevronDown
+const I_UP: char = '\u{E70E}'; // ChevronUp
+const I_TEXT: char = '\u{E8D2}'; // Font
+const I_SEND: char = '\u{E724}'; // Send
+const I_PLAY: char = '\u{E768}'; // Play
+const I_STOP: char = '\u{E71A}'; // Stop
+const I_RETRY: char = '\u{E72C}'; // Refresh
+const I_FOLDER: char = '\u{E838}'; // FolderOpen
+const I_SORT: char = '\u{E8CB}'; // Sort
+const I_GIFT: char = '\u{F133}'; // GiftboxOpen
+const I_WAIT: char = '\u{E916}'; // Stopwatch
+const I_INFO: char = '\u{E946}'; // Info
+const I_PREV_MONTH: char = '\u{E892}'; // Previous
+const I_NEXT_MONTH: char = '\u{E893}'; // Next
+const I_POINTER: char = '\u{E7C9}'; // TouchPointer
+const I_COLOR: char = '\u{E790}'; // Color
+const I_SYNC: char = '\u{E895}'; // Sync
+const I_HELP: char = '\u{E897}'; // Help
+const I_DOCUMENT: char = '\u{E8A5}'; // Document
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Page {
@@ -613,7 +623,7 @@ fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, clos
                 .child(match kind {
                     Bar::Error => icon(I_CLOSE, 8.).into_any_element(),
                     Bar::Warning => alert_mark(10., p().bar_mark).into_any_element(),
-                    Bar::Info => icon('\u{E946}', 9.).into_any_element(),
+                    Bar::Info => icon(I_INFO, 9.).into_any_element(),
                 }),
         )
         .child(
@@ -1581,11 +1591,11 @@ impl Home {
                     .flex()
                     .items_center()
                     .gap(px(2.))
-                    .child(self.icon_btn(format!("{id}-m30"), '\u{E892}', "30 days earlier", false, cx.listener(step(-30))))
+                    .child(self.icon_btn(format!("{id}-m30"), I_PREV_MONTH, "30 days earlier", false, cx.listener(step(-30))))
                     .child(self.icon_btn(format!("{id}-m1"), I_PREV, "A day earlier", false, cx.listener(step(-1))))
                     .child(div().w(px(120.)).flex().justify_center().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(d.format("%-d %b %Y").to_string()))
                     .child(self.icon_btn(format!("{id}-p1"), I_NEXT, "A day later", false, cx.listener(step(1))))
-                    .child(self.icon_btn(format!("{id}-p30"), '\u{E893}', "30 days later", false, cx.listener(step(30))))
+                    .child(self.icon_btn(format!("{id}-p30"), I_NEXT_MONTH, "30 days later", false, cx.listener(step(30))))
             };
             let (a, b) = self.custom;
             out.push(
@@ -2105,7 +2115,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E7C9}', 18.).w(px(20.)))
+                .child(icon(I_POINTER, 18.).w(px(20.)))
                 .child(row_text("Hold to talk", "Hold the shortcut while you talk and let go to finish. A quick tap still starts and stops.".into()))
                 .child(toggle("hold-to-talk", s.hold_to_talk).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.hold_to_talk = !s.hold_to_talk, cx)))))
                 .into_any_element(),
@@ -2319,7 +2329,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E790}', 18.).w(px(20.)))
+                .child(icon(I_COLOR, 18.).w(px(20.)))
                 .child(row_text("Appearance", format!("{}. Voxa's window and the recording strip both follow it.", s.appearance.label())))
                 .child(looks)
                 .into_any_element(),
@@ -2332,7 +2342,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E895}', 18.).w(px(20.)))
+                .child(icon(I_SYNC, 18.).w(px(20.)))
                 .child(row_text(auto_title, auto_sub.into()))
                 .child(toggle("auto-update", s.auto_update).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.auto_update = !s.auto_update, cx)))))
                 .into_any_element(),
@@ -2349,7 +2359,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E897}', 18.).w(px(20.)))
+                .child(icon(I_HELP, 18.).w(px(20.)))
                 .child(row_text("Take the tour again", "How to dictate, what the strip shows, and your shortcut".into()))
                 .child(wbtn("rerun-setup", "Start tour", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_tour(cx))))
                 .into_any_element(),
@@ -2379,7 +2389,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E895}', 18.).w(px(20.)))
+                .child(icon(I_SYNC, 18.).w(px(20.)))
                 .child(row_text(&format!("Voxa {}", env!("CARGO_PKG_VERSION")), status))
                 .child(buttons)
                 .into_any_element(),
@@ -2387,7 +2397,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E8A5}', 18.).w(px(20.)))
+                .child(icon(I_DOCUMENT, 18.).w(px(20.)))
                 .child(row_text("Open source licences", "Voxa's notice and the libraries, fonts and models it is built with".into()))
                 .child(wbtn("open-licences", "View", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::Licences, cx))))
                 .into_any_element(),
@@ -2395,7 +2405,7 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
-                .child(icon('\u{E946}', 18.).w(px(20.)))
+                .child(icon(I_INFO, 18.).w(px(20.)))
                 .child(row_text("Your data", "Your words go to ChatGPT only while you dictate. Everything else stays on this PC.".into()))
                 .child(wbtn("open-logs", "Open data folder", false).on_click(cx.listener(|_, _: &ClickEvent, _, _| {
                     crate::os::open(crate::data_dir().as_os_str());
@@ -2603,32 +2613,122 @@ impl Render for Home {
 mod tests {
     use super::*;
 
-    /// A warning showed as an empty box: "!" is not in Segoe Fluent Icons. Every character drawn
-    /// with the icon font is one of its private-use code points; marks like "!" are vectors.
-    /// Structural (reads the source): `icon(...)` gets a `'\u{E...}'` literal, an `I_` constant
-    /// or a variable, and every `I_` constant is in the private use area.
+    /// Microsoft's names for the Segoe Fluent Icons glyphs Voxa draws, read from
+    /// learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font on 2026-11-28.
+    /// A new icon is added here only after looking its name up there.
+    const REVIEWED_ICONS: &[(u32, &str)] = &[
+        (0xE70D, "ChevronDown"),
+        (0xE70E, "ChevronUp"),
+        (0xE70F, "Edit"),
+        (0xE711, "Cancel"),
+        (0xE713, "Settings"),
+        (0xE71A, "Stop"),
+        (0xE720, "Microphone"),
+        (0xE721, "Search"),
+        (0xE724, "Send"),
+        (0xE72A, "Forward"),
+        (0xE72B, "Back"),
+        (0xE72C, "Refresh"),
+        (0xE72E, "Lock"),
+        (0xE73E, "CheckMark"),
+        (0xE74D, "Delete"),
+        (0xE765, "KeyboardClassic"),
+        (0xE768, "Play"),
+        (0xE76B, "ChevronLeft"),
+        (0xE76C, "ChevronRight"),
+        (0xE77B, "Contact"),
+        (0xE790, "Color"),
+        (0xE7C9, "TouchPointer"),
+        (0xE7E8, "PowerButton"),
+        (0xE80F, "Home"),
+        (0xE81C, "History"),
+        (0xE82D, "Dictionary"),
+        (0xE838, "FolderOpen"),
+        (0xE892, "Previous"),
+        (0xE893, "Next"),
+        (0xE895, "Sync"),
+        (0xE897, "Help"),
+        (0xE8A5, "Document"),
+        (0xE8C8, "Copy"),
+        (0xE8CB, "Sort"),
+        (0xE8D2, "Font"),
+        (0xE916, "Stopwatch"),
+        (0xE946, "Info"),
+        (0xE9D2, "AreaChart"),
+        (0xF133, "GiftboxOpen"),
+    ];
+
+    /// Glyphs of the icon font that are letters, not pictures: the input language and input
+    /// method indicators. E88C (LanguageCht) is the Chinese character the birthday row showed.
+    const TEXT_GLYPHS: &[u32] = &[0xE7DE, 0xE87C, 0xE87D, 0xE87E, 0xE87F, 0xE88B, 0xE88C, 0xE88D, 0xE97D, 0xE981, 0xE984, 0xE985, 0xE989, 0xE98A, 0xF698];
+
+    /// Every private use code point in the app's code (outside tests): (file, line, code point).
+    fn icon_code_points() -> Vec<(String, String, u32)> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).expect("src dir").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        assert!(files.len() > 10, "found the app's sources");
+        let pua = |c: u32| (0xE000..=0xF8FF).contains(&c);
+        let mut out = Vec::new();
+        for f in files {
+            let src = std::fs::read_to_string(&f).expect("read source");
+            let src = src.split("#[cfg(test)]").next().unwrap_or(&src);
+            let name = f.file_name().unwrap().to_string_lossy().to_string();
+            for line in src.lines() {
+                let mut rest = line;
+                while let Some(i) = rest.find("\\u{") {
+                    rest = &rest[i + 3..];
+                    let hex: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+                    if let Ok(c) = u32::from_str_radix(&hex, 16) {
+                        if pua(c) {
+                            out.push((name.clone(), line.trim().to_string(), c));
+                        }
+                    }
+                }
+                for ch in line.chars().filter(|c| pua(*c as u32)) {
+                    out.push((name.clone(), line.trim().to_string(), ch as u32));
+                }
+            }
+        }
+        out
+    }
+
+    /// The birthday row drew a Chinese character: E88C is in the icon font, but it is LanguageCht,
+    /// not a gift, and a range check passed it. Every icon code point anywhere in desktop/app/src
+    /// is an `I_` constant in home.rs with Microsoft's glyph name after it, the pair is in
+    /// [`REVIEWED_ICONS`], and none is a letter glyph. Marks like "!" are vectors, never `icon('!')`.
     #[test]
-    fn the_icon_font_only_draws_its_own_code_points() {
-        let pua = |c: char| ('\u{E000}'..='\u{F8FF}').contains(&c);
-        for (k, c) in [("history", I_HISTORY), ("check", I_CHECK), ("retry", I_RETRY), ("sort", I_SORT), ("send", I_SEND), ("mic", I_MIC)] {
-            assert!(pua(c), "{k}");
+    fn every_icon_is_a_reviewed_segoe_fluent_picture() {
+        let found = icon_code_points();
+        assert!(found.iter().any(|(_, _, c)| *c == I_GIFT as u32), "the scan sees the icon constants");
+        for (file, line, c) in &found {
+            let at = format!("{file}: {line}");
+            assert!(file == "home.rs" && line.starts_with("const I_"), "icon code point U+{c:04X} outside an I_ constant in home.rs: {at}");
+            assert!(!TEXT_GLYPHS.contains(c), "U+{c:04X} is a letter glyph of the icon font, not a picture: {at}");
+            let named = line.rsplit("// ").next().unwrap_or("").trim();
+            let reviewed = REVIEWED_ICONS.iter().find(|(r, _)| r == c).unwrap_or_else(|| panic!("U+{c:04X} is not in REVIEWED_ICONS; look its name up first: {at}"));
+            assert_eq!(named, reviewed.1, "the comment names the glyph Microsoft gives U+{c:04X}: {at}");
         }
-        let sources = [include_str!("home.rs"), include_str!("home/tour.rs")];
-        for src in sources {
+        for src in [include_str!("home.rs"), include_str!("home/tour.rs"), include_str!("home/greet_view.rs")] {
             let src = src.split("#[cfg(test)]").next().unwrap_or(src);
-            for (i, _) in src.match_indices("icon('") {
-                let rest = &src[i + 6..];
-                let lit = &rest[..rest.find('\'').expect("closing quote")];
-                let hex = lit.strip_prefix("\\u{").and_then(|h| h.strip_suffix('}')).unwrap_or_else(|| panic!("icon('{lit}') is not a code point"));
-                let c = char::from_u32(u32::from_str_radix(hex, 16).expect("hex")).expect("char");
-                assert!(pua(c), "icon('{lit}') is outside Segoe Fluent Icons' range");
-            }
-            for line in src.lines().filter(|l| l.starts_with("const I_")) {
-                let hex = line.split("\\u{").nth(1).and_then(|r| r.split('}').next()).expect("code point");
-                let c = char::from_u32(u32::from_str_radix(hex, 16).expect("hex")).expect("char");
-                assert!(pua(c), "{line}");
-            }
+            assert!(!src.contains("icon('"), "icon() takes an I_ constant, never a literal");
         }
+        assert_eq!(I_GIFT, '\u{F133}', "the birthday row draws GiftboxOpen");
+    }
+
+    #[test]
+    fn the_icon_guard_catches_the_chinese_glyph() {
+        assert!(TEXT_GLYPHS.contains(&0xE88C));
+        assert!(!REVIEWED_ICONS.iter().any(|(c, _)| TEXT_GLYPHS.contains(c)), "no reviewed icon is a letter glyph");
     }
 
     #[test]
