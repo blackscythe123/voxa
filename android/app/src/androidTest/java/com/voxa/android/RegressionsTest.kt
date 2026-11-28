@@ -175,6 +175,22 @@ class RegressionsTest {
         assertEquals("Good evening" to false, com.voxa.android.ui.greetingLayout("Good evening", null) { it.length <= 5 })
     }
 
+    /** Owner decision: the birthday is day and month only, kept on the phone (no backup, no year). */
+    @Test
+    fun theBirthdayIsDayAndMonthOnlyAndStaysOnThePhone() {
+        val before = com.voxa.android.ui.Birthday.get(ctx)
+        try {
+            com.voxa.android.ui.Birthday.set(ctx, 2, 29)
+            assertEquals(2 to 29, com.voxa.android.ui.Birthday.get(ctx))
+            val keys = ctx.getSharedPreferences("ui", 0).all.keys.filter { it.contains("birth", ignoreCase = true) }
+            assertEquals(setOf("birthday_month", "birthday_day"), keys.toSet())
+            val flags = ctx.applicationInfo.flags
+            assertEquals("app data is never backed up", 0, flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP)
+        } finally {
+            if (before == null) com.voxa.android.ui.Birthday.clear(ctx) else com.voxa.android.ui.Birthday.set(ctx, before.first, before.second)
+        }
+    }
+
     /** Sign out forgets the cached ChatGPT profile picture. */
     @Test
     fun signingOutForgetsTheProfilePicture() {
