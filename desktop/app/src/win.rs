@@ -795,11 +795,17 @@ pub fn stop_audio() {
 /// Where an app's icon is cached, keyed by the name History shows.
 pub fn cache_app_icon(hwnd: HWND, app: String) {
     let out = icon_file(&app);
-    if out.exists() || app.is_empty() {
+    if app.is_empty() {
         return;
     }
     let exe = exe_path(hwnd);
     if exe.is_empty() {
+        return;
+    }
+    // Taken again when the app was updated since (its program file is newer than the saved icon),
+    // so a new icon shows in History; Voxa's own kept its old quill after 1.0.0 otherwise.
+    let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    if !crate::common::icon_stale(modified(&out), modified(std::path::Path::new(&exe))) {
         return;
     }
     std::thread::spawn(move || match exe_icon_rgba(&exe, 64) {

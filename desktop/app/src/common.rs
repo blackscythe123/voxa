@@ -255,6 +255,30 @@ pub fn icon_file(app: &str) -> std::path::PathBuf {
     crate::data_dir().join("icons").join(format!("{}.png", slug.trim_matches('-')))
 }
 
+/// Whether an app's saved icon must be taken (again): none saved yet, or the app's program file
+/// changed after it was saved (an update can bring a new icon).
+pub fn icon_stale(saved: Option<std::time::SystemTime>, exe: Option<std::time::SystemTime>) -> bool {
+    match (saved, exe) {
+        (None, _) => true,
+        (Some(s), Some(e)) => e > s,
+        (Some(_), None) => false,
+    }
+}
+
+#[cfg(test)]
+mod icon_refresh {
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn an_app_updated_after_its_icon_was_saved_gets_its_new_icon() {
+        let saved = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        assert!(super::icon_stale(None, Some(saved)), "no icon yet: take it");
+        assert!(super::icon_stale(Some(saved), Some(saved + Duration::from_secs(60))), "app updated since: take it again");
+        assert!(!super::icon_stale(Some(saved), Some(saved - Duration::from_secs(60))), "unchanged app: keep the saved icon");
+        assert!(!super::icon_stale(Some(saved), None), "program file unreadable: keep the saved icon");
+    }
+}
+
 /// Save the real icon of the app that owns `hwnd` (64 px PNG), once per app. Runs off the UI thread.
 pub(crate) fn write_png(out: &std::path::Path, rgba: &[u8], n: u32) -> std::io::Result<()> {
     if let Some(d) = out.parent() {
