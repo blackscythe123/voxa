@@ -60,36 +60,115 @@ impl Entry {
     }
 }
 
+/// Write `bytes` to `path` so a reader only ever sees the old file or the new one, whole: a
+/// temporary file with a name no other writer uses (threads or processes), flushed to the disk
+/// before it is renamed over `path` (a power cut right after the rename can't leave an empty
+/// file). A failure removes the temporary file and is reported.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(tmp, path)
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    // Windows refuses a rename over a file another writer is renaming at the same moment; a
+    // few short tries settle it.
+    let mut result = written.and_then(|()| std::fs::rename(&tmp, path));
+    for _ in 0..20 {
+        if result.is_ok() || !tmp.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        result = std::fs::rename(&tmp, path);
+    }
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Keep a copy of a file that can't be read as expected next to it, as `<stem>.broken-<ms>.json`,
+/// so nothing is lost when Voxa starts again from what it could read.
+fn keep_broken_copy(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_str()?;
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let copy = path.with_file_name(format!("{stem}.broken-{ms}.json"));
+    std::fs::copy(path, &copy).ok()?;
+    Some(copy)
+}
+
+/// What a damaged history file still holds: the entries before the point where it was cut off
+/// (a torn write keeps the start of the array). Empty when nothing can be read.
+fn salvage_entries(bytes: &[u8]) -> Vec<Entry> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return Vec::new() };
+    // Try the longest prefix that ends after a whole entry, closing the array there.
+    let ends: Vec<usize> = text.match_indices('}').map(|(i, _)| i + 1).collect();
+    for &end in ends.iter().rev().take(4000) {
+        if let Ok(v) = serde_json::from_str::<Vec<Entry>>(&format!("{}]", &text[..end])) {
+            return v;
+        }
+    }
+    Vec::new()
 }
 
 /// One lock for every read-modify-write of history.json in this process (Android's keyboard and
 /// app screens share the file).
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
 
+/// How history.json read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Loaded {
+    /// Read whole, or there is no file yet.
+    Clean,
+    /// It didn't parse (a torn write, a newer app's format). A copy was kept aside as
+    /// `history.broken-<ms>.json` and what could be read was salvaged. Saving is safe (the copy
+    /// keeps the rest); deleting by what History lacks (orphan sweeps, pruning) is not.
+    Damaged,
+    /// It couldn't be read at all (locked, a read error). Nothing may be saved over it.
+    Unreadable,
+}
+
 pub struct History {
     path: PathBuf,
     /// Oldest first.
     pub entries: Vec<Entry>,
+    /// How the file read: anything but `Clean` turns off pruning, and `Unreadable` saving.
+    pub loaded: Loaded,
 }
 
 impl History {
     pub fn load(dir: &Path) -> Self {
         let path = dir.join("history.json");
-        let entries = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { path, entries }
+        let (entries, loaded) = match std::fs::read(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), Loaded::Clean),
+            Err(_) => (Vec::new(), Loaded::Unreadable),
+            Ok(b) => match serde_json::from_slice::<Vec<Entry>>(&b) {
+                Ok(v) => (v, Loaded::Clean),
+                Err(_) => match keep_broken_copy(&path) {
+                    Some(_) => (salvage_entries(&b), Loaded::Damaged),
+                    // No copy could be made: never write over the only one.
+                    None => (salvage_entries(&b), Loaded::Unreadable),
+                },
+            },
+        };
+        Self { path, entries, loaded }
     }
 
-    pub fn save(&self) {
-        if let Ok(bytes) = serde_json::to_vec_pretty(&self.entries) {
-            let _ = write_atomic(&self.path, &bytes);
+    /// Save, unless the file couldn't be read (then the copy on disk is the only one).
+    pub fn save(&self) -> std::io::Result<()> {
+        if self.loaded == Loaded::Unreadable {
+            return Err(std::io::Error::other("history.json could not be read; not saved over"));
         }
+        let bytes = serde_json::to_vec_pretty(&self.entries).map_err(std::io::Error::other)?;
+        write_atomic(&self.path, &bytes)
     }
 
     /// Load, change and save under the process-wide lock. `f` returns (changed, result).
@@ -98,9 +177,29 @@ impl History {
         let mut h = Self::load(dir);
         let (changed, r) = f(&mut h);
         if changed {
-            h.save();
+            let _ = h.save();
         }
         r
+    }
+
+    /// Whether a recording no entry lists may be deleted (`file_name` starts with the ms it was
+    /// recorded at). Only when History read cleanly, and never for a recording made before
+    /// History was found damaged: its entry may have been in the part that was lost.
+    pub fn may_delete_unlisted_audio(&self, file_name: &str) -> bool {
+        if self.loaded != Loaded::Clean {
+            return false;
+        }
+        let Some(dir) = self.path.parent() else { return false };
+        let Ok(files) = std::fs::read_dir(dir) else { return false };
+        let recorded: Option<u128> = file_name.split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse().ok());
+        for f in files.flatten() {
+            let n = f.file_name();
+            let Some(damaged_at) = n.to_str().and_then(|n| n.strip_prefix("history.broken-")?.strip_suffix(".json")?.parse::<u128>().ok()) else { continue };
+            if recorded.is_none_or(|r| r <= damaged_at) {
+                return false;
+            }
+        }
+        true
     }
 
     pub fn get(&self, id: u64) -> Option<&Entry> {
@@ -143,11 +242,16 @@ impl History {
 
     /// Drop entries (and their audio) older than `keep_days`. 0 keeps everything. Dictations not
     /// written out yet (waiting or failed) are never dropped: they are still owed to the user.
+    ///
+    /// The wall clock is not trusted alone: age is counted up to the newest dictation at most, so
+    /// a clock that jumps ahead (a dead clock battery, a wrong network time, a date set forward)
+    /// never deletes recent History. Nothing is dropped from a History that didn't read cleanly.
     pub fn prune(&mut self, keep_days: u32, now_ms: u64) -> usize {
-        if keep_days == 0 {
+        if keep_days == 0 || self.loaded != Loaded::Clean {
             return 0;
         }
-        let cutoff = now_ms.saturating_sub(keep_days as u64 * 86_400_000);
+        let newest = self.entries.iter().map(|e| e.id).max().unwrap_or(0);
+        let cutoff = now_ms.min(newest).saturating_sub(keep_days as u64 * 86_400_000);
         let (old, keep): (Vec<Entry>, Vec<Entry>) = std::mem::take(&mut self.entries).into_iter().partition(|e| e.id < cutoff && !e.status.is_unsent());
         self.entries = keep;
         for e in &old {
@@ -165,7 +269,7 @@ impl History {
             }
         }
         self.entries.clear();
-        self.save();
+        let _ = self.save();
     }
 
     /// Bytes of audio kept on disk.
@@ -223,13 +327,33 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The saved settings, or the defaults when there are none or they can't be read.
     pub fn load(dir: &Path) -> Self {
-        std::fs::read(dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        Self::load_checked(dir).unwrap_or_default()
     }
-    pub fn save(&self, dir: &Path) {
-        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
-            let _ = write_atomic(&dir.join("settings.json"), &bytes);
+
+    /// The saved settings (the defaults when there is no file yet), or None when the file exists
+    /// but can't be read or parsed: then nothing may be decided from them (pruning by
+    /// `keep_days` would use the default 30 days for someone who keeps History forever). A copy
+    /// of a damaged file is kept aside.
+    pub fn load_checked(dir: &Path) -> Option<Self> {
+        let path = dir.join("settings.json");
+        match std::fs::read(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Self::default()),
+            Err(_) => None,
+            Ok(b) => match serde_json::from_slice(&b) {
+                Ok(s) => Some(s),
+                Err(_) => {
+                    keep_broken_copy(&path);
+                    None
+                }
+            },
         }
+    }
+
+    pub fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let bytes = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
+        write_atomic(&dir.join("settings.json"), &bytes)
     }
     pub const KEEP_CHOICES: [u32; 4] = [7, 30, 90, 0];
     pub fn keep_label(days: u32) -> String {
@@ -267,10 +391,9 @@ impl Words {
     pub fn load(dir: &Path) -> Self {
         std::fs::read(dir.join("words.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
-    pub fn save(&self, dir: &Path) {
-        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
-            let _ = write_atomic(&dir.join("words.json"), &bytes);
-        }
+    pub fn save(&self, dir: &Path) -> std::io::Result<()> {
+        let bytes = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
+        write_atomic(&dir.join("words.json"), &bytes)
     }
     /// Fixes, then snippets, then spoken formatting, then the rule for `app` if there is one.
     pub fn apply(&self, text: &str, app: &str) -> String {
@@ -386,7 +509,7 @@ mod tests {
         assert!(h.upsert(entry(20, "b", Status::Pasted)));
         assert!(h.upsert(entry(10, "a", Status::Pasted)));
         assert!(!h.upsert(entry(10, "a", Status::Pasted)), "no change");
-        h.save();
+        h.save().unwrap();
         let back = History::load(&dir);
         assert_eq!(back.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [10, 20]);
         assert_eq!(back.search("b").len(), 1);
@@ -464,7 +587,7 @@ three "), 3);
 
     #[test]
     fn set_text_edits_written_entries_only() {
-        let mut h = History { path: PathBuf::new(), entries: vec![entry(1, "a", Status::Pasted), entry(2, "", Status::Waiting("x".into()))] };
+        let mut h = History { path: PathBuf::new(), loaded: Loaded::Clean, entries: vec![entry(1, "a", Status::Pasted), entry(2, "", Status::Waiting("x".into()))] };
         assert!(h.set_text(1, "b"));
         assert!(!h.set_text(1, "b"), "no change");
         assert!(!h.set_text(2, "c"), "unsent entries are not edited");
@@ -477,7 +600,7 @@ three "), 3);
         let s = Settings::load(&dir);
         assert_eq!(s, Settings::default());
         let s2 = Settings { remove_fillers: true, keep_days: 7, ..s };
-        s2.save(&dir);
+        s2.save(&dir).unwrap();
         assert_eq!(Settings::load(&dir), s2);
         std::fs::write(dir.join("settings.json"), r#"{"remove_fillers": true}"#).unwrap();
         assert_eq!(Settings::load(&dir).keep_days, 30, "older files still load");
@@ -492,11 +615,11 @@ three "), 3);
             spoken_formatting: true,
             rules: vec![AppRule { app: "Claude Code".into(), no_final_period: true, lowercase: false }],
         };
-        w.save(&dir);
+        w.save(&dir).unwrap();
         assert_eq!(Words::load(&dir), w);
         assert_eq!(w.apply("Ask clawed code. New line. Mail my email.", "Claude Code"), "Ask Claude Code.\nMail sam@example.com");
         assert_eq!(finish_text("Um, ask clawed code.".into(), &dir, "Slack"), "Um, ask Claude Code.", "fillers off by default");
-        Settings { remove_fillers: true, ..Settings::default() }.save(&dir);
+        Settings { remove_fillers: true, ..Settings::default() }.save(&dir).unwrap();
         assert_eq!(finish_text("Um, ask clawed code.".into(), &dir, "Slack"), "Ask Claude Code.");
     }
 }
