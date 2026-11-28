@@ -17,6 +17,7 @@ pub mod copy;
 pub mod doodle;
 pub mod error;
 pub mod flow;
+pub mod fsx;
 pub mod greeting;
 pub mod job;
 pub mod notices;

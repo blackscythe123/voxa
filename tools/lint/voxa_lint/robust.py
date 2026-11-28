@@ -141,7 +141,7 @@ def check_unique_temp(ctx: Ctx) -> list[Violation]:
             name = f.name
             body = src.code[f.body:f.end]
             t = re.search(r"\blet\s+tmp\s*=\s*([^;]+);", body)
-            if t and re.search(r"fs::rename\(", body) and not UNIQUE.search(t.group(1)):
+            if t and re.search(r"fs::rename\(|replace_file\(", body) and not UNIQUE.search(t.group(1)):
                 line = src.line_of(f.body + t.start())
                 out.append(Violation("robust-atomic-write", rel, line, f"{name}() writes through a fixed temporary name ({t.group(1).strip()[:50]}). "
                                      "Rule: the temp file is unique per write (process id plus a counter or time, as in "
@@ -150,5 +150,26 @@ def check_unique_temp(ctx: Ctx) -> list[Violation]:
     return out
 
 
+RENAME_HELPER = "core/voxa-core/src/fsx.rs"
+
+
+def check_rename(ctx: Ctx) -> list[Violation]:
+    """No bare fs::rename outside the shared helper: on Windows a rename over a file that an
+    antivirus scan or another save holds for a moment fails, and one try loses the save."""
+    out = []
+    for rel in S.files(ctx.root, "desktop/**/*.rs", "core/*/src/**/*.rs", exclude=CORE_NOT_LIB):
+        if rel == RENAME_HELPER:
+            continue
+        src = S.load(ctx.root, rel)
+        tests = S.test_ranges(src)
+        for m in re.finditer(r"\bfs::rename\(", src.code):
+            if S.in_ranges(m.start(), tests):
+                continue
+            out.append(Violation("robust-rename", rel, src.line_of(m.start()), "A bare fs::rename. Rule: replace files with "
+                                 "voxa_core::fsx::replace_file, which retries while Windows reports the target busy "
+                                 "(antivirus, another save), so a save is never silently lost (docs/guardrails.md#8-robustness)"))
+    return out
+
+
 def check(ctx: Ctx) -> list[Violation]:
-    return check_case_slice(ctx) + check_unwrap(ctx) + check_atomic_writes(ctx) + check_unique_temp(ctx)
+    return check_case_slice(ctx) + check_unwrap(ctx) + check_atomic_writes(ctx) + check_unique_temp(ctx) + check_rename(ctx)

@@ -85,7 +85,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         f.write_all(bytes)?;
         f.sync_all()
     })();
-    if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
+    if let Err(e) = written.and_then(|_| voxa_core::fsx::replace_file(&tmp, path)) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }

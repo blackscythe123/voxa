@@ -180,6 +180,7 @@ messages are already checked by a hook.)
 - `robust-unwrap`: no `.unwrap()` / `.expect()` in `core/*/src` library code outside tests (the
   nudge trainer in `src/bin` is exempt). Network, file and user input must never panic the
   keyboard or the app; lock poisoning uses `unwrap_or_else(|e| e.into_inner())`.
+- `robust-rename`: no bare `fs::rename`; every file replacement goes through `voxa_core::fsx::replace_file`, which retries for about 2 s while Windows reports the target busy (an antivirus scan, another save). A single try silently lost saves under load.
 - `robust-atomic-write`: history, settings, session, account and other store files are written
   through the atomic writers (`voxa_store::write_atomic`, `desktop/app/src/store.rs`,
   `voxa_chatgpt::write_unique_then_rename`), never with a bare `fs::write` / `File::create` on the

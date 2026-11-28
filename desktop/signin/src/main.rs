@@ -25,7 +25,7 @@ const SESSION_COOKIE: &str = "__Secure-next-auth.session-token";
 fn save_session(dir: &std::path::Path, bytes: &[u8]) -> bool {
     // Its own temporary name: the main app may be saving a refreshed sign-in at the same moment.
     let tmp = dir.join(format!("session.json.signin-{}.tmp", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_err() || std::fs::rename(&tmp, dir.join("session.json")).is_err() {
+    if std::fs::write(&tmp, bytes).is_err() || voxa_core::fsx::replace_file(&tmp, &dir.join("session.json")).is_err() {
         let _ = std::fs::remove_file(&tmp);
         return false;
     }

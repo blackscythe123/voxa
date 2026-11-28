@@ -7980,6 +7980,7 @@ version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
+ "voxa-core",
 ]
 
 [[package]]
@@ -7988,6 +7989,7 @@ version = "1.0.0"
 dependencies = [
  "serde_json",
  "tao",
+ "voxa-core",
  "wry",
 ]
 

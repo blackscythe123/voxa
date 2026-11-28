@@ -112,7 +112,7 @@ def main_self_test() -> int:
     rules = {r for r, _ in expected}
     every = {"contrast", "copy-emoji", "copy-dash", "copy-case", "copy-occasion", "privacy-log", "privacy-notify", "focus-steal",
              "focus-notify", "android-size", "android-deps", "android-workmanager", "android-exact-alarm", "android-signing", "isolation-env", "isolation-test-hook",
-             "release-latest", "robust-case-slice", "robust-unwrap", "robust-atomic-write", "licence-consistent"}
+             "release-latest", "robust-case-slice", "robust-unwrap", "robust-atomic-write", "robust-rename", "licence-consistent"}
     for r in sorted(every - rules):
         ok = False
         print(f"FAIL rule {r} has no fixture proving it catches a violation")

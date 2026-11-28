@@ -108,7 +108,7 @@ pub fn write_unique_then_rename(path: &Path, bytes: &[u8]) -> std::io::Result<()
         f.write_all(bytes)?;
         f.sync_all()
     })();
-    let result = written.and_then(|()| std::fs::rename(&tmp, path));
+    let result = written.and_then(|()| voxa_core::fsx::replace_file(&tmp, path));
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
