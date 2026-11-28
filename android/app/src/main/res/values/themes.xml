@@ -9,9 +9,9 @@
         <item name="android:windowLightNavigationBar">true</item>
     </style>
 
-    <!-- Android 12+ system splash: the base colour only, then Voxa's launch animation (cold start). -->
+    <!-- Android 12+ system splash: the splash colour only, then the written splash (cold start). -->
     <style name="Theme.Voxa.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/base</item>
+        <item name="windowSplashScreenBackground">@color/splash</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
         <item name="postSplashScreenTheme">@style/Theme.Voxa</item>
     </style>

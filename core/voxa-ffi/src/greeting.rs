@@ -264,12 +264,6 @@ pub fn doodle_flourish(doodle: String, stroke: DoodleStroke, scale: f32, t_ms: f
     doodle::flourish_at(doodle_of(&doodle), &(&stroke).into(), scale, t_ms).map(|(m, alpha)| FlourishFrame { matrix: m.to_vec(), alpha })
 }
 
-/// Material's standard easing, cubic-bezier(0.4, 0, 0.2, 1), for a stroke's progress.
-#[uniffi::export]
-pub fn doodle_progress(t: f32) -> f32 {
-    doodle::standard(t)
-}
-
 #[uniffi::export]
 pub fn splash_spec() -> SplashSpec {
     SplashSpec {

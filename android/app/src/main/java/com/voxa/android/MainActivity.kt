@@ -72,6 +72,9 @@ class MainActivity : ComponentActivity() {
         tick.intValue++
     }
     private val stack = mutableStateListOf<Route>()
+    /** The written splash is on screen; Home's doodle waits for it. */
+    var splashShowing by mutableStateOf(false)
+        private set
     /** The open bottom sheet, drawn over everything (tabs included). */
     private var sheet by mutableStateOf<(@Composable ColumnScope.() -> Unit)?>(null)
 
@@ -93,16 +96,17 @@ class MainActivity : ComponentActivity() {
         for (key in listOf(Settings.Secure.ENABLED_INPUT_METHODS, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
-        // The launch animation: every time the app is opened (not when the keyboard opens it for
-        // sign-in or the mic, not on rotation), and never when the user turned animations off.
+        // The written splash: every time the app is opened (not when the keyboard opens it for
+        // sign-in or the mic, not on rotation). With animations off it is the still end frame.
         // The keyboard keeps the app's process alive, so "once per process" would mean almost never.
         val animationsOff = Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         val freeze = if (BuildConfig.DEBUG && intent.hasExtra("debug_launch_at")) intent.getFloatExtra("debug_launch_at", 0.5f) else null
-        val showLaunch = freeze != null || (savedInstanceState == null && openRequest == null && !animationsOff)
+        val showLaunch = freeze != null || (savedInstanceState == null && openRequest == null)
+        splashShowing = showLaunch && freeze == null
         com.voxa.android.ui.ThemePref.load(this)
         setContent {
             val dark = com.voxa.android.ui.ThemePref.isDark(com.voxa.android.ui.ThemePref.current.value, androidx.compose.foundation.isSystemInDarkTheme())
-            VoxaTheme(dark = dark) { Root(showLaunch, freeze) }
+            VoxaTheme(dark = dark) { Root(showLaunch, freeze, animationsOff) }
         }
     }
 
@@ -128,6 +132,10 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putBoolean("ready", intent.getBooleanExtra("debug_ready", false)).apply()
             voxa.checkSession(force = true)
         }
+        // --es debug_now 2026-12-02T13:05: Home greets as if it were then ("" to use the clock).
+        if (intent.hasExtra("debug_now")) prefs.edit().putString("now", intent.getStringExtra("debug_now").orEmpty()).apply()
+        // --es debug_name Alexandria: greet with this first name when no account is known ("" clears).
+        if (intent.hasExtra("debug_name")) prefs.edit().putString("name", intent.getStringExtra("debug_name").orEmpty()).apply()
         if (intent.hasExtra("debug_levels")) prefs.edit().putBoolean("levels", intent.getBooleanExtra("debug_levels", false)).apply()
         if (intent.hasExtra("debug_transcript")) {
             val t = intent.getStringExtra("debug_transcript").orEmpty()
@@ -179,6 +187,7 @@ class MainActivity : ComponentActivity() {
     /** Setup finished (or skipped): Home. */
     fun finishSetup() {
         voxa.core.setSettings(voxa.core.settings().copy(onboarded = true))
+        getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean("greet_first_open", true).apply()
         stack.clear()
         stack.add(Route.Tabbed(Tab.Home))
     }
@@ -229,7 +238,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Root(showLaunch: Boolean, freeze: Float?) {
+    private fun Root(showLaunch: Boolean, freeze: Float?, reduced: Boolean) {
         var launching by remember { mutableStateOf(showLaunch) }
         openRequest?.let {
             openRequest = null
@@ -267,7 +276,10 @@ class MainActivity : ComponentActivity() {
                 if (route is Route.Tabbed) TabBar(route.tab) { go(Route.Tabbed(it)) }
             }
             sheet?.let { s -> BottomSheet(onDismiss = { sheet = null }, content = s) }
-            if (launching) LaunchOverlay(freeze) { launching = false }
+            if (launching) LaunchOverlay(freeze, reduced) {
+                launching = false
+                splashShowing = false
+            }
         }
     }
 
