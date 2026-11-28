@@ -17,6 +17,7 @@ pub mod copy;
 pub mod error;
 pub mod flow;
 pub mod job;
+pub mod notices;
 pub mod readiness;
 pub mod text;
 pub mod trim;
