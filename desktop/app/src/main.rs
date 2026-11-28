@@ -158,8 +158,10 @@ fn lock_session_file() -> std::sync::MutexGuard<'static, ()> {
 /// lead to a "signed out" toast. `generation`: [`session_gen`] when the check was asked for.
 fn ask_session(gpt: &ChatGpt, generation: u64) -> (Option<GptSession>, Session, Network, bool) {
     let dir = data_dir();
-    // Carry an Electron sign-in over once, unless the user signed out here.
-    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if dir.join("signed-out").exists() { None } else { GptSession::from_electron_dir(&electron_dir()) });
+    // Carry an Electron sign-in over once, unless the user signed out here. Never for a test copy
+    // (VOXA_DATA): it must not pick up the real account and send a test take with it.
+    let carry_over = !dir.join("signed-out").exists() && std::env::var_os("VOXA_DATA").is_none();
+    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if carry_over { GptSession::from_electron_dir(&electron_dir()) } else { None });
     if let (Some(s), Some(answer)) = (saved.clone(), test_session_answer()) {
         os::log(&format!("test: session check answers {answer:?}"));
         return (Some(s), answer, Network::Up, answer == Session::Expired);
