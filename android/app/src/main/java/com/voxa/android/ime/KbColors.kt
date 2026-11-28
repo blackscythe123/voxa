@@ -159,6 +159,9 @@ object Contrast {
     /** The sRGB grey (0..1) with [c]'s luminance. */
     fun grey(c: Int) = srgb(lum(c))
 
+    /** The sRGB grey (0..1) with relative luminance [y]. */
+    fun greyOfLum(y: Float) = srgb(y)
+
     fun ratioLum(a: Float, b: Float) = (maxOf(a, b) + 0.05f) / (minOf(a, b) + 0.05f)
     fun ratio(a: Int, b: Int) = ratioLum(lum(a), lum(b))
     /** [c] against a grey given as sRGB 0..1. */
@@ -168,8 +171,10 @@ object Contrast {
 
 /**
  * Readability over a photo. The panel is split in three bands (status line, around the mic, the
- * keys); each picks near-white or near-black against its worst 10 % of cells, under a wash toward
- * a dark or light surface. The Photo strength slider stops where any band would stop reading.
+ * keys); each picks near-white or near-black against its worst cells, under a wash toward a dark
+ * or light surface. Each cell keeps its darkest and brightest pixels (not an average, so small
+ * bright details under a label count), a band is judged at its 2nd / 98th percentile cell, and
+ * every minimum gets a 10 % margin. The Photo strength slider stops where any band would stop reading.
  */
 object Photo {
     /** The panel's height used for the crop (it is 296 dp plus the navigation bar). */
@@ -184,7 +189,7 @@ object Photo {
     private val STATUS_NEEDS = listOf(1f to 4.5f, 0.8f to 4.5f)
     /** "That's N seconds of typing saved" (4.5:1) and the level bars at 50 % (3:1, WCAG 1.4.11). */
     private val STAGE_NEEDS = listOf(0.8f to 4.5f, 0.5f to 3f)
-    /** The space label ("Tap to stop") and the key icons, at 90 %. */
+    /** The space label ("Pause", "Resume", "space") and the key icons, at 90 %. */
     private val KEY_NEEDS = listOf(0.9f to 4.5f)
 
     /** The panel's width over [PANEL_DP] (the crop's shape). */
@@ -196,7 +201,7 @@ object Photo {
     /** The wash's opacity: the rest of Photo strength, 20 points stronger when dark. */
     fun washAlpha(strength: Float, dark: Boolean) = (1f - strength + if (dark) 0.2f else 0f).coerceIn(0f, 1f)
 
-    /** A band's 10th and 90th percentile greys, before the wash. */
+    /** The band's darkest and brightest cells (2nd / 98th percentile), before the wash. */
     class Band(val lo: Float, val hi: Float)
 
     private fun band(g: KeyboardLook.Grid, aspect: Float, position: Float, range: Pair<Float, Float>): Band {
@@ -212,11 +217,17 @@ object Photo {
         val r1 = ((bottom * g.h).toInt()).coerceIn(r0 + 1, g.h)
         val c0 = (x0 * g.w).toInt().coerceIn(0, g.w - 1)
         val c1 = (((x0 + vw) * g.w).toInt()).coerceIn(c0 + 1, g.w)
-        val v = FloatArray((r1 - r0) * (c1 - c0))
+        val n = (r1 - r0) * (c1 - c0)
+        val lo = FloatArray(n)
+        val hi = FloatArray(n)
         var i = 0
-        for (r in r0 until r1) for (c in c0 until c1) v[i++] = g.cells[r * g.w + c]
-        v.sort()
-        return Band(v[((v.size - 1) * 0.1f).toInt()], v[((v.size - 1) * 0.9f).toInt()])
+        for (r in r0 until r1) for (c in c0 until c1) {
+            lo[i] = g.lo[r * g.w + c]
+            hi[i++] = g.hi[r * g.w + c]
+        }
+        lo.sort()
+        hi.sort()
+        return Band(lo[((n - 1) * 0.02f).toInt()], hi[((n - 1) * 0.98f).toInt()])
     }
 
     private fun bands(g: KeyboardLook.Grid, aspect: Float, position: Float) =
@@ -227,6 +238,9 @@ object Photo {
         val all = band(g, aspect, position, 0f to PANEL_DP)
         return Contrast.ratioGrey(LIGHT_FG, all.hi) >= Contrast.ratioGrey(DARK_FG, all.lo)
     }
+
+    /** Headroom on every minimum: the grid is coarse and the photo is drawn scaled. */
+    private const val MARGIN = 1.1f
 
     private const val LIGHT_FG = KbColors.LIGHT_FG
     private const val DARK_FG = KbColors.DARK_FG
@@ -242,7 +256,7 @@ object Photo {
         var worst = Float.MAX_VALUE
         for ((alpha, need) in needs) {
             val e = alpha * f + (1f - alpha) * bg
-            worst = minOf(worst, Contrast.greyRatio(e, bg) / need)
+            worst = minOf(worst, Contrast.greyRatio(e, bg) / (need * MARGIN))
         }
         return worst
     }
@@ -281,10 +295,11 @@ object Photo {
         val w = KbColors::withAlpha
         // Status colours are fixed pairs: the dark-palette pair over a dark wash, the light pair over a light one.
         val good = if (washIsDark) 0xFF45C27C.toInt() else 0xFF1F9D55.toInt()
+        val goodText = if (washIsDark) good else KbColors.GOOD_TEXT_LIGHT
         val sb = bs[0]
         val goodReads = minOf(
-            Contrast.ratioGrey(good, a * wash + (1f - a) * sb.lo),
-            Contrast.ratioGrey(good, a * wash + (1f - a) * sb.hi),
+            Contrast.ratioGrey(goodText, a * wash + (1f - a) * sb.lo),
+            Contrast.ratioGrey(goodText, a * wash + (1f - a) * sb.hi),
         ) >= 4.5f
         val stageLight = stage == LIGHT_FG
         val mic = if (look.micColor != 0) look.micColor else if (stageLight) 0xFFD9946D.toInt() else 0xFF8F4C2C.toInt()
@@ -301,7 +316,7 @@ object Photo {
             micRing = if (micReads) w(mic, if (stageLight) 0.22f else 0.12f) else w(stage, 0.85f),
             micGlow = w(mic, if (stageLight) 0.25f else 0.35f),
             bars = w(stage, 0.5f), spinner = w(stage, 0.5f),
-            good = good, goodTitle = if (goodReads) good else status,
+            good = good, goodTitle = if (goodReads) goodText else status,
             recording = if (washIsDark) 0xFFF2555A.toInt() else 0xFFE5484D.toInt(),
             press = if (keyFg == LIGHT_FG) 0x33FFFFFF else 0x1F000000, dark = washIsDark, look = look.copy(strength = minOf(look.strength, cap)),
         )

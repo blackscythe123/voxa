@@ -166,10 +166,11 @@ object KeyboardLook {
     private const val GRID_W = 32
 
     /**
-     * The photo's brightness, [w] x [h] cells, each the sRGB grey with the cell's luminance
-     * (0..1). Kept for the whole photo, so any crop and position can be checked.
+     * The photo's brightness, [w] x [h] cells: for each, the sRGB grey (0..1) of its darkest
+     * ([lo]) and brightest ([hi]) pixels, ignoring the extreme 2 % so one stray pixel doesn't
+     * decide. Kept for the whole photo, so any crop and position can be checked.
      */
-    class Grid(val w: Int, val h: Int, val cells: FloatArray) {
+    class Grid(val w: Int, val h: Int, val lo: FloatArray, val hi: FloatArray) {
         val aspect get() = w.toFloat() / h
     }
 
@@ -215,31 +216,89 @@ object KeyboardLook {
         }
     }
 
-    private fun gridOf(bmp: Bitmap): Grid {
-        val gh = (GRID_W * bmp.height.toFloat() / bmp.width).roundToInt().coerceIn(8, 96)
-        val small = Bitmap.createScaledBitmap(bmp, GRID_W, gh, true)
-        val px = IntArray(GRID_W * gh)
-        small.getPixels(px, 0, GRID_W, 0, 0, GRID_W, gh)
-        if (small != bmp) small.recycle()
-        return Grid(GRID_W, gh, FloatArray(px.size) { Contrast.grey(px[it]) })
+    /**
+     * Every pixel (the copy is at most 1440 px, read one row at a time) into a 256-level grey
+     * histogram per cell, for one row of cells at a time; small fixed buffers only.
+     */
+    internal fun gridOf(bmp: Bitmap): Grid {
+        val bw = bmp.width
+        val bh = bmp.height
+        val gh = (GRID_W * bh.toFloat() / bw).roundToInt().coerceIn(8, 96)
+        val lin = FloatArray(256) { Contrast.lin(it / 255f) }
+        // Luminance (0..1 in 1024 steps) to its sRGB grey level 0..255.
+        val toGrey = IntArray(1025) { (Contrast.greyOfLum(it / 1024f) * 255f).roundToInt().coerceIn(0, 255) }
+        val lo = FloatArray(GRID_W * gh)
+        val hi = FloatArray(GRID_W * gh)
+        val row = IntArray(bw)
+        val hist = IntArray(GRID_W * 256)
+        val count = IntArray(GRID_W)
+        for (gr in 0 until gh) {
+            hist.fill(0)
+            count.fill(0)
+            val y0 = gr * bh / gh
+            val y1 = maxOf(y0 + 1, (gr + 1) * bh / gh)
+            for (y in y0 until minOf(y1, bh)) {
+                bmp.getPixels(row, 0, bw, 0, y, bw, 1)
+                for (x in 0 until bw) {
+                    val p = row[x]
+                    val l = 0.2126f * lin[(p shr 16) and 0xFF] + 0.7152f * lin[(p shr 8) and 0xFF] + 0.0722f * lin[p and 0xFF]
+                    val cell = minOf(GRID_W - 1, x * GRID_W / bw)
+                    hist[cell * 256 + toGrey[(l * 1024f).toInt().coerceIn(0, 1024)]]++
+                    count[cell]++
+                }
+            }
+            for (cell in 0 until GRID_W) {
+                val i = gr * GRID_W + cell
+                val n = count[cell]
+                if (n == 0) {
+                    // A photo narrower than the grid: assume the worst for this cell.
+                    lo[i] = 0f
+                    hi[i] = 1f
+                    continue
+                }
+                val skip = n / 50
+                val base = cell * 256
+                var seen = 0
+                var v = 0
+                while (v < 255 && seen + hist[base + v] <= skip) seen += hist[base + v++]
+                lo[i] = v / 255f
+                seen = 0
+                v = 255
+                while (v > 0 && seen + hist[base + v] <= skip) seen += hist[base + v--]
+                hi[i] = v / 255f
+            }
+        }
+        return Grid(GRID_W, gh, lo, hi)
     }
 
+    /** w, h, then every cell's darkest grey, then every cell's brightest (one byte each). */
     private fun writeGrid(c: Context, g: Grid) {
-        val bytes = ByteArray(2 + g.cells.size)
+        val n = g.w * g.h
+        val bytes = ByteArray(2 + 2 * n)
         bytes[0] = g.w.toByte()
         bytes[1] = g.h.toByte()
-        for (i in g.cells.indices) bytes[2 + i] = (g.cells[i] * 255f).roundToInt().coerceIn(0, 255).toByte()
+        for (i in 0 until n) {
+            bytes[2 + i] = (g.lo[i] * 255f).roundToInt().coerceIn(0, 255).toByte()
+            bytes[2 + n + i] = (g.hi[i] * 255f).roundToInt().coerceIn(0, 255).toByte()
+        }
         gridFile(c).writeBytes(bytes)
     }
 
-    /** The saved brightness grid; throws when it is missing or damaged (the caller falls back). */
+    /**
+     * The saved brightness grid; throws when it is missing or damaged (the caller falls back).
+     * A grid saved before cells kept their darkest and brightest pixels (one average per cell)
+     * still reads, with that average as both.
+     */
     fun readGrid(c: Context): Grid {
         val b = gridFile(c).readBytes()
+        require(b.size > 2) { "bad grid" }
         val w = b[0].toInt() and 0xFF
         val h = b[1].toInt() and 0xFF
-        require(w > 0 && h > 0 && b.size == 2 + w * h) { "bad grid" }
+        val n = w * h
+        require(w > 0 && h > 0 && (b.size == 2 + n || b.size == 2 + 2 * n)) { "bad grid" }
         if (!photoFile(c).isFile) error("photo copy missing")
-        return Grid(w, h, FloatArray(w * h) { (b[2 + it].toInt() and 0xFF) / 255f })
+        val hiAt = if (b.size == 2 + 2 * n) 2 + n else 2
+        return Grid(w, h, FloatArray(n) { (b[2 + it].toInt() and 0xFF) / 255f }, FloatArray(n) { (b[hiAt + it].toInt() and 0xFF) / 255f })
     }
 
     /**
