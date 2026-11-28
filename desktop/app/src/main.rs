@@ -191,6 +191,10 @@ pub(crate) fn now_ms() -> u64 {
 
 /// Where the current (Electron) Voxa saved its session. Used once, to carry a user's sign-in over.
 fn electron_dir() -> PathBuf {
+    // A test copy (VOXA_DATA) must never see the real old app: no sign-in, no History carried over.
+    if let Some(d) = std::env::var_os("VOXA_DATA") {
+        return PathBuf::from(d).join("no-old-app");
+    }
     app_data_root().join(if cfg!(target_os = "macos") { "Voxa" } else { "voxa" })
 }
 
