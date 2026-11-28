@@ -8003,6 +8003,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "voxa-update"
+version = "0.4.7"
+dependencies = [
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "voxa-vad"
 version = "0.4.7"
 dependencies = [

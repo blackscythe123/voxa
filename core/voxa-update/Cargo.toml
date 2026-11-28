@@ -1,0 +1,26 @@
+[package]
+name = "voxa-update"
+description = "Voxa's self update: signed feed checks, version rules, the install gate and a capped, verified download. Shared by the desktop app and Android."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["net"]
+# The HTTPS client (reqwest is already in every Voxa build through voxa-chatgpt, so it adds nothing).
+net = ["dep:reqwest"]
+# voxa-update-tool: signs and verifies feeds for CI and tests. Never part of an app build.
+sign = []
+
+[dependencies]
+# Same minor as the ring that rustls already links, so it dedups and costs about 0 bytes.
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+
+[[bin]]
+name = "voxa-update-tool"
+path = "src/bin/voxa-update-tool.rs"
+required-features = ["sign", "net"]
