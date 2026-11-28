@@ -234,7 +234,26 @@ pub fn strip_visible(show: bool) {
     log(&format!("strip {}", if show { "shown" } else { "hidden" }));
 }
 
-pub fn light_caption(_view: HWND) {}
+/// The title bar follows the window's appearance (see `window_follows`); nothing to colour here.
+pub fn window_caption(_view: HWND, _dark: bool, _caption: u32, _text: u32) {}
+
+/// "Use system setting": the window follows macOS (appearance nil). Light or Dark: the window is
+/// held in Aqua or DarkAqua, so its title bar matches Voxa's palette.
+pub fn window_follows(view: HWND, system: bool, dark: bool) {
+    let w = ns_window(view);
+    if w.is_null() {
+        return;
+    }
+    unsafe {
+        let look: id = if system {
+            nil
+        } else {
+            let name = NSString::alloc(nil).init_str(if dark { "NSAppearanceNameDarkAqua" } else { "NSAppearanceNameAqua" });
+            msg_send![class!(NSAppearance), appearanceNamed: name]
+        };
+        let _: () = msg_send![w, setAppearance: look];
+    }
+}
 
 pub fn bring_to_front(view: HWND) {
     unsafe {

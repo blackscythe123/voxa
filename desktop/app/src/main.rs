@@ -16,6 +16,7 @@ mod store;
 mod audio;
 mod stand_in;
 mod common;
+mod theme;
 #[cfg(windows)]
 mod tab;
 /// The per-OS layer: win.rs on Windows, mac.rs on macOS. Same functions on both.
@@ -216,6 +217,11 @@ pub(crate) struct Voxa {
     hotkey_paused_at: Option<Instant>,
     /// Draw nothing in the strip (while a rebuilt strip paints its first frame unseen).
     strip_blank: bool,
+    /// The OS is in dark mode (for Appearance "Use system setting").
+    os_dark: bool,
+    /// Test only (VOXA_TEST_STRIP, with VOXA_DATA): a stand-alone flow the strip draws instead of
+    /// the real one, so its look can be checked without recording. See `strip_preview`.
+    strip_preview: Option<Flow>,
     /// The strip window now in use (replaced when it is rebuilt).
     strip_window: Option<gpui::AnyWindowHandle>,
     job_secs: HashMap<JobId, f32>,
@@ -515,6 +521,8 @@ impl Voxa {
         })
         .detach();
 
+        let os_dark = theme::os_is_dark(cx.window_appearance());
+        theme::apply(settings.appearance, os_dark);
         let mut me = Self {
             flow,
             history,
@@ -526,6 +534,8 @@ impl Voxa {
             trouble: HashMap::new(),
             hotkey_paused_at: None,
             strip_blank: false,
+            os_dark,
+            strip_preview: None,
             strip_window: None,
             job_secs: HashMap::new(),
             published: None,
@@ -1159,6 +1169,11 @@ impl Voxa {
                 if let Some(m) = self.mic.as_mut() {
                     m.set_preferred(self.settings.mic_device.clone());
                 }
+                // Appearance may have changed in the window: the strip follows it straight away.
+                self.os_dark = theme::os_is_dark(cx.window_appearance());
+                if theme::apply(self.settings.appearance, self.os_dark) {
+                    cx.notify();
+                }
                 self.mic_name = self.settings.mic_device.clone().unwrap_or_else(|| audio::default_device_name().unwrap_or_else(|| "No microphone".into()));
                 if self.history.prune(self.settings.keep_days, now_ms()) > 0 {
                     self.history.save();
@@ -1467,7 +1482,8 @@ fn tray_icon(dot: Option<[u8; 3]>) -> Icon {
 // ── view ──────────────────────────────────────────────────────────────────
 
 fn button(id: &'static str, label: impl Into<gpui::SharedString>, primary: bool) -> gpui::Stateful<gpui::Div> {
-    let (bg, fg) = if primary { (INK, 0xFFFFFF) } else { (0xFFFFFF, 0x1A1A1A) };
+    let t = theme::p();
+    let (bg, fg) = if primary { (t.accent, t.on_accent) } else { (t.card, t.text) };
     div()
         .id(id)
         .h(px(32.))
@@ -1476,7 +1492,7 @@ fn button(id: &'static str, label: impl Into<gpui::SharedString>, primary: bool)
         .items_center()
         .rounded(px(4.))
         .border_1()
-        .border_color(rgba(0x00000022))
+        .border_color(rgba(t.line_input_a))
         .bg(rgb(bg))
         .text_color(rgb(fg))
         .cursor_pointer()
@@ -1485,18 +1501,17 @@ fn button(id: &'static str, label: impl Into<gpui::SharedString>, primary: bool)
 
 /// Leading glyph: a different shape per kind of state, never colour alone.
 fn glyph(state: &State, frame: u64) -> AnyElement {
-    let ink: Hsla = rgb(INK).into();
+    let t = theme::p();
     let (kind, color) = match state {
-        State::Recording { paused: true, .. } => ("pause", 0x8A8A8A),
-        State::Recording { .. } => ("dot", 0xE5483D),
-        State::Transcribing { .. } | State::Delivering { .. } => ("spin", INK),
-        State::Delivered { .. } => ("check", 0x0F7B0F),
-        State::NeedsYou(Problem::NoSpeech { .. }) => ("info", 0x5F5F5F),
-        State::NeedsYou(Problem::Unreachable { .. }) | State::Blocked(_) => ("alert", 0xC42B1C),
-        _ => ("alert", 0x9D5D00),
+        State::Recording { paused: true, .. } => ("pause", t.strip_paused),
+        State::Recording { .. } => ("dot", t.strip_rec),
+        State::Transcribing { .. } | State::Delivering { .. } => ("spin", t.accent),
+        State::Delivered { .. } => ("check", t.good),
+        State::NeedsYou(Problem::NoSpeech { .. }) => ("info", t.strip_muted),
+        State::NeedsYou(Problem::Unreachable { .. }) | State::Blocked(_) => ("alert", t.error),
+        _ => ("alert", t.warn_text),
     };
     let color: Hsla = rgb(color).into();
-    let _ = ink;
     canvas(
         |_, _, _| {},
         move |b, _, window, _| {
@@ -1587,8 +1602,11 @@ pub(crate) fn ink_line(levels: Vec<f32>, tick: usize) -> AnyElement {
 
 /// `fade`: fade in and out with each 4 s pass (the strip); off for still uses in the window.
 pub(crate) fn ink_line_faded(levels: Vec<f32>, tick: usize, fade: bool) -> AnyElement {
-    let ink: Hsla = rgb(INK).into();
-    let pen: Hsla = rgb(0x2D2418).into();
+    let t = theme::p();
+    let ink: Hsla = rgb(t.accent).into();
+    let pen: Hsla = rgb(t.pen).into();
+    // The feather's spine: a light line on the dark quill, a dark one on the light quill.
+    let spine_hsla = if t.dark { gpui::hsla(0.08, 0.25, 0.45, 0.6) } else { gpui::hsla(0.08, 0.3, 0.75, 0.55) };
     canvas(
         |_, _, _| {},
         move |b, _, window, _| {
@@ -1656,7 +1674,7 @@ pub(crate) fn ink_line_faded(levels: Vec<f32>, tick: usize, fade: bool) -> AnyEl
             spine.move_to(q(12.2, 2.0));
             spine.cubic_bezier_to(q(5.5, 13.0), q(9.5, 4.5), q(7.0, 8.5));
             if let Ok(path) = spine.build() {
-                window.paint_path(path, gpui::hsla(0.08, 0.3, 0.75, 0.55 * alpha));
+                window.paint_path(path, spine_hsla.opacity(alpha));
             }
         },
     )
@@ -1676,7 +1694,10 @@ impl Render for Voxa {
 
 impl Voxa {
     fn strip_view(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.flow.state().clone();
+        let flow = self.strip_preview.as_ref().unwrap_or(&self.flow);
+        let state = flow.state().clone();
+        let th = theme::p();
+        // The brand mark keeps the 1.0 sepia with white in both modes, like the app icon.
         let mark = div()
             .size(px(24.))
             .rounded(px(6.))
@@ -1689,14 +1710,14 @@ impl Voxa {
             .child("v");
 
         let mut row: Vec<AnyElement> = vec![mark.into_any_element(), glyph(&state, self.frame)];
-        let text = strip_text(&self.flow);
+        let text = strip_text(flow);
 
         match &state {
             State::Recording { job, paused, .. } => {
                 let paused = *paused;
-                let app = self.flow.job(*job).map(|j| j.target.app.clone()).unwrap_or_default();
+                let app = flow.job(*job).map(|j| j.target.app.clone()).unwrap_or_default();
                 let secs = self.talk_time().as_secs();
-                row.push(div().text_size(px(12.)).text_color(rgb(0x555555)).child(app).into_any_element());
+                row.push(div().text_size(px(12.)).text_color(rgb(th.strip_muted)).child(app).into_any_element());
                 // This pass's levels: the last (tick + 1) ticks.
                 let tick = self.frame as usize % QUILL_CYCLE;
                 let pass: Vec<f32> = self.levels.iter().skip(self.levels.len().saturating_sub(tick + 1)).copied().collect();
@@ -1711,11 +1732,11 @@ impl Voxa {
                     if paused {
                         let mut col = div().flex().flex_col().text_size(px(12.)).child(div().child(t.title.clone()));
                         if let Some(d) = t.detail.clone() {
-                            col = col.child(div().text_color(rgb(0x555555)).child(d));
+                            col = col.child(div().text_color(rgb(th.strip_muted)).child(d));
                         }
                         row.push(col.into_any_element());
                     } else if t.title != "Listening" {
-                        row.push(div().text_size(px(12.)).text_color(rgb(0x7A5100)).child(t.title.clone()).into_any_element());
+                        row.push(div().text_size(px(12.)).text_color(rgb(th.warn_text)).child(t.title.clone()).into_any_element());
                     }
                 }
                 row.push(
@@ -1743,7 +1764,7 @@ impl Voxa {
                 if let Some(t) = text {
                     let mut col = div().flex().flex_col().child(div().child(t.title.clone()));
                     if let Some(d) = t.detail.clone() {
-                        col = col.child(div().text_size(px(12.)).text_color(rgb(0x555555)).child(d));
+                        col = col.child(div().text_size(px(12.)).text_color(rgb(th.strip_muted)).child(d));
                     }
                     row.push(col.into_any_element());
                     if matches!(state, State::Transcribing { .. }) {
@@ -1780,13 +1801,13 @@ impl Voxa {
                 .h(px(52.))
                 .px(px(10.))
                 .rounded(px(8.))
-                .bg(rgba(0xF9F7F4F2))
+                .bg(rgba(th.strip_a))
                 .border_1()
-                .border_color(rgba(0x00000020))
+                .border_color(rgba(th.line_input_a))
                 .shadow_lg()
                 .font_family("Segoe UI")
                 .text_size(px(14.))
-                .text_color(rgb(0x1A1A1A))
+                .text_color(rgb(th.text))
                 .children(row),
         )
     }
@@ -1832,7 +1853,6 @@ fn run_window(tour: bool) {
         };
         let opened = cx.open_window(options, move |window, cx| {
             if let Some(w) = os::window_ptr(window) {
-                os::light_caption(w);
                 os::bring_to_front(w);
             }
             cx.new(|cx| Home::new(backend, first, window, cx))
@@ -1865,6 +1885,32 @@ fn run_window(tour: bool) {
             Err(e) => os::log(&format!("FAIL open window: {e}")),
         }
     });
+}
+
+/// Test only (VOXA_TEST_STRIP=recording|paused|signed-out, and only with a separate VOXA_DATA
+/// folder): a flow of its own, moved into that state with its effects thrown away, so no
+/// microphone opens and nothing is sent or pasted. The strip only draws it.
+fn strip_preview() -> Option<Flow> {
+    std::env::var_os("VOXA_DATA")?;
+    let kind = std::env::var("VOXA_TEST_STRIP").ok()?;
+    let session = if kind == "signed-out" { Session::Expired } else { Session::Valid };
+    let mut f = Flow::new(Readiness { session, network: Network::Up, mic: Mic::Granted });
+    let _ = f.handle(Event::Hotkey { target: Target { app: "Notepad".into(), window: 0 } });
+    if kind == "paused" {
+        let _ = f.handle(Event::Pause);
+    }
+    Some(f)
+}
+
+/// The strip follows the system's light/dark switch while Appearance is "Use system setting".
+fn follow_os_appearance(window: &mut Window, cx: &mut Context<Voxa>) {
+    cx.observe_window_appearance(window, |v, _, cx| {
+        v.os_dark = theme::os_is_dark(cx.window_appearance());
+        if theme::apply(v.settings.appearance, v.os_dark) {
+            cx.notify();
+        }
+    })
+    .detach();
 }
 
 /// Where the strip sits: bottom centre of the main screen.
@@ -1915,6 +1961,7 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
         os::STRIP.store(old_strip, std::sync::atomic::Ordering::Relaxed);
         return None;
     };
+    let _ = new.update(cx, |_, window, cx| follow_os_appearance(window, cx));
     if let Some((x, y, w, h)) = rect {
         os::move_strip(x, y, w, h);
     }
@@ -2033,6 +2080,9 @@ fn main() {
         if let Err(e) = &opened {
             os::log(&format!("FAIL open_window: {e}"));
         }
+        if let Ok(h) = &opened {
+            let _ = h.update(cx, |_, window, cx| follow_os_appearance(window, cx));
+        }
         // Started by the user (not at Windows sign-in): show the window; the tour on first run.
         if let Ok(h) = &opened {
             if let Ok(voxa) = h.entity(cx) {
@@ -2055,6 +2105,16 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_millis(500)).await;
             os::strip_visible(false);
+            if let (Some(preview), Ok(handle)) = (strip_preview(), opened.as_ref()) {
+                os::log("test: showing the strip preview (nothing records)");
+                let _ = handle.update(cx, |v, _, cx| {
+                    v.levels = (0..QUILL_CYCLE).map(|i| stand_in::level(i as f32 * 0.4)).collect();
+                    v.frame = QUILL_CYCLE as u64 * 4 + 70;
+                    v.strip_preview = Some(preview);
+                    cx.notify();
+                });
+                os::strip_visible(true);
+            }
             // Dev only (with VOXA_FAKE): start a stand-in recording without touching the keyboard,
             // so the strip can be screen-recorded while someone is using the PC.
             if let (true, Ok(handle)) = (demo, opened.as_ref()) {

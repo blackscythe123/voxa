@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::store::{self, Settings, Status};
-use crate::INK;
+use crate::theme::p;
 use crate::input::TextInput;
 
 mod tour;
@@ -16,12 +16,6 @@ use tour::Tour;
 use crate::remote::Backend as Voxa;
 use voxa_core::{Blocker, Network, Session};
 
-const TEXT: u32 = 0x1A1A1A;
-/// Secondary text at AAA: 7.2:1 on the page (#FBFAF8).
-const MUTED: u32 = 0x555555;
-const PAGE_BG: u32 = 0xFBFAF8;
-const NAV_BG: u32 = 0xF1EEEA;
-const CARD_BORDER: u32 = 0x0000000F;
 
 // Segoe Fluent Icons code points.
 const I_HISTORY: char = '\u{E81C}';
@@ -107,6 +101,10 @@ pub struct Home {
     chart_metric: Metric,
     /// The bar clicked in the Insights chart.
     chart_pick: Option<usize>,
+    /// The OS is in dark mode (read at start, on a system change and when Appearance changes).
+    os_dark: bool,
+    /// The Appearance choice and OS mode the window was last coloured for.
+    drawn_with: Option<(store::Appearance, bool)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -159,14 +157,14 @@ impl Render for BarTip {
             .px(px(10.))
             .py(px(8.))
             .rounded(px(6.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(p().card))
             .border_1()
-            .border_color(rgba(0x00000026))
+            .border_color(rgba(p().line_strong_a))
             .shadow_md()
             .font_family("Segoe UI")
-            .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(self.value.clone()))
-            .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(self.period.clone()))
-            .when(!self.extra.is_empty(), |d| d.child(div().mt(px(2.)).text_size(px(12.)).text_color(rgb(MUTED)).child(self.extra.clone())))
+            .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(p().text)).child(self.value.clone()))
+            .child(div().text_size(px(12.)).text_color(rgb(p().muted)).child(self.period.clone()))
+            .when(!self.extra.is_empty(), |d| d.child(div().mt(px(2.)).text_size(px(12.)).text_color(rgb(p().muted)).child(self.extra.clone())))
     }
 }
 
@@ -243,7 +241,28 @@ impl Home {
             mic_picker: None,
             chart_metric: Metric::Words,
             chart_pick: None,
+            os_dark: crate::theme::os_is_dark(cx.window_appearance()),
+            drawn_with: None,
         };
+        // The system switched light/dark: follow it (if Appearance says so).
+        cx.observe_window_appearance(window, |this, window, cx| {
+            this.os_dark = crate::theme::os_is_dark(cx.window_appearance());
+            this.drawn_with = None;
+            this.sync_theme(window, cx);
+            // GPUI resets the caption's dark flag after telling us; set ours again just after.
+            if let Some(h) = crate::os::window_ptr(window) {
+                let h = h as usize;
+                cx.spawn(async move |_, cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+                    let t = crate::theme::p();
+                    crate::os::window_caption(h as _, t.dark, t.caption, t.caption_text);
+                })
+                .detach();
+            }
+            cx.notify();
+        })
+        .detach();
+        me.sync_theme(window, cx);
         me.go(page, cx);
         me
     }
@@ -262,6 +281,28 @@ impl Home {
         }
         self.page = page;
         cx.notify();
+    }
+
+    /// Picks the palette from the Appearance setting (and the OS for "System") and colours the
+    /// caption bar to match. Cheap when nothing changed; runs before every frame.
+    fn sync_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let choice = self.voxa.read(cx).settings.appearance;
+        if self.drawn_with.is_some_and(|(c, _)| c != choice) {
+            // The choice changed: the OS may have switched meanwhile without telling a window
+            // that was held light or dark (macOS).
+            self.os_dark = crate::theme::os_is_dark(cx.window_appearance());
+        }
+        let now = (choice, self.os_dark);
+        if self.drawn_with == Some(now) {
+            return;
+        }
+        self.drawn_with = Some(now);
+        crate::theme::apply(choice, self.os_dark);
+        if let Some(h) = crate::os::window_ptr(window) {
+            let t = crate::theme::p();
+            crate::os::window_follows(h, choice == store::Appearance::System, t.dark);
+            crate::os::window_caption(h, t.dark, t.caption, t.caption_text);
+        }
     }
 
     fn stop_capture(&mut self, cx: &mut Context<Self>) {
@@ -343,7 +384,7 @@ fn icon(c: char, size: f32) -> gpui::Div {
 }
 
 fn card() -> gpui::Div {
-    div().flex().items_center().gap(px(16.)).px(px(16.)).py(px(12.)).min_h(px(64.)).bg(rgb(0xFFFFFF)).border_1().border_color(rgba(CARD_BORDER)).rounded(px(4.))
+    div().flex().items_center().gap(px(16.)).px(px(16.)).py(px(12.)).min_h(px(64.)).bg(rgb(p().card)).border_1().border_color(rgba(p().card_border_a)).rounded(px(4.))
 }
 
 fn section(title: impl Into<SharedString>) -> gpui::Div {
@@ -351,7 +392,8 @@ fn section(title: impl Into<SharedString>) -> gpui::Div {
 }
 
 fn wbtn(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, accent: bool) -> gpui::Stateful<gpui::Div> {
-    let (bg, fg, hover) = if accent { (INK, 0xFFFFFF, 0x66341C) } else { (0xFFFFFF, TEXT, 0xF6F4F1) };
+    let t = p();
+    let (bg, fg, hover) = if accent { (t.accent, t.on_accent, t.accent_hover) } else { (t.card, t.text, t.hover) };
     div()
         .id(id.into())
         .flex()
@@ -361,7 +403,7 @@ fn wbtn(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, accent: 
         .px(px(12.))
         .rounded(px(4.))
         .border_1()
-        .border_color(rgba(0x0000001A))
+        .border_color(rgba(p().line_a))
         .bg(rgb(bg))
         .text_color(rgb(fg))
         .text_size(px(14.))
@@ -380,17 +422,17 @@ fn keycaps(shortcut: &str) -> gpui::Div {
             .items_center()
             .justify_center()
             .rounded(px(4.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(p().card))
             .border_1()
             .border_b_2()
-            .border_color(rgba(0x0000001F))
+            .border_color(rgba(p().line_input_a))
             .text_size(px(12.))
             .child(k.to_string())
     }))
 }
 
 fn toggle(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
-    let knob = div().size(px(12.)).rounded_full().bg(rgb(if on { 0xFFFFFF } else { 0x5F5F5F }));
+    let knob = div().size(px(12.)).rounded_full().bg(rgb(if on { p().on_accent } else { p().toggle_knob_off }));
     div()
         .id(id)
         .flex()
@@ -407,8 +449,8 @@ fn toggle(id: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
                 .px(px(4.))
                 .flex()
                 .items_center()
-                .when(on, |d| d.justify_end().bg(rgb(INK)))
-                .when(!on, |d| d.bg(rgb(0xFFFFFF)).border_1().border_color(rgba(0x0000008A)))
+                .when(on, |d| d.justify_end().bg(rgb(p().accent)))
+                .when(!on, |d| d.bg(rgb(p().card)).border_1().border_color(rgba(p().toggle_line_a)))
                 .child(knob),
         )
 }
@@ -424,7 +466,7 @@ fn app_badge_via(app: &str, via: Option<&str>, size: f32) -> gpui::Div {
                 .bottom(px(-5.))
                 .size(px(size * 0.55))
                 .rounded_full()
-                .bg(rgb(0xFFFFFF))
+                .bg(rgb(p().card))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -474,8 +516,8 @@ enum Bar {
 
 fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, close: Option<AnyElement>) -> gpui::Div {
     let (bg, dot) = match kind {
-        Bar::Error => (0xFDE7E9, 0xC42B1C),
-        Bar::Warning => (0xFFF4CE, 0x9D5D00),
+        Bar::Error => (p().error_bar, p().error_glyph),
+        Bar::Warning => (p().warn_bar, p().warn_glyph),
     };
     div()
         .flex()
@@ -487,7 +529,7 @@ fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, clos
         .py(px(12.))
         .rounded(px(4.))
         .border_1()
-        .border_color(rgba(CARD_BORDER))
+        .border_color(rgba(p().card_border_a))
         .bg(rgb(bg))
         .child(
             div()
@@ -496,7 +538,7 @@ fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, clos
                 .flex_none()
                 .rounded_full()
                 .bg(rgb(dot))
-                .text_color(rgb(0xFFFFFF))
+                .text_color(rgb(p().bar_mark))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -539,9 +581,9 @@ impl Home {
             .rounded(px(4.))
             .text_size(px(14.))
             .cursor_pointer()
-            .when(on, |d| d.bg(rgba(0x0000000E)))
-            .hover(|s| s.bg(rgba(0x00000009)))
-            .when(on, |d| d.child(div().absolute().left_0().top(px(9.)).w(px(3.)).h(px(18.)).rounded(px(2.)).bg(rgb(INK))))
+            .when(on, |d| d.bg(rgba(p().nav_sel_a)))
+            .hover(|s| s.bg(rgba(p().nav_hover_a)))
+            .when(on, |d| d.child(div().absolute().left_0().top(px(9.)).w(px(3.)).h(px(18.)).rounded(px(2.)).bg(rgb(p().accent))))
             .child(icon(glyph, 16.))
             .child(label)
             .child(self.mark(id))
@@ -569,13 +611,13 @@ impl Home {
         // One-line ready status.
         let ready = r.blocker().is_none() && r.session == Session::Valid;
         let status = if ready {
-            div().flex().items_center().gap(px(10.)).child(icon(I_CHECK, 14.).text_color(rgb(0x0F7B0F))).child("Ready. Press").child(keycaps(&shortcut)).child("in any app to dictate.")
+            div().flex().items_center().gap(px(10.)).child(icon(I_CHECK, 14.).text_color(rgb(p().good))).child("Ready. Press").child(keycaps(&shortcut)).child("in any app to dictate.")
         } else if r.session == Session::Unknown {
             div().child("Checking your ChatGPT sign-in...")
         } else {
             div().flex().items_center().gap(px(10.)).child("Shortcut:").child(keycaps(&shortcut))
         };
-        out.push(div().mt(px(14.)).text_size(px(14.)).text_color(rgb(0x3D3D3D)).child(status).into_any_element());
+        out.push(div().mt(px(14.)).text_size(px(14.)).text_color(rgb(p().body)).child(status).into_any_element());
 
         // Toolbar: search, sort, app and status filters.
         let today = chrono::Local::now().date_naive();
@@ -611,17 +653,17 @@ impl Home {
             .items_center()
             .gap(px(8.))
             .rounded(px(4.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(p().card))
             .border_1()
-            .border_color(rgba(if self.search_active { 0x7A3F22FF } else { 0x00000014 }))
+            .border_color(rgba(if self.search_active { p().accent << 8 | 0xFF } else { p().line_soft_a }))
             .border_b_2()
             .text_size(px(14.))
             .cursor_text()
-            .child(icon(I_SEARCH, 12.).text_color(rgb(MUTED)))
+            .child(icon(I_SEARCH, 12.).text_color(rgb(p().muted)))
             .child(if query.is_empty() && !self.search_active {
-                div().text_color(rgb(MUTED)).child("Search words or apps")
+                div().text_color(rgb(p().muted)).child("Search words or apps")
             } else {
-                div().text_color(rgb(TEXT)).child(format!("{query}{}", if self.search_active { "|" } else { "" }))
+                div().text_color(rgb(p().text)).child(format!("{query}{}", if self.search_active { "|" } else { "" }))
             })
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 this.search_active = true;
@@ -639,7 +681,7 @@ impl Home {
                 .items_center()
                 .gap(px(10.))
                 .child(search_box)
-                .child(div().flex_1().text_size(px(13.)).text_color(rgb(MUTED)).child(format!(
+                .child(div().flex_1().text_size(px(13.)).text_color(rgb(p().muted)).child(format!(
                     "{} dictation{}, {} words",
                     entries.len(),
                     if entries.len() == 1 { "" } else { "s" },
@@ -678,7 +720,7 @@ impl Home {
             } else {
                 format!("Nothing yet. Press {shortcut} in any app, talk, and what you say shows up here.")
             };
-            out.push(div().mt(px(40.)).text_size(px(14.)).text_color(rgb(MUTED)).child(msg).into_any_element());
+            out.push(div().mt(px(40.)).text_size(px(14.)).text_color(rgb(p().muted)).child(msg).into_any_element());
             return out;
         }
         let mut last_day = None;
@@ -791,8 +833,8 @@ impl Home {
             .text_size(px(13.))
             .cursor_pointer()
             .border_1()
-            .when(on, |d| d.bg(rgb(INK)).text_color(rgb(0xFFFFFF)).border_color(rgb(INK)))
-            .when(!on, |d| d.bg(rgb(0xFFFFFF)).border_color(rgba(0x0000001A)).hover(|s| s.bg(rgb(0xF6F4F1))))
+            .when(on, |d| d.bg(rgb(p().accent)).text_color(rgb(p().on_accent)).border_color(rgb(p().accent)))
+            .when(!on, |d| d.bg(rgb(p().card)).border_color(rgba(p().line_a)).hover(|s| s.bg(rgb(p().hover))))
             .child(label.to_string())
             .on_click(f)
             .into_any_element()
@@ -807,8 +849,8 @@ impl Home {
             .justify_center()
             .rounded(px(4.))
             .cursor_pointer()
-            .text_color(rgb(if danger { 0xB3241B } else { 0x3D3D3D }))
-            .hover(|s| s.bg(rgba(0x0000000F)))
+            .text_color(rgb(if danger { p().danger_text } else { p().body }))
+            .hover(|s| s.bg(rgba(p().hover_a)))
             .tooltip(move |_, cx| cx.new(|_| Tip(tip)).into())
             .child(icon(glyph, 13.))
             .on_click(f)
@@ -824,8 +866,8 @@ impl Home {
             .justify_center()
             .rounded(px(4.))
             .cursor_pointer()
-            .hover(|s| s.bg(rgba(0x0000000F)))
-            .text_color(rgb(MUTED))
+            .hover(|s| s.bg(rgba(p().hover_a)))
+            .text_color(rgb(p().muted))
             .child(icon(I_CLOSE, 10.))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 this.dismissed.push(key);
@@ -881,8 +923,9 @@ impl Home {
                     wbtn(SharedString::from(format!("del-yes-{id}")), "Delete", true)
                         .h(px(28.))
                         .text_size(px(13.))
-                        .bg(rgb(0xC42B1C))
-                        .hover(|s| s.bg(rgb(0xA32416)))
+                        .bg(rgb(p().danger))
+                        .text_color(rgb(p().on_danger))
+                        .hover(|s| s.bg(rgb(p().danger_hover)))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.confirm_entry = None;
                             if this.playing == Some(id) {
@@ -900,8 +943,8 @@ impl Home {
             }
         }
         let note_color = match &e.status {
-            Status::Failed(_) => 0xC42B1C,
-            _ => 0x9D5D00,
+            Status::Failed(_) => p().error,
+            _ => p().warn_text,
         };
         div()
             .flex()
@@ -910,9 +953,9 @@ impl Home {
             .px(px(14.))
             .py(px(12.))
             .mb(px(3.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(p().card))
             .border_1()
-            .border_color(rgba(CARD_BORDER))
+            .border_color(rgba(p().card_border_a))
             .rounded(px(4.))
             .child(app_badge_via(&e.app, e.via.as_deref(), 28.).mt(px(2.)))
             .child(
@@ -921,8 +964,8 @@ impl Home {
                     .flex_none()
                     .text_size(px(12.))
                     .line_height(px(18.))
-                    .text_color(rgb(MUTED))
-                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(time_label(e)))
+                    .text_color(rgb(p().muted))
+                    .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(p().text)).child(time_label(e)))
                     .child(e.app.clone())
                     .children({
                         // One line: "in Brave, from Gmail".
@@ -946,8 +989,8 @@ impl Home {
                     .line_height(px(21.))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.go(Page::Detail(id), cx)))
-                    .child(div().text_color(rgb(if muted { MUTED } else { TEXT })).hover(|s| s.text_color(rgb(INK))).child(body))
-                    .children(note.filter(|(_, why)| !why.is_empty()).map(|(_, why)| div().mt(px(4.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(MUTED)).child(why))),
+                    .child(div().text_color(rgb(if muted { p().muted } else { p().text })).hover(|s| s.text_color(rgb(p().accent))).child(body))
+                    .children(note.filter(|(_, why)| !why.is_empty()).map(|(_, why)| div().mt(px(4.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(p().muted)).child(why))),
             )
             .child(actions)
             .into_any_element()
@@ -956,7 +999,7 @@ impl Home {
     fn detail(&mut self, id: u64, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(e) = self.voxa.read(cx).history.get(id).cloned() else {
             return vec![
-                div().text_size(px(14.)).text_color(rgb(MUTED)).child("This dictation was deleted.").into_any_element(),
+                div().text_size(px(14.)).text_color(rgb(p().muted)).child("This dictation was deleted.").into_any_element(),
                 wbtn("back-gone", "Back to History", false).mt(px(12.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::History, cx))).into_any_element(),
             ];
         };
@@ -970,7 +1013,7 @@ impl Home {
                 .items_center()
                 .gap(px(8.))
                 .text_size(px(13.))
-                .text_color(rgb(INK))
+                .text_color(rgb(p().accent))
                 .cursor_pointer()
                 .child(icon(I_BACK, 12.))
                 .child("History")
@@ -1000,7 +1043,7 @@ impl Home {
                 .child(
                     div()
                         .child(div().text_size(px(24.)).line_height(px(30.)).font_weight(FontWeight::SEMIBOLD).child(e.app.clone()))
-                        .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(
+                        .child(div().text_size(px(13.)).text_color(rgb(p().muted)).child(
                             [when.format("%A %-d %B %Y, %H:%M").to_string(), secs_label(e.secs), format!("{} words", e.words()), status, place]
                                 .into_iter()
                                 .filter(|s| !s.is_empty())
@@ -1018,7 +1061,7 @@ impl Home {
                 .flex()
                 .flex_col()
                 .gap(px(10.))
-                .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Correct the text. Voxa keeps the recording either way."))
+                .child(div().text_size(px(12.)).text_color(rgb(p().muted)).child("Correct the text. Voxa keeps the recording either way."))
                 .child(self.edit_box.clone())
                 .child(
                     div()
@@ -1080,11 +1123,11 @@ impl Home {
                     .px(px(16.))
                     .py(px(12.))
                     .rounded(px(4.))
-                    .bg(rgb(0xF3E7DE))
+                    .bg(rgb(p().accent_wash))
                     .flex()
                     .items_center()
                     .gap(px(12.))
-                    .child(icon(I_WORDS, 14.).text_color(rgb(INK)))
+                    .child(icon(I_WORDS, 14.).text_color(rgb(p().accent)))
                     .child(div().flex_1().text_size(px(14.)).child(format!("Always change \"{from}\" to \"{to}\" in future dictations?")))
                     .child(wbtn("sug-no", "No thanks", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.suggestion = None;
@@ -1112,8 +1155,8 @@ impl Home {
             out.push(
                 card()
                     .child(self.icon_btn(format!("dplay-{id}"), if playing { I_STOP } else { I_PLAY }, if playing { "Stop" } else { "Play" }, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_play(id, cx))))
-                    .child(div().flex_1().h(px(4.)).rounded(px(2.)).bg(rgb(0xF0EBE5)).child(div().h_full().w(gpui::relative(progress)).rounded(px(2.)).bg(rgb(INK))))
-                    .child(div().w(px(60.)).flex().justify_end().text_size(px(13.)).text_color(rgb(MUTED)).child(secs_label(e.secs)))
+                    .child(div().flex_1().h(px(4.)).rounded(px(2.)).bg(rgb(p().track)).child(div().h_full().w(gpui::relative(progress)).rounded(px(2.)).bg(rgb(p().accent))))
+                    .child(div().w(px(60.)).flex().justify_end().text_size(px(13.)).text_color(rgb(p().muted)).child(secs_label(e.secs)))
                     .child(self.icon_btn(format!("dfolder-{id}"), I_FOLDER, "Show the file", false, cx.listener(move |_, _: &ClickEvent, _, _| crate::os::reveal(&file))))
                     .into_any_element(),
             );
@@ -1131,7 +1174,7 @@ impl Home {
         }
         if !live {
             actions = actions.child(if self.confirm_entry == Some(id) {
-                wbtn("ddel-yes", "Delete it and its recording", true).bg(rgb(0xC42B1C)).hover(|s| s.bg(rgb(0xA32416))).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                wbtn("ddel-yes", "Delete it and its recording", true).bg(rgb(p().danger)).text_color(rgb(p().on_danger)).hover(|s| s.bg(rgb(p().danger_hover))).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.confirm_entry = None;
                     if this.playing == Some(id) {
                         this.playing = None;
@@ -1173,20 +1216,20 @@ impl Home {
             div()
                 .mt(px(4.))
                 .text_size(px(14.))
-                .text_color(rgb(MUTED))
+                .text_color(rgb(p().muted))
                 .child("Fix what ChatGPT keeps getting wrong, and expand things you say often. Applied on this PC after every dictation, before it is pasted.")
                 .into_any_element(),
         ];
 
         // Fixes and snippets share a shape: a pair list with an add row.
         let pair_list = |this: &mut Self, title: &str, sub: &str, key: &'static str, items: Vec<store::Pair>, from: Entity<TextInput>, to: Entity<TextInput>, cx: &mut Context<Self>| -> Vec<AnyElement> {
-            let mut v: Vec<AnyElement> = vec![section(title.to_string()).into_any_element(), div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(MUTED)).child(sub.to_string()).into_any_element()];
+            let mut v: Vec<AnyElement> = vec![section(title.to_string()).into_any_element(), div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(p().muted)).child(sub.to_string()).into_any_element()];
             let (f, t) = (from.clone(), to.clone());
             v.push(
                 card()
                     .mb(px(3.))
                     .child(div().flex_1().child(from))
-                    .child(icon(I_ARROW, 12.).text_color(rgb(MUTED)))
+                    .child(icon(I_ARROW, 12.).text_color(rgb(p().muted)))
                     .child(div().flex_1().child(to))
                     .child(wbtn(SharedString::from(format!("{key}-add")), "Add", true).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         let (a, b) = (f.read(cx).text(), t.read(cx).text());
@@ -1208,8 +1251,8 @@ impl Home {
                         .min_h(px(48.))
                         .py(px(8.))
                         .mb(px(3.))
-                        .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).text_color(rgb(MUTED)).child(p.from.clone()))
-                        .child(icon(I_ARROW, 12.).text_color(rgb(MUTED)))
+                        .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).text_color(rgb(crate::theme::p().muted)).child(p.from.clone()))
+                        .child(icon(I_ARROW, 12.).text_color(rgb(crate::theme::p().muted)))
                         .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).child(p.to.clone()))
                         .child(this.icon_btn(format!("{key}-del-{i}"), I_DELETE, "Remove", false, cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.voxa.update(cx, |v, cx| {
@@ -1239,14 +1282,14 @@ impl Home {
                         .flex_1()
                         .min_w(px(0.))
                         .child(div().text_size(px(14.)).child("Say \"new line\", \"new paragraph\" or \"bullet point\""))
-                        .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Turns them into line breaks and bullets. In chats and terminals a line break may send the message.")),
+                        .child(div().text_size(px(12.)).text_color(rgb(p().muted)).child("Turns them into line breaks and bullets. In chats and terminals a line break may send the message.")),
                 )
                 .child(toggle("spoken-fmt", w.spoken_formatting).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_words(|w| w.spoken_formatting = !w.spoken_formatting, cx)))))
                 .into_any_element(),
         );
 
         out.push(section("Per-app rules").into_any_element());
-        out.push(div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(MUTED)).child("How text should look in a particular app or site.").into_any_element());
+        out.push(div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(p().muted)).child("How text should look in a particular app or site.").into_any_element());
         for (i, r) in w.rules.iter().enumerate() {
             let (np, lc) = (r.no_final_period, r.lowercase);
             out.push(
@@ -1266,7 +1309,7 @@ impl Home {
             );
         }
         if !apps.is_empty() {
-            let mut chips = div().mt(px(6.)).flex().flex_wrap().items_center().gap(px(6.)).child(div().text_size(px(13.)).text_color(rgb(MUTED)).mr(px(4.)).child("Add a rule for"));
+            let mut chips = div().mt(px(6.)).flex().flex_wrap().items_center().gap(px(6.)).child(div().text_size(px(13.)).text_color(rgb(p().muted)).mr(px(4.)).child("Add a rule for"));
             for (i, a) in apps.into_iter().enumerate() {
                 let app = a.clone();
                 chips = chips.child(self.chip(SharedString::from(format!("rule-add-{i}")), &a, false, cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -1338,12 +1381,12 @@ impl Home {
             .min_w(px(0.))
             .px(px(18.))
             .py(px(16.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(p().card))
             .border_1()
-            .border_color(rgba(CARD_BORDER))
+            .border_color(rgba(p().card_border_a))
             .rounded(px(4.))
             .child(div().text_size(px(30.)).line_height(px(38.)).font_weight(FontWeight::SEMIBOLD).child(n))
-            .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(l.to_string()))
+            .child(div().text_size(px(13.)).text_color(rgb(p().muted)).child(l.to_string()))
     }
 
     fn insights(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -1359,7 +1402,7 @@ impl Home {
                 .flex()
                 .items_end()
                 .justify_between()
-                .child(div().child(div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Insights")).child(div().mt(px(2.)).text_size(px(14.)).text_color(rgb(MUTED)).child(label)))
+                .child(div().child(div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Insights")).child(div().mt(px(2.)).text_size(px(14.)).text_color(rgb(p().muted)).child(label)))
                 .into_any_element(),
         ];
         // Range picker.
@@ -1402,9 +1445,9 @@ impl Home {
                     .flex()
                     .items_center()
                     .gap(px(14.))
-                    .bg(rgb(0xFFFFFF))
+                    .bg(rgb(p().card))
                     .border_1()
-                    .border_color(rgba(CARD_BORDER))
+                    .border_color(rgba(p().card_border_a))
                     .rounded(px(4.))
                     .text_size(px(13.))
                     .child("From")
@@ -1464,10 +1507,10 @@ impl Home {
         // Y axis labels and hairline gridlines at the same heights.
         let y_of = |v: f32| plot_h - plot_h * (v / top);
         let axis = div().relative().w(px(52.)).flex_none().h(px(plot_h)).children(ticks.iter().map(|t| {
-            div().absolute().right(px(8.)).top(px(y_of(*t) - 8.)).text_size(px(11.)).text_color(rgb(MUTED)).child(metric.tick(*t))
+            div().absolute().right(px(8.)).top(px(y_of(*t) - 8.)).text_size(px(11.)).text_color(rgb(p().muted)).child(metric.tick(*t))
         }));
         let grid = div().absolute().top_0().left_0().size_full().children(ticks.iter().map(|t| {
-            div().absolute().left_0().right_0().top(px(y_of(*t))).h(px(1.)).bg(rgb(if *t == 0.0 { 0xCFC6BD } else { 0xEFEAE4 }))
+            div().absolute().left_0().right_0().top(px(y_of(*t))).h(px(1.)).bg(rgb(if *t == 0.0 { p().grid_zero } else { p().grid }))
         }));
         let bars = div().absolute().top_0().left_0().size_full().flex().children(st.buckets.iter().enumerate().map(|(i, b)| {
             let v = metric.of(b);
@@ -1490,13 +1533,13 @@ impl Home {
                 .justify_end()
                 .cursor_pointer()
                 .rounded(px(4.))
-                .hover(|s| s.bg(rgba(0x7A3F220D)))
+                .hover(|s| s.bg(rgba(p().accent_hover_a)))
                 .tooltip(move |_, cx| cx.new(|_| BarTip { value: tip.0.clone(), period: tip.1.clone(), extra: tip.2.clone() }).into())
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.chart_pick = if this.chart_pick == Some(i) { None } else { Some(i) };
                     cx.notify();
                 }))
-                .child(div().w(gpui::relative(0.62)).max_w(px(24.)).h(px(h)).rounded_t(px(4.)).bg(rgb(if emphasised { INK } else { 0xDCCBBE })))
+                .child(div().w(gpui::relative(0.62)).max_w(px(24.)).h(px(h)).rounded_t(px(4.)).bg(rgb(if emphasised { p().accent } else { p().bar })))
         }));
         let labels = div().flex().pl(px(52.)).mt(px(8.)).children(st.buckets.iter().enumerate().map(|(i, b)| {
             let strong = pick == Some(i) || (pick.is_none() && b.current);
@@ -1506,7 +1549,7 @@ impl Home {
                 .flex()
                 .justify_center()
                 .text_size(px(11.))
-                .text_color(rgb(if strong { TEXT } else { MUTED }))
+                .text_color(rgb(if strong { p().text } else { p().muted }))
                 .when(strong, |x| x.font_weight(FontWeight::SEMIBOLD))
                 .child(if i % every == 0 || strong { b.label.clone() } else { String::new() })
         }));
@@ -1515,9 +1558,9 @@ impl Home {
                 .mt(px(3.))
                 .px(px(20.))
                 .py(px(18.))
-                .bg(rgb(0xFFFFFF))
+                .bg(rgb(p().card))
                 .border_1()
-                .border_color(rgba(CARD_BORDER))
+                .border_color(rgba(p().card_border_a))
                 .rounded(px(4.))
                 .child(
                     div()
@@ -1530,7 +1573,7 @@ impl Home {
                 )
                 .child(div().flex().child(axis).child(div().relative().flex_1().min_w(px(0.)).h(px(plot_h)).child(grid).child(bars)))
                 .child(labels)
-                .child(div().mt(px(10.)).text_size(px(12.)).text_color(rgb(MUTED)).child("Point at a bar for its numbers; click it for the details."))
+                .child(div().mt(px(10.)).text_size(px(12.)).text_color(rgb(p().muted)).child("Point at a bar for its numbers; click it for the details."))
                 .into_any_element(),
         );
 
@@ -1543,11 +1586,11 @@ impl Home {
                     .mt(px(3.))
                     .px(px(20.))
                     .py(px(16.))
-                    .bg(rgb(0xFFFFFF))
+                    .bg(rgb(p().card))
                     .border_1()
                     .border_l_4()
-                    .border_color(rgba(CARD_BORDER))
-                    .border_color(rgb(INK))
+                    .border_color(rgba(p().card_border_a))
+                    .border_color(rgb(p().accent))
                     .rounded(px(4.))
                     .child(
                         div()
@@ -1555,7 +1598,7 @@ impl Home {
                             .items_center()
                             .justify_between()
                             .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(b.period.clone()))
-                            .child(div().id("pick-clear").text_size(px(13.)).text_color(rgb(MUTED)).cursor_pointer().hover(|s| s.text_color(rgb(INK))).child("Clear").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            .child(div().id("pick-clear").text_size(px(13.)).text_color(rgb(p().muted)).cursor_pointer().hover(|s| s.text_color(rgb(p().accent))).child("Clear").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.chart_pick = None;
                                 cx.notify();
                             }))),
@@ -1572,9 +1615,9 @@ impl Home {
                                 (if sub.wpm > 0 { format!("{}", sub.wpm) } else { "-".into() }, "words a minute"),
                             ]
                             .into_iter()
-                            .map(|(n, l)| div().child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child(n)).child(div().text_size(px(12.)).text_color(rgb(MUTED)).child(l)))),
+                            .map(|(n, l)| div().child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child(n)).child(div().text_size(px(12.)).text_color(rgb(p().muted)).child(l)))),
                     )
-                    .when(!apps.is_empty(), |d| d.child(div().mt(px(10.)).text_size(px(13.)).text_color(rgb(0x3D3D3D)).child(format!("Where: {apps}"))))
+                    .when(!apps.is_empty(), |d| d.child(div().mt(px(10.)).text_size(px(13.)).text_color(rgb(p().body)).child(format!("Where: {apps}"))))
                     .into_any_element(),
             );
         }
@@ -1588,7 +1631,7 @@ impl Home {
             facts.push(format!("Average dictation: {} words. Longest: {} words.", st.avg_words, fmt_thousands(st.longest_words)));
         }
         if !facts.is_empty() {
-            out.push(div().mt(px(10.)).flex().flex_col().gap(px(4.)).text_size(px(13.)).text_color(rgb(0x3D3D3D)).children(facts).into_any_element());
+            out.push(div().mt(px(10.)).flex().flex_col().gap(px(4.)).text_size(px(13.)).text_color(rgb(p().body)).children(facts).into_any_element());
         }
 
         if !st.per_app.is_empty() {
@@ -1607,16 +1650,16 @@ impl Home {
                                 .flex_1()
                                 .min_w(px(0.))
                                 .child(div().text_size(px(14.)).child(app.clone()))
-                                .child(div().mt(px(5.)).h(px(4.)).rounded(px(2.)).bg(rgb(0xF0EBE5)).child(div().h_full().w(gpui::relative(share)).rounded(px(2.)).bg(rgb(INK)))),
+                                .child(div().mt(px(5.)).h(px(4.)).rounded(px(2.)).bg(rgb(p().track)).child(div().h_full().w(gpui::relative(share)).rounded(px(2.)).bg(rgb(p().accent)))),
                         )
-                        .child(div().w(px(110.)).flex().justify_end().text_size(px(14.)).text_color(rgb(MUTED)).child(format!("{} words", fmt_thousands(*words))))
+                        .child(div().w(px(110.)).flex().justify_end().text_size(px(14.)).text_color(rgb(p().muted)).child(format!("{} words", fmt_thousands(*words))))
                         .into_any_element(),
                 );
             }
         } else {
-            out.push(div().mt(px(30.)).text_size(px(14.)).text_color(rgb(MUTED)).child("No dictations in this range.").into_any_element());
+            out.push(div().mt(px(30.)).text_size(px(14.)).text_color(rgb(p().muted)).child("No dictations in this range.").into_any_element());
         }
-        out.push(div().mt(px(16.)).mb(px(24.)).text_size(px(12.)).text_color(rgb(MUTED)).child(format!("\"Faster than typing\" compares your speaking time with typing the same words at {} words a minute.", store::TYPING_WPM as u32)).into_any_element());
+        out.push(div().mt(px(16.)).mb(px(24.)).text_size(px(12.)).text_color(rgb(p().muted)).child(format!("\"Faster than typing\" compares your speaking time with typing the same words at {} words a minute.", store::TYPING_WPM as u32)).into_any_element());
         out
     }
 
@@ -1649,9 +1692,9 @@ impl Home {
                 .px(px(24.))
                 .py(px(22.))
                 .rounded(px(8.))
-                .bg(rgb(0xFFFFFF))
+                .bg(rgb(p().card))
                 .border_1()
-                .border_color(rgba(CARD_BORDER))
+                .border_color(rgba(p().card_border_a))
                 .flex()
                 .items_center()
                 .gap(px(24.))
@@ -1659,12 +1702,12 @@ impl Home {
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .child(div().flex().items_center().gap(px(8.)).text_size(px(13.)).text_color(rgb(if ready { 0x0E5C0E } else { 0x9D5D00 })).child(icon(if ready { I_CHECK } else { '!' }, 12.)).child(if ready { "Ready to dictate" } else if r.session == Session::Unknown { "Checking your sign-in" } else { "Needs you first" }))
+                        .child(div().flex().items_center().gap(px(8.)).text_size(px(13.)).text_color(rgb(if ready { p().good_text } else { p().warn_text })).child(icon(if ready { I_CHECK } else { '!' }, 12.)).child(if ready { "Ready to dictate" } else if r.session == Session::Unknown { "Checking your sign-in" } else { "Needs you first" }))
                         .child(div().mt(px(8.)).text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::SEMIBOLD).child("Click where you want to type, press your shortcut, and talk."))
-                        .child(div().mt(px(6.)).text_size(px(13.)).text_color(rgb(MUTED)).child("Press it again to finish. Esc cancels. Works in every app.")),
+                        .child(div().mt(px(6.)).text_size(px(13.)).text_color(rgb(p().muted)).child("Press it again to finish. Esc cancels. Works in every app.")),
                 )
                 .child(div().relative().child(self.mark("keys")).flex().gap(px(6.)).children(shortcut.split('+').map(|k| {
-                    div().h(px(48.)).min_w(px(48.)).px(px(14.)).flex().items_center().justify_center().rounded(px(6.)).bg(rgb(0xFBFAF8)).border_1().border_b_4().border_color(rgba(0x0000002A)).text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(k.to_string())
+                    div().h(px(48.)).min_w(px(48.)).px(px(14.)).flex().items_center().justify_center().rounded(px(6.)).bg(rgb(p().page)).border_1().border_b_4().border_color(rgba(p().key_line_a)).text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(k.to_string())
                 })))
                 .into_any_element(),
         );
@@ -1680,10 +1723,10 @@ impl Home {
                     .mt(px(3.))
                     .rounded(px(6.))
                     .border_1()
-                    .border_color(rgba(if got.is_some() { 0x0F7B0F66 } else { 0x0000001F }))
-                    .bg(rgb(0xFFFFFF))
-                    .child(div().px(px(16.)).py(px(8.)).border_b_1().border_color(rgba(CARD_BORDER)).text_size(px(12.)).text_color(rgb(MUTED)).child("Practice"))
-                    .child(div().px(px(16.)).py(px(14.)).min_h(px(70.)).text_size(px(16.)).line_height(px(24.)).text_color(rgb(if got.is_some() { TEXT } else { MUTED })).child(got.unwrap_or_else(|| "Your words will appear here.".into())))
+                    .border_color(rgba(if got.is_some() { p().good_line_a } else { p().line_input_a }))
+                    .bg(rgb(p().card))
+                    .child(div().px(px(16.)).py(px(8.)).border_b_1().border_color(rgba(p().card_border_a)).text_size(px(12.)).text_color(rgb(p().muted)).child("Practice"))
+                    .child(div().px(px(16.)).py(px(14.)).min_h(px(70.)).text_size(px(16.)).line_height(px(24.)).text_color(rgb(if got.is_some() { p().text } else { p().muted })).child(got.unwrap_or_else(|| "Your words will appear here.".into())))
                     .into_any_element(),
             );
         }
@@ -1709,11 +1752,11 @@ impl Home {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().id("see-all").text_size(px(13.)).font_weight(FontWeight::NORMAL).text_color(rgb(INK)).cursor_pointer().child("See all in History").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::History, cx))))
+                .child(div().id("see-all").text_size(px(13.)).font_weight(FontWeight::NORMAL).text_color(rgb(p().accent)).cursor_pointer().child("See all in History").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::History, cx))))
                 .into_any_element(),
         );
         if recent.is_empty() {
-            out.push(div().text_size(px(14.)).text_color(rgb(MUTED)).child(format!("Nothing yet. Press {shortcut} anywhere and your words show up here.")).into_any_element());
+            out.push(div().text_size(px(14.)).text_color(rgb(p().muted)).child(format!("Nothing yet. Press {shortcut} anywhere and your words show up here.")).into_any_element());
         }
         for e in &recent {
             out.push(self.history_row(e, cx));
@@ -1727,12 +1770,12 @@ impl Home {
                 .min_w(px(0.))
                 .px(px(16.))
                 .py(px(14.))
-                .bg(rgb(0xFFFFFF))
+                .bg(rgb(p().card))
                 .border_1()
-                .border_color(rgba(CARD_BORDER))
+                .border_color(rgba(p().card_border_a))
                 .rounded(px(4.))
-                .child(div().flex().items_center().gap(px(8.)).text_color(rgb(INK)).child(icon(glyph, 14.)).child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(TEXT)).child(title.to_string())))
-                .child(div().mt(px(6.)).text_size(px(13.)).line_height(px(19.)).text_color(rgb(MUTED)).child(body.to_string()))
+                .child(div().flex().items_center().gap(px(8.)).text_color(rgb(p().accent)).child(icon(glyph, 14.)).child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(p().text)).child(title.to_string())))
+                .child(div().mt(px(6.)).text_size(px(13.)).line_height(px(19.)).text_color(rgb(p().muted)).child(body.to_string()))
         };
         out.push(
             div()
@@ -1756,7 +1799,7 @@ impl Home {
         let count = v.history.entries.len();
         let mb = v.history.audio_bytes() as f64 / 1e6;
         let row_text = |h: &str, sub: String| {
-            div().flex_1().min_w(px(0.)).child(div().text_size(px(14.)).line_height(px(20.)).child(h.to_string())).child(div().mt(px(1.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(MUTED)).child(sub))
+            div().flex_1().min_w(px(0.)).child(div().text_size(px(14.)).line_height(px(20.)).child(h.to_string())).child(div().mt(px(1.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(p().muted)).child(sub))
         };
         let mut out: Vec<AnyElement> = vec![div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Settings").into_any_element()];
 
@@ -1792,27 +1835,27 @@ impl Home {
                                 .flex_1()
                                 .min_w(px(0.))
                                 .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(if a.name.is_empty() { a.email.clone() } else { a.name.clone() }))
-                                .child(div().text_size(px(13.)).text_color(rgb(MUTED)).child(a.email.clone()))
+                                .child(div().text_size(px(13.)).text_color(rgb(p().muted)).child(a.email.clone()))
                                 .child(
                                     div()
                                         .mt(px(6.))
                                         .flex()
                                         .gap(px(6.))
-                                        .child(div().px(px(8.)).py(px(2.)).rounded(px(10.)).bg(rgb(0xE8F5EF)).text_color(rgb(0x0E6B4F)).text_size(px(12.)).child(a.plan_label()))
-                                        .child(div().px(px(8.)).py(px(2.)).rounded(px(10.)).bg(rgb(0xDFF6DD)).text_color(rgb(0x0E5C0E)).text_size(px(12.)).child("Signed in")),
+                                        .child(div().px(px(8.)).py(px(2.)).rounded(px(10.)).bg(rgb(p().plan_bg)).text_color(rgb(p().plan_text)).text_size(px(12.)).child(a.plan_label()))
+                                        .child(div().px(px(8.)).py(px(2.)).rounded(px(10.)).bg(rgb(p().signed_bg)).text_color(rgb(p().signed_text)).text_size(px(12.)).child("Signed in")),
                                 ),
                         )
                         .child(btn)
                         .into_any_element(),
                 );
-                out.push(div().mb(px(3.)).px(px(16.)).py(px(10.)).text_size(px(12.)).text_color(rgb(MUTED)).child(acct).into_any_element());
+                out.push(div().mb(px(3.)).px(px(16.)).py(px(10.)).text_size(px(12.)).text_color(rgb(p().muted)).child(acct).into_any_element());
             }
             None => out.push(card().mb(px(3.)).child(icon(I_ACCOUNT, 18.).w(px(20.))).child(row_text("ChatGPT", acct)).child(btn).into_any_element()),
         }
 
         out.push(section("Dictation").into_any_element());
         let shortcut_right = if self.capturing {
-            div().flex().items_center().gap(px(10.)).text_size(px(14.)).text_color(rgb(INK)).child("Press the new shortcut...").child(
+            div().flex().items_center().gap(px(10.)).text_size(px(14.)).text_color(rgb(p().accent)).child("Press the new shortcut...").child(
                 wbtn("cancel-capture", "Cancel", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.stop_capture(cx);
                     cx.notify();
@@ -1874,7 +1917,7 @@ impl Home {
                 .mb(px(3.))
                 .child(icon(I_MIC, 18.).w(px(20.)))
                 .child(row_text("Microphone", mic_sub))
-                .child(div().flex_none().max_w(px(240.)).text_size(px(13.)).text_color(rgb(MUTED)).child(match &chosen {
+                .child(div().flex_none().max_w(px(240.)).text_size(px(13.)).text_color(rgb(p().muted)).child(match &chosen {
                     None => format!("System default ({mic})"),
                     Some(n) => n.clone(),
                 }))
@@ -1901,9 +1944,9 @@ impl Home {
                 .px(px(16.))
                 .py(px(12.))
                 .rounded(px(4.))
-                .bg(rgb(0xFFFFFF))
+                .bg(rgb(p().card))
                 .border_1()
-                .border_color(rgba(CARD_BORDER))
+                .border_color(rgba(p().card_border_a))
                 .child(
                     div()
                         .flex()
@@ -1912,10 +1955,10 @@ impl Home {
                         .pb(px(10.))
                         .mb(px(6.))
                         .border_b_1()
-                        .border_color(rgba(CARD_BORDER))
-                        .child(div().text_size(px(12.)).text_color(rgb(MUTED)).child("Say something:"))
+                        .border_color(rgba(p().card_border_a))
+                        .child(div().text_size(px(12.)).text_color(rgb(p().muted)).child("Say something:"))
                         .child(crate::ink_line_faded(levels, tick, false))
-                        .child(div().flex_1().min_w(px(0.)).text_size(px(12.)).text_color(rgb(MUTED)).child(testing_name)),
+                        .child(div().flex_1().min_w(px(0.)).text_size(px(12.)).text_color(rgb(p().muted)).child(testing_name)),
                 );
             let options: Vec<Option<String>> = std::iter::once(None).chain(devices.into_iter().map(Some)).collect();
             for (i, opt) in options.into_iter().enumerate() {
@@ -1934,8 +1977,8 @@ impl Home {
                         .py(px(8.))
                         .rounded(px(4.))
                         .cursor_pointer()
-                        .hover(|s| s.bg(rgb(0xF6F4F1)))
-                        .child(div().w(px(16.)).text_color(rgb(INK)).child(if selected { icon(I_CHECK, 12.) } else { div() }))
+                        .hover(|s| s.bg(rgb(p().hover)))
+                        .child(div().w(px(16.)).text_color(rgb(p().accent)).child(if selected { icon(I_CHECK, 12.) } else { div() }))
                         .child(div().text_size(px(14.)).when(selected, |d| d.font_weight(FontWeight::SEMIBOLD)).child(label))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             let pick = opt.clone();
@@ -1976,15 +2019,15 @@ impl Home {
                         .justify_between()
                         .gap(px(10.))
                         .rounded(px(4.))
-                        .bg(rgb(0xFFFFFF))
+                        .bg(rgb(p().card))
                         .border_1()
                         .border_b_2()
-                        .border_color(rgba(0x00000020))
+                        .border_color(rgba(p().line_input_a))
                         .text_size(px(14.))
                         .cursor_pointer()
-                        .hover(|s| s.bg(rgb(0xF6F4F1)))
+                        .hover(|s| s.bg(rgb(p().hover)))
                         .child(Settings::keep_label(s.keep_days))
-                        .child(icon(I_DOWN, 10.).text_color(rgb(MUTED)))
+                        .child(icon(I_DOWN, 10.).text_color(rgb(p().muted)))
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.voxa.update(cx, |v, cx| {
                                 let c = Settings::KEEP_CHOICES;
@@ -2027,7 +2070,7 @@ impl Home {
                     this.confirm_delete = false;
                     cx.notify();
                 })))
-                .child(wbtn("delete-confirm", format!("Delete {count} dictation{}", if count == 1 { "" } else { "s" }), true).bg(rgb(0xC42B1C)).hover(|s| s.bg(rgb(0xA32416))).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                .child(wbtn("delete-confirm", format!("Delete {count} dictation{}", if count == 1 { "" } else { "s" }), true).bg(rgb(p().danger)).text_color(rgb(p().on_danger)).hover(|s| s.bg(rgb(p().danger_hover))).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.confirm_delete = false;
                     this.voxa.update(cx, |v, cx| v.delete_history(cx));
                 })))
@@ -2047,6 +2090,24 @@ impl Home {
         );
 
         out.push(section("System").into_any_element());
+        let mut looks = div().flex().gap(px(6.));
+        for (i, a) in store::Appearance::ALL.into_iter().enumerate() {
+            let label = match a {
+                store::Appearance::System => "System",
+                other => other.label(),
+            };
+            looks = looks.child(self.chip(SharedString::from(format!("appearance-{i}")), label, s.appearance == a, cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.voxa.update(cx, |v, cx| v.update_settings(|s| s.appearance = a, cx));
+            })));
+        }
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon('\u{E790}', 18.).w(px(20.)))
+                .child(row_text("Appearance", format!("{}. Voxa's window and the recording strip both follow it.", s.appearance.label())))
+                .child(looks)
+                .into_any_element(),
+        );
         out.push(
             card()
                 .mb(px(3.))
@@ -2093,6 +2154,7 @@ fn fmt_thousands(n: usize) -> String {
 
 impl Render for Home {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_theme(window, cx);
         self.tour_check(cx);
         let root = div()
             .relative()
@@ -2100,8 +2162,8 @@ impl Render for Home {
             .on_key_down(cx.listener(Self::on_key))
             .size_full()
             .font_family("Segoe UI")
-            .text_color(rgb(TEXT))
-            .bg(rgb(NAV_BG));
+            .text_color(rgb(p().text))
+            .bg(rgb(p().nav));
         let content = match self.page {
             Page::Home => self.home(cx),
             Page::History => self.history(cx),
@@ -2135,11 +2197,11 @@ impl Render for Home {
                 .min_w(px(0.))
                 .h_full()
                 .overflow_y_scroll()
-                .bg(rgb(PAGE_BG))
+                .bg(rgb(p().page))
                 .rounded_tl(px(8.))
                 .border_t_1()
                 .border_l_1()
-                .border_color(rgba(CARD_BORDER))
+                .border_color(rgba(p().card_border_a))
                 .px(px(40.))
                 .pt(px(28.))
                 .pb(px(30.))
@@ -2176,6 +2238,6 @@ struct Tip(&'static str);
 
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().px(px(8.)).py(px(4.)).rounded(px(4.)).bg(rgb(0xFFFFFF)).border_1().border_color(rgba(0x00000026)).shadow_md().font_family("Segoe UI").text_size(px(12.)).text_color(rgb(TEXT)).child(self.0)
+        div().px(px(8.)).py(px(4.)).rounded(px(4.)).bg(rgb(p().card)).border_1().border_color(rgba(p().line_strong_a)).shadow_md().font_family("Segoe UI").text_size(px(12.)).text_color(rgb(p().text)).child(self.0)
     }
 }

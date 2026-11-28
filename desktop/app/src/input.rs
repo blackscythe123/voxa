@@ -8,7 +8,7 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler,
     FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, PaintQuad, Pixels, Point, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle,
-    Window, actions, div, fill, hsla, point, prelude::*, px, relative, rgb, rgba, size,
+    Window, actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use unicode_segmentation::*;
 
@@ -445,7 +445,7 @@ impl Element for TextElement {
         let style = window.text_style();
 
         let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), hsla(0., 0., 0., 0.2))
+            (input.placeholder.clone(), rgb(crate::theme::p().muted).into())
         } else {
             (content, style.color)
         };
@@ -499,7 +499,7 @@ impl Element for TextElement {
                         point(bounds.left() + cursor_pos, bounds.top()),
                         size(px(2.), bounds.bottom() - bounds.top()),
                     ),
-                    gpui::blue(),
+                    rgb(crate::theme::p().accent),
                 )),
             )
         } else {
@@ -515,7 +515,7 @@ impl Element for TextElement {
                             bounds.bottom(),
                         ),
                     ),
-                    rgba(0x3311ff30),
+                    rgba(crate::theme::p().selection_a),
                 )),
                 None,
             )
@@ -593,9 +593,9 @@ impl Render for TextInput {
             .w_full()
             .px(px(10.))
             .rounded(px(4.))
-            .bg(rgb(0xFFFFFF))
+            .bg(rgb(crate::theme::p().card))
             .border_1()
-            .border_color(if focused { rgba(0x7A3F22FF) } else { rgba(0x00000020) })
+            .border_color(if focused { rgba(crate::theme::p().accent << 8 | 0xFF) } else { rgba(crate::theme::p().line_input_a) })
             .text_size(px(14.))
             .line_height(px(20.))
             .overflow_hidden()

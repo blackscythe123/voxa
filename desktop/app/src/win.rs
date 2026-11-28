@@ -422,18 +422,24 @@ pub fn strip_visible(show: bool) {
     log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
 }
 
-/// Light caption bar in the nav colour, so the window reads as one surface (the default follows
-/// the system's dark mode and looks like a different app).
-pub fn light_caption(hwnd: HWND) {
+/// The caption bar in the nav colour (0xRRGGBB), so the window reads as one surface; `dark` also
+/// turns on the dark caption buttons (DWMWA_USE_IMMERSIVE_DARK_MODE). Without this the caption
+/// follows the system's mode and can disagree with Voxa's Appearance setting.
+pub fn window_caption(hwnd: HWND, dark: bool, caption: u32, text: u32) {
+    // COLORREF is 0x00BBGGRR.
+    let bgr = |c: u32| (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF);
     unsafe {
-        let off: i32 = 0;
-        DwmSetWindowAttribute(hwnd, 20, &off as *const i32 as *const c_void, 4);
-        let caption: u32 = 0x00EAEEF1; // #F1EEEA as COLORREF (BGR)
+        let on: i32 = dark as i32;
+        DwmSetWindowAttribute(hwnd, 20, &on as *const i32 as *const c_void, 4);
+        let caption = bgr(caption);
         DwmSetWindowAttribute(hwnd, 35, &caption as *const u32 as *const c_void, 4);
-        let text: u32 = 0x001A1A1A;
+        let text = bgr(text);
         DwmSetWindowAttribute(hwnd, 36, &text as *const u32 as *const c_void, 4);
     }
 }
+
+/// macOS only (the window's own appearance); Windows draws the caption with `window_caption`.
+pub fn window_follows(_hwnd: HWND, _system: bool, _dark: bool) {}
 
 // ── single instance ──────────────────────────────────────────────────────
 
