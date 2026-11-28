@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use gpui::Context;
 use serde::{Deserialize, Serialize};
 use voxa_update::policy::{self, Blocked, Debounce, Inputs, Moment};
-use voxa_update::{Channel, Offer, Origin, UpdateError, Version, fetch::Client, keys, stage};
+use voxa_update::{Channel, CheckState, Offer, Origin, UpdateError, Version, fetch::Client, keys, stage};
 
 use crate::link::UpdateView;
 use crate::{Voxa, os};
@@ -84,7 +84,8 @@ pub struct UpdateState {
     pub last_check_ms: u64,
     /// up_to_date, ready, available (macOS), manual_only, offline, failed, refused, disk_full.
     pub last_result: String,
-    pub highest_serial: u64,
+    /// The check schedule, cache validators and the highest verified serial (voxa_update::schedule).
+    pub check: CheckState,
     pub offer: Option<Offer>,
     pub paused: bool,
     pub staged_path: Option<PathBuf>,
@@ -333,7 +334,6 @@ pub fn status_line(st: &UpdateState, auto: bool, checking: bool, downloading: Op
 pub struct Updater {
     pub state: UpdateState,
     dir: PathBuf,
-    next_check: Instant,
     checking: bool,
     manual: bool,
     downloading: Option<String>,
@@ -342,18 +342,24 @@ pub struct Updater {
     last_block: Option<Blocked>,
     last_hotkey: Option<Instant>,
     started: Instant,
+    started_ms: u64,
     pub mac_access_bar: bool,
 }
 
-fn jitter() -> Duration {
-    let seed = u64::from(std::process::id()).wrapping_mul(7919).wrapping_add(crate::now_ms());
-    Duration::from_millis(seed % (60 * 60 * 1000))
+/// An automatic check goes to the network only when this install's daily slot (or a backoff
+/// after a failure) is due, and never in the first 2 minutes after the tray starts. A restart
+/// therefore never adds a check.
+pub fn should_check(check: &CheckState, now_ms: u64, started_ms: u64) -> bool {
+    now_ms >= started_ms + FIRST_CHECK.as_millis() as u64 && check.due(now_ms)
 }
 
 impl Updater {
     pub fn new() -> Self {
         let dir = updates_dir();
         let mut state = UpdateState::load(&dir);
+        if state.check.slot_ms.is_none() {
+            state.check.init_random(crate::now_ms());
+        }
         match after_restart(&mut state, &dir, env!("CARGO_PKG_VERSION")) {
             AfterRestart::Updated { from, to } => ulog(&dir, &format!("updated from {from} to {to}")),
             AfterRestart::Failed { to, attempts } => ulog(&dir, &format!("the update to {to} didn't finish (attempt {attempts}); still on {}", env!("CARGO_PKG_VERSION"))),
@@ -379,7 +385,6 @@ impl Updater {
         Self {
             state,
             dir,
-            next_check: now + FIRST_CHECK,
             checking: false,
             manual: false,
             downloading: None,
@@ -388,6 +393,7 @@ impl Updater {
             last_block: None,
             last_hotkey: None,
             started: now,
+            started_ms: crate::now_ms(),
             mac_access_bar,
         }
     }
@@ -422,10 +428,19 @@ impl Updater {
     }
 }
 
-fn check_feed(highest_serial: u64) -> Result<voxa_update::Manifest, UpdateError> {
+/// One check through the cache (If-None-Match / If-Modified-Since); `check` comes back with the
+/// schedule, backoff and serial updated.
+fn check_feed(mut check: CheckState, manual: bool) -> (Result<voxa_update::Manifest, UpdateError>, CheckState) {
     let (origin, keys) = origin_and_keys();
-    let client = Client::new(origin, env!("CARGO_PKG_VERSION"), PLATFORM)?;
-    client.check(&keys, Channel::Desktop, highest_serial)
+    let result = match Client::new(origin, env!("CARGO_PKG_VERSION"), PLATFORM) {
+        Ok(c) => c.check_with_state(&keys, Channel::Desktop, &mut check, crate::now_ms(), manual),
+        Err(e) => {
+            // Never a tight loop: a client that can't be built backs off like any failure.
+            check.record(crate::now_ms(), false, manual);
+            Err(e)
+        }
+    };
+    (result, check)
 }
 
 fn download_offer(offer: &Offer, dir: &Path) -> Result<PathBuf, UpdateError> {
@@ -446,8 +461,7 @@ fn result_code(e: &UpdateError) -> &'static str {
 impl Voxa {
     /// From the tray's tick loop, about once a second.
     pub(crate) fn update_tick(&mut self, cx: &mut Context<Self>) {
-        let now = Instant::now();
-        if !self.updater.checking && self.updater.downloading.is_none() && now >= self.updater.next_check {
+        if !self.updater.checking && self.updater.downloading.is_none() && should_check(&self.updater.state.check, crate::now_ms(), self.updater.started_ms) {
             self.check_for_updates(false, cx);
         }
         #[cfg(target_os = "macos")]
@@ -545,32 +559,34 @@ impl Voxa {
         if self.updater.checking {
             return;
         }
+        // Pressed again within a minute: show the last answer again, no network.
+        if manual && !self.updater.state.check.manual_allowed(crate::now_ms()) {
+            self.updater.manual = true;
+            self.publish();
+            return;
+        }
         self.updater.checking = true;
         self.updater.manual = manual;
         self.publish();
-        let highest = self.updater.state.highest_serial;
+        let check = self.updater.state.check.clone();
         cx.spawn(async move |this, cx| {
             let started = Instant::now();
-            let result = cx.background_executor().spawn(async move { check_feed(highest) }).await;
-            let _ = this.update(cx, |v, cx| v.check_done(result, started.elapsed(), cx));
+            let (result, check) = cx.background_executor().spawn(async move { check_feed(check, manual) }).await;
+            let _ = this.update(cx, |v, cx| v.check_done(result, check, started.elapsed(), cx));
         })
         .detach();
     }
 
-    fn check_done(&mut self, result: Result<voxa_update::Manifest, UpdateError>, took: Duration, cx: &mut Context<Self>) {
+    fn check_done(&mut self, result: Result<voxa_update::Manifest, UpdateError>, check: CheckState, took: Duration, cx: &mut Context<Self>) {
         let u = &mut self.updater;
         u.checking = false;
-        u.next_check = Instant::now() + Duration::from_millis(DAY_MS) + jitter();
-        u.state.last_check_ms = crate::now_ms();
+        u.state.check = check;
         let dir = u.dir.clone();
         let mut download = None;
         match result {
             Ok(m) => {
-                if m.serial < u.state.highest_serial {
-                    u.state.last_result = "refused".into();
-                    ulog(&dir, &format!("refused: replay (serial {} below {})", m.serial, u.state.highest_serial));
-                } else {
-                    u.state.highest_serial = policy::next_serial(u.state.highest_serial, m.serial);
+                u.state.last_check_ms = crate::now_ms();
+                {
                     u.state.paused = m.paused;
                     let offer = policy::offer(&m, current(), ASSET);
                     ulog(&dir, &format!("checked: feed {} serial {} paused {} in {} ms: {}", m.version, m.serial, m.paused, took.as_millis(), offer.as_ref().map_or("nothing newer", |_| "offer")));
@@ -837,7 +853,6 @@ mod tests {
         Updater {
             state: UpdateState::default(),
             dir: std::env::temp_dir(),
-            next_check: now,
             checking: false,
             manual: false,
             downloading: None,
@@ -846,6 +861,7 @@ mod tests {
             last_block: None,
             last_hotkey: None,
             started: now,
+            started_ms: 0,
             mac_access_bar: false,
         }
     }
@@ -879,6 +895,40 @@ mod tests {
     }
 
     #[test]
+    fn a_start_does_not_check_when_not_due() {
+        let day = voxa_update::schedule::DAY_MS;
+        let mut c = CheckState::default();
+        c.init(10 * day, 3 * 60 * 60 * 1000); // this install's slot: 03:00 UTC
+        let started = 10 * day + 4 * 60 * 60 * 1000; // the tray started at 04:00, after today's slot
+        // Checked fine yesterday at the slot: the next one is tomorrow's slot, a restart adds none.
+        c.record(10 * day + 3 * 60 * 60 * 1000, true, false);
+        assert!(!should_check(&c, started + 10 * 60 * 1000, started), "not due: no network at start");
+        // Due, but never in the first 2 minutes after the tray starts.
+        let due = c.next_due_ms;
+        assert!(!should_check(&c, due, due - 1000));
+        assert!(should_check(&c, due + 120_000, due - 1000));
+        // A failed automatic check backs off an hour, never a tight loop.
+        c.record(due + 120_000, false, false);
+        assert!(!should_check(&c, due + 120_000 + 59 * 60 * 1000, 0));
+        assert!(should_check(&c, due + 120_000 + 60 * 60 * 1000, 0));
+    }
+
+    #[test]
+    fn the_manual_button_within_a_minute_does_no_network() {
+        let mut c = CheckState::default();
+        c.init(1_000_000, 0);
+        assert!(c.manual_allowed(2_000_000));
+        c.record(2_000_000, true, true);
+        assert!(!c.manual_allowed(2_000_000 + 30_000), "pressed again: the last answer, no request");
+        assert!(c.manual_allowed(2_000_000 + 60_000));
+        // check_for_updates honours it before anything goes to the network.
+        let src = include_str!("update.rs");
+        let f = &src[src.find("pub(crate) fn check_for_updates").unwrap()..];
+        let guard = f.find("manual_allowed(").unwrap();
+        assert!(guard < f.find("check_feed(").unwrap());
+    }
+
+    #[test]
     fn update_log_is_appended_and_rotated_never_deleted() {
         let dir = tmp("log");
         ulog(&dir, "first");
@@ -894,7 +944,7 @@ mod tests {
     #[test]
     fn update_state_survives_the_file_trip() {
         let dir = tmp("state");
-        let st = UpdateState { last_check_ms: 5, highest_serial: 9, offer: Some(offer_for(b"x", "1.0.1")), target: "1.0.1".into(), attempts: 1, ..Default::default() };
+        let st = UpdateState { last_check_ms: 5, check: CheckState { highest_serial: 9, ..Default::default() }, offer: Some(offer_for(b"x", "1.0.1")), target: "1.0.1".into(), attempts: 1, ..Default::default() };
         st.save(&dir);
         assert_eq!(UpdateState::load(&dir), st);
         assert_eq!(UpdateState::load(&dir.join("missing")), UpdateState::default());
