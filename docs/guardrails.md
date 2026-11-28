@@ -144,7 +144,8 @@ a real ChatGPT sign-in.
 **Check** (`isolation-env`, `isolation-test-hook`, `isolation.py`). Under `desktop/`: a function
 reading `HOME`, `APPDATA`, `LOCALAPPDATA` (and similar), a `dirs::*_dir()`, or calling
 `app_data_root()` must also check `VOXA_DATA` (the old app's folder is reached only through
-`app_data_root()`). Every `VOXA_TEST_*` read sits in a function that checks `VOXA_DATA`.
+`app_data_root()`). Every `VOXA_TEST_*` read sits in a function that checks `VOXA_DATA`, directly or through
+`test_hooks()`, which also needs a debug build or `VOXA_TEST=1`.
 `ALLOWED` lists `app_data_root` itself (only called from the guarded `data_dir` and
 `electron_dir`) and macOS `launch_agent` (the OS login item, not app data).
 
@@ -184,11 +185,6 @@ These are on the allow-list with their reasons and should be fixed, then deleted
 
 - Desktop app badges: white letters on several brand colours (WhatsApp, Gmail, YouTube, ...) are
   under 4.5:1; the Settings avatar fallback (white on `#10A37F`) is 3.2:1.
-- Android `LightVx.muted` `#575757` is 6.5:1 on the grey surface (AAA needs 7:1; about `#525252` fixes it).
-- `core/voxa-core/src/text.rs` `find_phrase` slices with indices from a lowercased copy when the
-  byte lengths match (guarded, but not strictly safe for mixed scripts).
-- `voxa-chatgpt` `ChatGpt::new()`: `.expect("http client")` and a `SystemTime` `.unwrap()`.
 - `account.json` (desktop `save_account`) and `notify.json` (desktop `Notifier::save`) are written
   with a bare `fs::write`.
-- `voxa_store::write_atomic`, desktop `store.rs` `write_atomic` and the nudge engine use a fixed
-  `.tmp` name.
+- Desktop `store.rs` `write_atomic` uses a fixed `.tmp` name.
