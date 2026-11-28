@@ -125,7 +125,8 @@ fn save_account(a: &voxa_chatgpt::Account) {
         return;
     }
     if let Ok(b) = serde_json::to_vec_pretty(a) {
-        let _ = std::fs::write(&path, b);
+        // Whole or not at all: a crash mid-write never leaves Settings without an account.
+        let _ = store::write_atomic(&path, &b);
     }
     if a.image.starts_with("https://") && (before.image != a.image || !dir.join("avatar.png").exists()) {
         let url = a.image.clone();

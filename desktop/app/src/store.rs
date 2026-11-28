@@ -68,13 +68,28 @@ impl Entry {
     }
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Write a whole file or nothing: to a temporary file of its own (process id and a counter, so
+/// two writers never share one), flushed to disk, then renamed over the real one. A crash, power
+/// cut or second process never leaves half a file.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(tmp, path)
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!("{name}.{}-{}.tmp", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Read a JSON file: Ok(None) when it doesn't exist, Err when it exists but can't be read or
@@ -654,6 +669,30 @@ mod load_tests {
         h.save();
         let on_disk: Vec<Entry> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(on_disk.iter().map(|e| e.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    /// Two writers never share a temporary file, and none is left behind.
+    #[test]
+    fn atomic_writes_use_their_own_temp_and_leave_none() {
+        let d = tmp("atomic");
+        let path = d.join("history.json");
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let p = path.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..20 {
+                        write_atomic(&p, format!("[{i}]").repeat(200).as_bytes()).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.chars().all(|c| "[]01234567".contains(c)) && body.len() % 600 == 0, "a torn or mixed file");
+        let left: Vec<_> = std::fs::read_dir(&d).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect();
+        assert!(left.is_empty(), "temporary files left: {left:?}");
     }
 
     /// Hunt 4: a settings file that can't be read is never overwritten with defaults.
