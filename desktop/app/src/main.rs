@@ -151,7 +151,10 @@ pub(crate) struct Voxa {
     holding: Option<Instant>,
     menu_open: MenuId,
     menu_quit: MenuId,
+    /// When the mic last went live in this take (start or resume).
     rec_started: Instant,
+    /// Talking time before the current stretch (paused time is left out).
+    talked: Duration,
     frame: u64,
     tray: Option<TrayIcon>,
     hotkeys: GlobalHotKeyManager,
@@ -264,7 +267,8 @@ impl Voxa {
             let alive = this
                 .update(cx, |v, cx| {
                     // A take whose mic delivers nothing 0.7 s in: restart the stream once (no UI).
-                    if v.mic_on && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
+                    // Never while paused; after a resume it judges the time since the resume.
+                    if v.mic_on && !v.paused() && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
                         if let Some(m) = v.mic.as_mut() {
                             if m.stalled() {
                                 v.mic_revived = true;
@@ -339,19 +343,7 @@ impl Voxa {
                             // The strip's graphics may be gone (sleep, charger, display change):
                             // build a fresh one now, hidden and without taking focus; it replaces
                             // the old one as this dictation's strip.
-                            if os::take_woke() {
-                                let me = cx.entity();
-                                let old = v.strip_window;
-                                cx.spawn(async move |_, cx| {
-                                    match rebuild_strip(&me, old, cx).await {
-                                        Some(h) => {
-                                            let _ = me.update(cx, |v, _| v.strip_window = Some(h));
-                                        }
-                                        None => os::log("FAIL rebuilding the strip"),
-                                    }
-                                })
-                                .detach();
-                            }
+                            v.rebuild_strip_if_woke(cx);
                             // The mic was missing or refused (at startup, or one failed start):
                             // look again now, so plugging it in or allowing it works without a restart.
                             if !matches!(v.flow.readiness().mic, Mic::Granted) && !fake_mode() {
@@ -391,7 +383,7 @@ impl Voxa {
                             v.handle(Event::Cancel, cx);
                         }
                     }
-                    if matches!(v.flow.state(), State::Recording { .. }) {
+                    if matches!(v.flow.state(), State::Recording { paused: false, .. }) {
                         let raw = if fake_mode() { stand_in::level(v.frame as f32 * 0.35) } else { audio::level() };
                         // Rises at once with the voice, settles over ~0.3 s, so the ink doesn't flicker.
                         let last = v.levels.back().copied().unwrap_or(0.0);
@@ -417,7 +409,8 @@ impl Voxa {
                     if !fake_mode() && v.last_check.elapsed() > every && quiet {
                         v.check_session(cx);
                     }
-                    if matches!(v.flow.state(), State::Recording { .. } | State::Transcribing { .. } | State::Delivering { .. }) {
+                    // Paused: the ink line and the timer hold still.
+                    if matches!(v.flow.state(), State::Recording { paused: false, .. } | State::Transcribing { .. } | State::Delivering { .. }) {
                         v.frame += 1;
                         cx.notify();
                     }
@@ -451,6 +444,7 @@ impl Voxa {
             menu_open: open_item.id().clone(),
             menu_quit: quit_item.id().clone(),
             rec_started: Instant::now(),
+            talked: Duration::ZERO,
             frame: 0,
             tray,
             hotkeys,
@@ -547,6 +541,7 @@ impl Voxa {
                 }
                 self.job_entries.insert(job, now_ms());
                 self.rec_started = Instant::now();
+                self.talked = Duration::ZERO;
                 self.frame = 0;
                 self.levels.clear();
                 if fake_mode() {
@@ -588,7 +583,7 @@ impl Voxa {
                 }
             }
             Effect::StopCapture { job } => {
-                self.job_secs.insert(job, self.rec_started.elapsed().as_secs_f32());
+                self.job_secs.insert(job, self.talk_time().as_secs_f32());
                 if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
                     self.mic_on = false;
                     let peak = m.finish();
@@ -597,6 +592,29 @@ impl Voxa {
                     if let Some(t) = m.trouble() {
                         os::log(&format!("  recording trouble: {t:?}"));
                         self.trouble.insert(job, t);
+                    }
+                }
+            }
+            Effect::PauseCapture { .. } => {
+                self.talked += self.rec_started.elapsed();
+                if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                    m.pause();
+                    os::log(&format!("  mic paused after {:.1} s of talking", self.talked.as_secs_f32()));
+                }
+            }
+            Effect::ResumeCapture { .. } => {
+                self.rec_started = Instant::now();
+                self.mic_revived = false;
+                // The PC may have slept during the pause: the strip's graphics can be gone.
+                self.rebuild_strip_if_woke(cx);
+                if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                    match m.resume() {
+                        Ok(()) => os::log("  mic resumed"),
+                        Err(e) => {
+                            // Like an interruption: finish and send what was recorded.
+                            os::log(&format!("  mic resume failed: {e:?}; sending what was recorded"));
+                            self.handle(Event::Stop, cx);
+                        }
                     }
                 }
             }
@@ -843,6 +861,7 @@ impl Voxa {
         let (session, online, mic) = link::Live::from_readiness(self.flow.readiness());
         let live_ids = self.job_entries.values().copied().filter(|id| self.is_live(*id)).collect();
         let state = match self.flow.state() {
+            State::Recording { paused: true, .. } => "paused",
             State::Recording { .. } => "recording",
             State::Transcribing { .. } | State::Delivering { .. } => "writing",
             State::Delivered { .. } => "pasted",
@@ -1082,9 +1101,37 @@ impl Voxa {
         cx.notify();
     }
 
-    /// Esc is bound only while recording, so Voxa never steals Esc from other apps.
+    fn paused(&self) -> bool {
+        matches!(self.flow.state(), State::Recording { paused: true, .. })
+    }
+
+    /// Talking time in this take: paused time is left out.
+    fn talk_time(&self) -> Duration {
+        if self.paused() { self.talked } else { self.talked + self.rec_started.elapsed() }
+    }
+
+    /// After sleep, a charger or a display change the strip's graphics may be gone: build a fresh
+    /// one now, hidden and without taking focus; it replaces the old one as this dictation's strip.
+    fn rebuild_strip_if_woke(&mut self, cx: &mut Context<Self>) {
+        if os::take_woke() {
+            let me = cx.entity();
+            let old = self.strip_window;
+            cx.spawn(async move |_, cx| {
+                match rebuild_strip(&me, old, cx).await {
+                    Some(h) => {
+                        let _ = me.update(cx, |v, _| v.strip_window = Some(h));
+                    }
+                    None => os::log("FAIL rebuilding the strip"),
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// Esc is bound only while recording, so Voxa never steals Esc from other apps. Not while
+    /// paused: the user is working elsewhere then, and Esc would throw the whole take away.
     fn sync_esc(&mut self) {
-        let want = matches!(self.flow.state(), State::Recording { .. });
+        let want = matches!(self.flow.state(), State::Recording { paused: false, .. });
         if want != self.esc_bound {
             let r = if want { self.hotkeys.register(self.esc_key) } else { self.hotkeys.unregister(self.esc_key) };
             self.esc_bound = want && r.is_ok();
@@ -1094,6 +1141,7 @@ impl Voxa {
 
     fn sync_tray(&self) {
         let dot = match self.flow.state() {
+            State::Recording { paused: true, .. } => Some([0x8A, 0x8A, 0x8A]),
             State::Recording { .. } => Some([0xE5, 0x48, 0x3D]),
             State::Blocked(_) | State::NeedsYou(_) => Some([0xC9, 0x8A, 0x16]),
             _ if self.flow.readiness().blocker().is_some() => Some([0xC9, 0x8A, 0x16]),
@@ -1148,6 +1196,7 @@ fn button(id: &'static str, label: impl Into<gpui::SharedString>, primary: bool)
 fn glyph(state: &State, frame: u64) -> AnyElement {
     let ink: Hsla = rgb(INK).into();
     let (kind, color) = match state {
+        State::Recording { paused: true, .. } => ("pause", 0x8A8A8A),
         State::Recording { .. } => ("dot", 0xE5483D),
         State::Transcribing { .. } | State::Delivering { .. } => ("spin", INK),
         State::Delivered { .. } => ("check", 0x0F7B0F),
@@ -1170,6 +1219,18 @@ fn glyph(state: &State, frame: u64) -> AnyElement {
                         if i == 0 { p.move_to(q) } else { p.line_to(q) }
                     }
                     if let Ok(p) = p.build() { window.paint_path(p, color) }
+                }
+                "pause" => {
+                    for dx in [-3.5f32, 1.5] {
+                        let mut p = PathBuilder::fill();
+                        let (x, y) = (c.x + px(dx), c.y - px(5.));
+                        p.move_to(point(x, y));
+                        p.line_to(point(x + px(2.5), y));
+                        p.line_to(point(x + px(2.5), y + px(10.)));
+                        p.line_to(point(x, y + px(10.)));
+                        p.close();
+                        if let Ok(p) = p.build() { window.paint_path(p, color) }
+                    }
                 }
                 "spin" => {
                     let mut p = PathBuilder::stroke(px(2.));
@@ -1340,23 +1401,45 @@ impl Voxa {
         let text = strip_text(&self.flow);
 
         match &state {
-            State::Recording { job, .. } => {
+            State::Recording { job, paused, .. } => {
+                let paused = *paused;
                 let app = self.flow.job(*job).map(|j| j.target.app.clone()).unwrap_or_default();
-                let secs = self.rec_started.elapsed().as_secs();
+                let secs = self.talk_time().as_secs();
                 row.push(div().text_size(px(12.)).text_color(rgb(0x5F5F5F)).child(app).into_any_element());
                 // This pass's levels: the last (tick + 1) ticks.
                 let tick = self.frame as usize % QUILL_CYCLE;
                 let pass: Vec<f32> = self.levels.iter().skip(self.levels.len().saturating_sub(tick + 1)).copied().collect();
-                row.push(ink_line(pass, tick));
+                if paused {
+                    // Frozen where it stopped, and faded: nothing is being heard.
+                    row.push(div().opacity(0.35).child(ink_line_faded(pass, tick, false)).into_any_element());
+                } else {
+                    row.push(ink_line(pass, tick));
+                }
                 row.push(div().w(px(36.)).child(format!("{}:{:02}", secs / 60, secs % 60)).into_any_element());
                 if let Some(t) = &text {
-                    if t.title != "Listening" {
+                    if paused {
+                        let mut col = div().flex().flex_col().text_size(px(12.)).child(div().child(t.title.clone()));
+                        if let Some(d) = t.detail.clone() {
+                            col = col.child(div().text_color(rgb(0x5F5F5F)).child(d));
+                        }
+                        row.push(col.into_any_element());
+                    } else if t.title != "Listening" {
                         row.push(div().text_size(px(12.)).text_color(rgb(0x7A5100)).child(t.title.clone()).into_any_element());
                     }
                 }
                 row.push(
                     button("cancel", "Cancel", false)
                         .on_click(cx.listener(|v, _: &ClickEvent, _, cx| v.handle(Event::Cancel, cx)))
+                        .into_any_element(),
+                );
+                let (id, label, ev) = if paused {
+                    ("resume", voxa_core::copy::RESUME_LABEL, Event::Resume)
+                } else {
+                    ("pause", voxa_core::copy::PAUSE_LABEL, Event::Pause)
+                };
+                row.push(
+                    button(id, label, false)
+                        .on_click(cx.listener(move |v, _: &ClickEvent, _, cx| v.handle(ev.clone(), cx)))
                         .into_any_element(),
                 );
                 row.push(
@@ -1667,6 +1750,48 @@ fn main() {
                 cx.background_executor().timer(Duration::from_secs(secs)).await;
                 let _ = handle.update(cx, |v, _, cx| {
                     os::log(&format!("test: state before cancel {:?}", v.flow.state()));
+                    v.handle(Event::Cancel, cx);
+                });
+            }
+            // Test only (VOXA_TEST_PAUSE=<seconds>, and only with a separate VOXA_DATA folder): a real
+            // take that talks, pauses, resumes and talks for <seconds> each, then is CANCELLED, so
+            // nothing is ever sent or pasted. Logs Esc, the talking time and the file's length.
+            let pause_secs = std::env::var("VOXA_TEST_PAUSE").ok().and_then(|s| s.parse::<u64>().ok()).filter(|_| std::env::var_os("VOXA_DATA").is_some());
+            if let (Some(secs), Ok(handle)) = (pause_secs, opened.as_ref()) {
+                let report = |v: &Voxa, at: &str| {
+                    let written = v.mic.as_ref().filter(|_| v.mic_on).map(|m| m.written_secs()).unwrap_or(0.0);
+                    os::log(&format!(
+                        "test: {at}: state {:?}, Esc bound {}, talking {:.2} s, file {:.2} s",
+                        v.flow.state(),
+                        v.esc_bound,
+                        v.talk_time().as_secs_f32(),
+                        written
+                    ));
+                };
+                cx.background_executor().timer(Duration::from_millis(1500)).await;
+                let fg = os::foreground();
+                let target = Target { app: os::app_name(fg), window: fg as u64 };
+                os::log("test: starting a take to pause and resume (will be cancelled)");
+                let _ = handle.update(cx, |v, _, cx| {
+                    let r = Readiness { session: Session::Valid, ..v.flow.readiness() };
+                    v.handle(Event::Readiness(r), cx);
+                    v.handle(Event::Hotkey { target }, cx);
+                });
+                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                let _ = handle.update(cx, |v, _, cx| {
+                    report(v, "before pause");
+                    v.handle(Event::Pause, cx);
+                    report(v, "paused");
+                });
+                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                let _ = handle.update(cx, |v, _, cx| {
+                    report(v, "end of pause");
+                    v.handle(Event::Resume, cx);
+                    report(v, "resumed");
+                });
+                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                let _ = handle.update(cx, |v, _, cx| {
+                    report(v, "before cancel");
                     v.handle(Event::Cancel, cx);
                 });
             }

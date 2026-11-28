@@ -43,6 +43,8 @@ struct Shared {
     dead: AtomicBool,
     /// Writing the WAV failed during the take (disk full).
     disk_error: AtomicBool,
+    /// The take is paused: whatever still arrives is dropped before it touches anything.
+    paused: AtomicBool,
 }
 
 impl Shared {
@@ -54,6 +56,7 @@ impl Shared {
             callbacks: AtomicU32::new(0),
             dead: AtomicBool::new(false),
             disk_error: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
         }
     }
 }
@@ -74,7 +77,20 @@ pub struct Mic {
     preferred: Option<String>,
     shared: Arc<Shared>,
     path: Option<PathBuf>,
+    /// Resumes in this take (silence is only inserted for the first [`MAX_GAPS`]).
+    resumes: u32,
+    /// When the mic last went live in this take (start or resume); None while paused.
+    live_since: Option<std::time::Instant>,
+    /// How long the last live stretch lasted, once it ended (pause or finish).
+    last_stretch: std::time::Duration,
+    /// The take was paused at least once.
+    was_paused: bool,
 }
+
+/// Silence written at each resume so words either side of a pause don't run together (~300 ms).
+const GAP_SAMPLES: usize = (RATE as usize * 3) / 10;
+/// After this many pauses in one take, resume without adding more silence.
+const MAX_GAPS: u32 = 50;
 
 fn default_device() -> Result<(cpal::Device, String), MicError> {
     let d = cpal::default_host().default_input_device().ok_or(MicError::NoDevice)?;
@@ -128,6 +144,10 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
         }
     };
     let mut on_samples = move |mono: &mut dyn Iterator<Item = f32>| {
+        // Paused: drop late buffers first, so they never reach the level, the peak or the file.
+        if shared.paused.load(Ordering::Relaxed) {
+            return;
+        }
         shared.callbacks.fetch_add(1, Ordering::Relaxed);
         if shared.reset.swap(false, Ordering::Relaxed) {
             pos = 0.0;
@@ -202,7 +222,7 @@ impl Mic {
         let (device, device_name) = pick_device(preferred.as_deref())?;
         let shared = Arc::new(Shared::new());
         let stream = build(&device, shared.clone())?;
-        Ok(Self { stream, device_name, preferred, shared, path: None })
+        Ok(Self { stream, device_name, preferred, shared, path: None, resumes: 0, live_since: None, last_stretch: std::time::Duration::ZERO, was_paused: false })
     }
 
     /// Change the preferred microphone; takes effect at the next recording.
@@ -236,9 +256,62 @@ impl Mic {
         self.shared.callbacks.store(0, Ordering::Relaxed);
         self.shared.disk_error.store(false, Ordering::Relaxed);
         self.shared.reset.store(true, Ordering::Relaxed);
+        self.shared.paused.store(false, Ordering::Relaxed);
+        self.resumes = 0;
+        self.live_since = Some(std::time::Instant::now());
+        self.was_paused = false;
         self.path = Some(path.to_path_buf());
         if let Err(e) = self.stream.play() {
             // Stale stream (device reset): rebuild once and retry.
+            self.stream = build(&device, self.shared.clone())?;
+            self.stream.play().map_err(|_| MicError::Blocked(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Turn the mic off mid-take and keep the file open. The OS mic indicator goes out, as when
+    /// idle; nothing is recorded until [`Mic::resume`].
+    pub fn pause(&mut self) {
+        self.shared.paused.store(true, Ordering::Relaxed);
+        if let Err(e) = self.stream.pause() {
+            crate::os::log(&format!("  mic pause: {e}"));
+        }
+        LEVEL.store(0f32.to_bits(), Ordering::Relaxed);
+        if let Some(t) = self.live_since.take() {
+            self.last_stretch = t.elapsed();
+        }
+        self.was_paused = true;
+    }
+
+    /// Turn the mic back on and keep writing to the same file, after a short silence. Rebuilds
+    /// first if the microphone changed or the stream died during the pause, as [`Mic::start`] does.
+    pub fn resume(&mut self) -> Result<(), MicError> {
+        let (device, name) = pick_device(self.preferred.as_deref())?;
+        let dead = self.shared.dead.swap(false, Ordering::Relaxed);
+        if name != self.device_name || dead {
+            crate::os::log(&format!("  resume: rebuilding the mic stream ({})", if dead { "it had stopped" } else { "the microphone changed" }));
+            self.stream = build(&device, self.shared.clone())?;
+            self.device_name = name;
+        }
+        self.resumes += 1;
+        if self.resumes <= MAX_GAPS {
+            if let Ok(mut g) = self.shared.writer.lock() {
+                if let Some(wr) = g.as_mut() {
+                    for _ in 0..GAP_SAMPLES {
+                        if wr.write_sample(0i16).is_err() {
+                            self.shared.disk_error.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // The stall watchdog judges the stretch since this resume.
+        self.shared.callbacks.store(0, Ordering::Relaxed);
+        self.shared.reset.store(true, Ordering::Relaxed);
+        self.shared.paused.store(false, Ordering::Relaxed);
+        self.live_since = Some(std::time::Instant::now());
+        if let Err(e) = self.stream.play() {
             self.stream = build(&device, self.shared.clone())?;
             self.stream.play().map_err(|_| MicError::Blocked(e.to_string()))?;
         }
@@ -259,20 +332,35 @@ impl Mic {
         self.stream.play().map_err(|e| MicError::Blocked(e.to_string()))
     }
 
+    /// Seconds of audio in the take's file so far (talking time plus the silence at each resume).
+    pub fn written_secs(&self) -> f32 {
+        self.shared.writer.lock().ok().and_then(|g| g.as_ref().map(|w| w.len() as f32 / RATE as f32)).unwrap_or(0.0)
+    }
+
     /// What went wrong with the take that just finished, if anything.
     pub fn trouble(&self) -> Option<Trouble> {
         if self.shared.disk_error.load(Ordering::Relaxed) {
             Some(Trouble::Disk)
-        } else if self.shared.callbacks.load(Ordering::Relaxed) == 0 || self.shared.dead.load(Ordering::Relaxed) {
+        } else if self.shared.dead.load(Ordering::Relaxed) || (self.shared.callbacks.load(Ordering::Relaxed) == 0 && !self.too_short_to_judge()) {
             Some(Trouble::MicStopped)
         } else {
             None
         }
     }
 
+    /// A paused take whose last live stretch was too short for any sound to arrive (paused right
+    /// after starting or resuming): no callbacks then is not a dead mic.
+    fn too_short_to_judge(&self) -> bool {
+        self.was_paused && self.last_stretch < std::time::Duration::from_millis(300)
+    }
+
     /// Stop and finalise the WAV. Returns the loudest RMS seen.
     pub fn finish(&mut self) -> f32 {
         let _ = self.stream.pause();
+        self.shared.paused.store(false, Ordering::Relaxed);
+        if let Some(t) = self.live_since.take() {
+            self.last_stretch = t.elapsed();
+        }
         if let Some(w) = self.shared.writer.lock().unwrap().take() {
             if let Err(e) = w.finalize() {
                 crate::os::log(&format!("  couldn't finish the recording file: {e}"));
