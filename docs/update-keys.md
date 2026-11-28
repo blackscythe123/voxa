@@ -23,11 +23,11 @@ Commands that change the repo (`cargo`, `python tools/lint/run.py`, `git`) run i
 |---|---|---|---|---|
 | K1 (Ed25519) | The update feeds `desktop.json` and `android.json` | Nothing (CI has it as the Environment `release` secret `VOXA_UPDATE_KEY`) | `voxa-update-k1.pem` | Rotate to K2 (below) |
 | K2 (Ed25519) | Nothing, until K1 is lost | Nothing. Never in CI | `voxa-update-k2.pem` | Generate a new pair in the next release while K1 still works |
-| Android release keystore | Every APK from 1.0.0 on | `voxa-release.jks`, for `android/release.ps1` | `voxa-release.jks` and its password | Every Android user must uninstall and lose History. **Never lose it, never regenerate it** |
+| Android release keystore | Every APK from 1.0.0 on | Optional: `voxa-release.jks`, only for the local fallback `android/release.ps1` (CI has it as the Environment `release` secrets `ANDROID_RELEASE_*`, step 6) | `voxa-release.jks` and its password | Every Android user must uninstall and lose History. **Never lose it, never regenerate it** |
 | macOS "Voxa Code Signing" certificate | The macOS app, so Accessibility access survives updates | Nothing (CI has `MAC_SIGN_P12`, `MAC_SIGN_P12_PASSWORD`) | `.p12`, `.key`, `.crt` and the password | Every Mac user must allow Accessibility again. Never regenerate it |
 
-After each step, delete the loose `.pem`, `.b64` and `.key` files from `~/voxa-keys`: only
-`voxa-release.jks` stays on the build PC.
+After each step, delete the loose `.pem`, `.b64` and `.key` files from `~/voxa-keys`: at most
+`voxa-release.jks` stays on the build PC, for the local fallback.
 
 ### What refuses placeholder keys
 
@@ -36,7 +36,8 @@ Until you do steps 1 and 2 the app has placeholder update keys. Then:
 - `cargo build` and the debug builds print a warning; the app says "Updates are off in this build".
 - Any release build fails: CI tags (`VOXA_RELEASE_BUILD=1`, `core/voxa-update/build.rs`), the
   Windows installer (`ISCC desktop\windows\voxa.iss` stops with an error), and every Android
-  release build (`./gradlew assembleRelease`, Android Studio "Build APK", `android/release.ps1`).
+  release build (`./gradlew assembleRelease`, Android Studio "Build APK", `android/release.ps1`,
+  `.github/workflows/android-release.yml`).
 - Only an explicit dev flag builds a local test copy, never handed out: `VOXA_ALLOW_PLACEHOLDER_KEYS=1`
   (cargo), `ISCC /DAllowPlaceholderKeys`, `./gradlew assembleRelease -Pvoxa.devRelease=true`.
 - `python tools/lint/run.py --release` fails (`update-key-present`); CI runs it on every tag.
@@ -69,13 +70,15 @@ git commit -m "release: the real update public keys"
 Why an Environment and not a repo secret: `desktop.yml` also runs on pull requests with
 `contents: write`; a plain repo secret is readable by any workflow change pushed to a branch. Only
 these jobs name `environment: release`: the desktop `feed` job, the `macos` job on tags (for the
-Mac certificate), `android-feed.yml` and `feed-pause.yml`. Each run waits for your approval, so
-a tag run asks twice (macos, then feed).
+Mac certificate), the `build` job (the Android release keystore) and the `feed` job (K1) of
+`android-release.yml`, and `feed-pause.yml`. Each run waits for your approval, so a desktop tag
+run asks twice (macos, then feed) and an Android tag run asks twice (build, then feed). The
+Android keystore and K1 are never in the same job (lint `release-android-ci`).
 
 1. GitHub, Settings, Environments, New environment: `release`.
 2. Required reviewers: yourself. Deployment branches and tags: selected tags only, `v*` and
-   `android-v*`. Workflows you start by hand (`android-feed`, `feed-pause`) must therefore run
-   from a tag ref: `gh workflow run android-feed.yml --ref android-v1.0.0 -f tag=android-v1.0.0`.
+   `android-v*`. Workflows you start by hand (`android-release` re-runs, `feed-pause`) must
+   therefore run from a tag ref: `gh workflow run android-release.yml --ref android-v1.0.0`.
    The workflow refuses any other ref itself.
 3. Add the secret from the file, in `~/voxa-keys` (nothing is echoed to the terminal):
 
@@ -111,7 +114,7 @@ The app embeds exactly two keys with ids 1 and 2 (`keys.rs`, the `KEYS` array on
 1. GitHub: put K2 into `VOXA_UPDATE_KEY` (step 2 with `voxa-update-k2.pem`).
 2. Repo: change `key_id:1` to `key_id:2` in the three signing steps:
    `.github/workflows/desktop.yml` (the `jq ... '{key_id:1,...}'` line in "Sign the desktop
-   feed"), `.github/workflows/android-feed.yml` ("Sign the feed") and `.github/workflows/feed-pause.yml`
+   feed"), `.github/workflows/android-release.yml` ("Sign the feed") and `.github/workflows/feed-pause.yml`
    ("Sign it").
 3. `~/voxa-keys`: generate K3 (step 1, as `voxa-update-k3.pem`).
 4. Repo, `keys.rs`: K1's slot gets K3 (`K1_HEX` = K3's public hex, still id 1), `K2_HEX` stays.
@@ -136,7 +139,7 @@ certificate SHA-256 `e648aa43bbc2a5e431a0f46a6e6d20cfd9422ec6ebe723922e8c86986fa
 certificate of both `%USERPROFILE%\.android\debug.keystore` and the backup
 `C:\Users\Sam\voxa-signing-backup\voxa-android-current-signing-key.keystore`; its versionCode is
 5 (below 10000). That digest is pinned in `android/signing/forbidden-signers.txt`: a release
-signed with it fails the build (`verifyReleaseSigner`) and `android-feed.yml`.
+signed with it fails the build (`verifyReleaseSigner`) and `android-release.yml`.
 
 In `~/voxa-keys`, with Android Studio's keytool:
 
@@ -154,12 +157,47 @@ Back up `voxa-release.jks` and its password offline at once (password manager pl
 
 In the repo: paste the SHA256 value, without colons and in lowercase, as the only line of
 `android/signing/release-cert.sha256` (below its comment) and commit it. From then on every
-release build and `android-feed.yml` refuse an APK signed by anything else, and
+release build and `android-release.yml` refuse an APK signed by anything else, and
 `python tools/lint/run.py --release` passes `release-android-signing`.
+
+### Put the release key into the release Environment (CI builds Android)
+
+Android releases are built by `.github/workflows/android-release.yml` on an `android-v*` tag
+(owner decision 2026-11-28). Its `build` job reads four secrets from the `release` Environment.
+In `~/voxa-keys`, in Git Bash (nothing is echoed to the terminal):
+
+```bash
+cd ~/voxa-keys
+base64 -w0 voxa-release.jks > voxa-release.jks.b64
+gh secret set ANDROID_RELEASE_KEYSTORE_B64 --env release --repo blackscythe123/voxa < voxa-release.jks.b64
+gh secret set ANDROID_RELEASE_STORE_PASSWORD --env release --repo blackscythe123/voxa   # prompts
+gh secret set ANDROID_RELEASE_KEY_PASSWORD --env release --repo blackscythe123/voxa     # prompts (same as the store password if keytool did not ask)
+gh secret set ANDROID_RELEASE_KEY_ALIAS --env release --repo blackscythe123/voxa       # prompts: voxa
+rm voxa-release.jks.b64
+```
+
+The job decodes the keystore to the runner's temp folder under `umask 077`, checks its
+certificate against `release-cert.sha256` before building, passes the passwords to Gradle only
+as environment values (`VOXA_RELEASE_*`, below), and deletes the file in an `if: always()` step.
+K1 is in a separate job (`feed`) that never sees the keystore.
+
+**The trade-off, stated plainly.** The permanent Android key now lives in GitHub as well as
+offline. Anyone who controls the owner's GitHub account (or can push a tag and approve the
+`release` environment) can now build and sign an Android update that phones accept, and with K1
+in the same Environment, publish its feed. Before, that also needed the owner's PC. What limits
+it: the `release` Environment has a required reviewer (the owner) and admits only `v*` and
+`android-v*` tags; the tag rulesets (step 4) stop those tags being deleted or moved (add
+"Restrict creations" there too if anyone else ever gets write access); GitHub never shows a
+secret's value after it is set. Protect the account accordingly: a hardware
+security key or passkey for 2FA, no long-lived personal access tokens with `repo` scope, and
+review the audit log after any surprise. If the account is ever compromised: pause the feed
+(release-runbook.md E), delete the four `ANDROID_RELEASE_*` secrets and `VOXA_UPDATE_KEY`, and
+rotate K1 (above). The Android key itself cannot be rotated without every user reinstalling,
+which is why it never leaves the protected Environment and the offline backup.
 
 ### How Gradle finds the release key (never committed)
 
-Add these lines to `android/local.properties` (git-ignored), or set the matching environment
+For the local fallback (`android/release.ps1`) add these lines to `android/local.properties` (git-ignored), or set the matching environment
 variables (`VOXA_RELEASE_STORE_FILE`, `VOXA_RELEASE_STORE_PASSWORD`, `VOXA_RELEASE_KEY_ALIAS`,
 `VOXA_RELEASE_KEY_PASSWORD`):
 
@@ -170,7 +208,7 @@ voxa.release.keyAlias=voxa
 voxa.release.keyPassword=...
 ```
 
-A release build (`android/release.ps1`, or `./gradlew assembleRelease` from `android/`) fails
+A release build (`android-release.yml`, `android/release.ps1`, or `./gradlew assembleRelease` from `android/`) fails
 when the update keys are placeholders, when no release key is configured, when the configured key
 is a debug key, or when the signed APK's certificate is a forbidden signer or not the pinned one.
 Check an APK by hand with:
@@ -225,5 +263,7 @@ recorded at the last start and access is really off.
 ## Which lints guard this
 
 `update-key-present` (real keys, with `--release`), `update-secret` (no private key in the tree),
-`release-placeholder-guard`, `release-android-signing`, `release-feed-guard` and
+`release-placeholder-guard`, `release-android-signing`, `release-feed-guard`,
+`release-android-ci` (the CI release job: `environment: release`, the keystore and K1 never in
+one job, no echoed or inline secrets, umask 077, the keystore deleted in an `always()` step) and
 `android-release-key` (docs/guardrails.md, sections 10 and 12).
