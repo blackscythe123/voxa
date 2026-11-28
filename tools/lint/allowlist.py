@@ -15,9 +15,6 @@ ALLOW = [
           "decoration and inactive components. Use text72 or muted for any icon that carries meaning."),
 
     # ── 8. robustness ───────────────────────────────────────────────────────────────────────────
-    Allow("robust-atomic-write", "desktop/app/src/notify.rs", "save:",
-          "notify.json (notification pacing) is written with a bare fs::write; a torn file only resets pacing. Should use "
-          "the atomic writer; notify.rs is in the desktop bug-fix area."),
     Allow("robust-atomic-write", "desktop/app/src/common.rs", "write_png: fixed temp",
           "website icon cache, not user data: a raced icon only falls back to the letter badge until the next fetch."),
 ]

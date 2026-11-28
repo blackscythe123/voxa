@@ -457,7 +457,13 @@ pub fn app_name(hwnd: HWND) -> String {
     let mut title = [0u16; 256];
     let n = unsafe { GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32) };
     let t = String::from_utf16_lossy(&title[..n.max(0) as usize]);
-    if !t.is_empty() { t } else if !stem.is_empty() { stem } else { "this app".into() }
+    name_from_title(t, stem)
+}
+
+/// An unknown app is named by its window title, else its exe, else "this app": never empty and
+/// never "Unknown app" (that label is only for History imported from the old app).
+fn name_from_title(title: String, stem: String) -> String {
+    if !title.trim().is_empty() { title } else if !stem.is_empty() { stem } else { "this app".into() }
 }
 
 /// GPUI activates a window when it first shows it. Hand focus straight back to the app that had it.
@@ -558,7 +564,11 @@ pub fn move_strip(x: i32, y: i32, w: i32, h: i32) {
 
 /// A dev/test instance (its own data folder) runs beside the installed Voxa.
 fn instance_suffix() -> String {
-    std::env::var("VOXA_DATA").map(|d| format!("-{:x}", d.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)))).unwrap_or_default()
+    instance_suffix_for(std::env::var("VOXA_DATA").ok().as_deref())
+}
+
+fn instance_suffix_for(data: Option<&str>) -> String {
+    data.map(|d| format!("-{:x}", d.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)))).unwrap_or_default()
 }
 
 pub fn strip_visible(show: bool) {
@@ -860,4 +870,44 @@ pub fn show_in_dock() {}
 /// Windows can always paste with SendInput; nothing to ask for.
 pub fn can_paste() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Restoring the clipboard wiped copied images and files: every memory format is saved and put
+    /// back (text, rich text, files, images as DIB, registered formats); only GDI handles, which
+    /// Windows makes again from those, are left out.
+    #[test]
+    fn the_clipboard_restore_keeps_text_files_and_images() {
+        for kept in [1u32, 7, 8, 13, 15, 16, 17, 0xC0F0] {
+            assert!(is_memory_format(kept), "format {kept} must be restored");
+        }
+        for gdi in [2u32, 3, 9, 14, 0x80, 0x82, 0x83, 0x8E, 0x300, 0x3FF] {
+            assert!(!is_memory_format(gdi), "GDI format {gdi} is not plain memory");
+        }
+        assert!(RESTORE_AFTER >= std::time::Duration::from_millis(1000), "restoring at 250 ms raced the paste");
+    }
+
+    /// A test copy (VOXA_DATA) runs beside the real Voxa with its own single-instance names, so it
+    /// never raises or answers the real window.
+    #[test]
+    fn a_test_copy_has_its_own_instance_names() {
+        assert_eq!(instance_suffix_for(None), "", "the real Voxa keeps its names");
+        let a = instance_suffix_for(Some(r"C:\voxa-test-a"));
+        let b = instance_suffix_for(Some(r"C:\voxa-test-b"));
+        assert!(a.starts_with('-') && b.starts_with('-') && a != b);
+        assert!(instance_suffix().is_empty() == std::env::var_os("VOXA_DATA").is_none());
+    }
+
+    /// New dictations always name their app: "Unknown app" in History filters comes only from
+    /// History imported from the old app, which had no app name.
+    #[test]
+    fn an_unknown_app_is_named_by_its_title_or_exe_never_unknown() {
+        assert_eq!(name_from_title("Budget.xlsx - Excel".into(), "excel".into()), "Budget.xlsx - Excel");
+        assert_eq!(name_from_title("  ".into(), "obsidian".into()), "obsidian");
+        assert_eq!(name_from_title(String::new(), String::new()), "this app");
+        assert_ne!(name_from_title(String::new(), String::new()), crate::import::UNKNOWN_APP);
+    }
 }
