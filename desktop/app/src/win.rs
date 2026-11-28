@@ -483,9 +483,11 @@ pub fn single_window_instance() -> bool {
     use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, INFINITE, SetEvent, WaitForSingleObject};
     unsafe {
-        let mutex = CreateMutexW(std::ptr::null(), 0, wide(r"Local\VoxaNextWindow").as_ptr());
+        // A test copy (VOXA_DATA) has its own names, so it never raises or answers the real window.
+        let test = if std::env::var_os("VOXA_DATA").is_some() { "Test" } else { "" };
+        let mutex = CreateMutexW(std::ptr::null(), 0, wide(&format!(r"Local\VoxaNextWindow{test}")).as_ptr());
         let already = GetLastError() == ERROR_ALREADY_EXISTS;
-        let event = CreateEventW(std::ptr::null(), 0, 0, wide(r"Local\VoxaNextWindowFront").as_ptr());
+        let event = CreateEventW(std::ptr::null(), 0, 0, wide(&format!(r"Local\VoxaNextWindowFront{test}")).as_ptr());
         if already {
             if !event.is_null() {
                 SetEvent(event);

@@ -7943,6 +7943,7 @@ dependencies = [
  "hound",
  "image",
  "log",
+ "lyon",
  "objc",
  "png 0.17.16",
  "raw-window-handle",

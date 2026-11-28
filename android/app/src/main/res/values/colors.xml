@@ -3,4 +3,6 @@
     <!-- docs/ui-mocks/v6-app-redesign.html, light. Dark values in values-night. -->
     <color name="base">#FFFFFF</color>
     <color name="accent">#7A3F22</color>
+    <!-- The system splash, under the written splash: the icon's tile colour in dark. -->
+    <color name="splash">#FFFFFF</color>
 </resources>

@@ -11,6 +11,7 @@ use crate::store::{self, Settings, Status};
 use crate::theme::p;
 use crate::input::TextInput;
 
+mod greet_view;
 mod tour;
 use tour::Tour;
 use crate::remote::Backend as Voxa;
@@ -105,6 +106,10 @@ pub struct Home {
     os_dark: bool,
     /// The Appearance choice and OS mode the window was last coloured for.
     drawn_with: Option<(store::Appearance, bool)>,
+    /// Home's greeting and doodle, picked when Home opens.
+    greet: Option<greet_view::Greet>,
+    /// The written splash, on a cold open of the window.
+    splash: Option<greet_view::SplashRun>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -243,6 +248,8 @@ impl Home {
             chart_pick: None,
             os_dark: crate::theme::os_is_dark(cx.window_appearance()),
             drawn_with: None,
+            greet: None,
+            splash: None,
         };
         // The system switched light/dark: follow it (if Appearance says so).
         cx.observe_window_appearance(window, |this, window, cx| {
@@ -279,6 +286,9 @@ impl Home {
             self.editing = None;
             self.suggestion = None;
         }
+        if page == Page::Home && self.page != Page::Home {
+            self.greet = None; // picked again when Home opens
+        }
         self.page = page;
         cx.notify();
     }
@@ -311,6 +321,9 @@ impl Home {
     }
 
     fn on_key(&mut self, ev: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.skip_splash(cx) {
+            return;
+        }
         let k = &ev.keystroke;
         if self.capturing {
             if k.key == "escape" && !k.modifiers.control && !k.modifiers.alt {
@@ -1664,26 +1677,17 @@ impl Home {
     }
 
     fn home(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let (entries, shortcut, r, account) = {
+        let (entries, shortcut) = {
             let v = self.voxa.read(cx);
-            (v.history.entries.clone(), v.settings.hotkey.clone(), v.readiness(), v.account())
+            (v.history.entries.clone(), v.settings.hotkey.clone())
         };
-        use chrono::Timelike;
-        let now = chrono::Local::now();
-        let today = now.date_naive();
-        let greeting = match now.hour() {
-            5..=11 => "Good morning",
-            12..=16 => "Good afternoon",
-            _ => "Good evening",
-        };
-        let first = account.as_ref().and_then(|a| a.name.split_whitespace().next().map(str::to_string)).filter(|n| !n.is_empty());
-        let mut out: Vec<AnyElement> = vec![
-            div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child(match first { Some(n) => format!("{greeting}, {n}"), None => greeting.to_string() }).into_any_element(),
-        ];
-        out.extend(self.needs_you(cx));
+        let today = chrono::Local::now().date_naive();
+        // The doodle band and the greeting; InfoBars only while something is wrong.
+        let needs = self.needs_you(cx);
+        let mut out: Vec<AnyElement> = vec![self.greeting_header(!needs.is_empty(), cx)];
+        out.extend(needs);
 
         // The one thing Voxa does, front and centre.
-        let ready = r.blocker().is_none() && r.session == Session::Valid;
         out.push(
             div()
                 .relative()
@@ -1702,8 +1706,7 @@ impl Home {
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .child(div().flex().items_center().gap(px(8.)).text_size(px(13.)).text_color(rgb(if ready { p().good_text } else { p().warn_text })).child(icon(if ready { I_CHECK } else { '!' }, 12.)).child(if ready { "Ready to dictate" } else if r.session == Session::Unknown { "Checking your sign-in" } else { "Needs you first" }))
-                        .child(div().mt(px(8.)).text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::SEMIBOLD).child("Click where you want to type, press your shortcut, and talk."))
+                        .child(div().text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::SEMIBOLD).child("Click where you want to type, press your shortcut, and talk."))
                         .child(div().mt(px(6.)).text_size(px(13.)).text_color(rgb(p().muted)).child("Press it again to finish. Esc cancels. Works in every app.")),
                 )
                 .child(div().relative().child(self.mark("keys")).flex().gap(px(6.)).children(shortcut.split('+').map(|k| {
@@ -2208,6 +2211,11 @@ impl Render for Home {
                 .children(content),
         )
         .children(self.tour_overlay(window, cx))
+        .children(self.splash_overlay(window, cx))
+        .when(self.doodle_moving(), |d| {
+            window.request_animation_frame();
+            d
+        })
     }
 }
 
