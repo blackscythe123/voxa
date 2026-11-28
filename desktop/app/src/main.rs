@@ -7,6 +7,7 @@ mod home;
 mod input;
 mod import;
 mod link;
+mod notify;
 mod prepare;
 mod remote;
 mod store;
@@ -55,6 +56,33 @@ fn invented_for_silence(text: &str, peak: f32) -> bool {
     peak < QUIET && SILENCE_PHRASES.contains(&text.trim().to_lowercase().as_str())
 }
 const RECHECK: Duration = Duration::from_secs(600);
+/// A check that finds the session ended is repeated this much later before Voxa says so: a
+/// false "signed out" is worse than a late one.
+const CONFIRM_EXPIRY: Duration = Duration::from_secs(120);
+
+/// Test only (with a separate VOXA_DATA folder): VOXA_TEST_SESSION=valid,expired,expired makes
+/// the next session checks answer that, in order, without asking ChatGPT, and
+/// VOXA_TEST_CONFIRM_SECS shortens the confirmation wait. Used to test the sign-in toast.
+fn test_session_answer() -> Option<Session> {
+    static SEQ: std::sync::Mutex<Option<VecDeque<String>>> = std::sync::Mutex::new(None);
+    std::env::var_os("VOXA_DATA")?;
+    let mut g = SEQ.lock().unwrap_or_else(|e| e.into_inner());
+    let q = g.get_or_insert_with(|| std::env::var("VOXA_TEST_SESSION").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
+    match q.pop_front()?.as_str() {
+        "valid" => Some(Session::Valid),
+        "expired" => Some(Session::Expired),
+        _ => None,
+    }
+}
+
+/// Test only (VOXA_TEST_RECHECK_SECS, with VOXA_DATA): check the session more often than every 10 minutes.
+fn recheck_every() -> Duration {
+    std::env::var("VOXA_TEST_RECHECK_SECS").ok().filter(|_| std::env::var_os("VOXA_DATA").is_some()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(RECHECK)
+}
+
+fn confirm_after() -> Duration {
+    std::env::var("VOXA_TEST_CONFIRM_SECS").ok().filter(|_| std::env::var_os("VOXA_DATA").is_some()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(CONFIRM_EXPIRY)
+}
 
 fn fake_mode() -> bool {
     std::env::var("VOXA_FAKE").is_ok_and(|v| !v.is_empty())
@@ -108,7 +136,33 @@ fn save_account(a: &voxa_chatgpt::Account) {
     }
 }
 
-fn now_ms() -> u64 {
+/// Ask ChatGPT whether the saved session is good: (session, readiness, network, definite).
+/// `definite`: ChatGPT's own session call said the session ended (not "nothing saved", not
+/// Cloudflare, not offline), the only answer that may lead to a "signed out" toast.
+fn ask_session(gpt: &ChatGpt) -> (Option<GptSession>, Session, Network, bool) {
+    let dir = data_dir();
+    // Carry an Electron sign-in over once, unless the user signed out here.
+    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if dir.join("signed-out").exists() { None } else { GptSession::from_electron_dir(&electron_dir()) });
+    if let (Some(s), Some(answer)) = (saved.clone(), test_session_answer()) {
+        os::log(&format!("test: session check answers {answer:?}"));
+        return (Some(s), answer, Network::Up, answer == Session::Expired);
+    }
+    match saved {
+        None => (None, Session::Expired, Network::Up, false),
+        Some(s) => match gpt.account(&s) {
+            Ok(a) => {
+                save_account(&a);
+                (Some(s), Session::Valid, Network::Up, false)
+            }
+            Err(TranscribeError::SessionExpired) => (Some(s), Session::Expired, Network::Up, true),
+            Err(TranscribeError::SignedOut) => (Some(s), Session::Expired, Network::Up, false),
+            Err(TranscribeError::Offline) => (Some(s), Session::Unknown, Network::Down, false),
+            Err(_) => (Some(s), Session::Unknown, Network::Up, false),
+        },
+    }
+}
+
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
@@ -170,6 +224,12 @@ pub(crate) struct Voxa {
     gpt: Arc<ChatGpt>,
     session: Option<GptSession>,
     last_check: Instant,
+    /// Toasts (docs/notifications.md).
+    notifier: notify::Notifier,
+    /// What the last session check said for certain (never from a failed transcription).
+    session_known: Option<Session>,
+    /// A second check is due to confirm an expiry.
+    confirming: bool,
 }
 
 impl Voxa {
@@ -296,6 +356,9 @@ impl Voxa {
                     for cmd in link::take_commands() {
                         v.on_command(cmd, cx);
                     }
+                    for click in notify::take_clicks() {
+                        v.on_notification(click, cx);
+                    }
                     if os::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         os::log("another launch asked to open the window");
                         v.open_home(None, cx);
@@ -412,7 +475,7 @@ impl Voxa {
                         }
                     }
                     let offline = v.flow.readiness().network == Network::Down;
-                    let every = if offline { Duration::from_secs(5) } else { RECHECK };
+                    let every = if offline { Duration::from_secs(5) } else { recheck_every() };
                     let quiet = matches!(v.flow.state(), State::Idle | State::NeedsYou(_));
                     if !fake_mode() && v.last_check.elapsed() > every && quiet {
                         v.check_session(cx);
@@ -467,6 +530,9 @@ impl Voxa {
             gpt: Arc::new(ChatGpt::new()),
             session: None,
             last_check: Instant::now(),
+            notifier: notify::Notifier::new(),
+            session_known: None,
+            confirming: false,
         };
         if !fake_mode() {
             me.check_session(cx);
@@ -479,29 +545,11 @@ impl Voxa {
         self.last_check = Instant::now();
         let gpt = self.gpt.clone();
         cx.spawn(async move |this, cx| {
-            let (session, state, network) = cx
-                .background_executor()
-                .spawn(async move {
-                    let dir = data_dir();
-                    // Carry an Electron sign-in over once, unless the user signed out here.
-                    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if dir.join("signed-out").exists() { None } else { GptSession::from_electron_dir(&electron_dir()) });
-                    match saved {
-                        None => (None, Session::Expired, Network::Up),
-                        Some(s) => match gpt.account(&s) {
-                            Ok(a) => {
-                                save_account(&a);
-                                (Some(s), Session::Valid, Network::Up)
-                            }
-                            Err(TranscribeError::SignedOut | TranscribeError::SessionExpired) => (Some(s), Session::Expired, Network::Up),
-                            Err(TranscribeError::Offline) => (Some(s), Session::Unknown, Network::Down),
-                            Err(_) => (Some(s), Session::Unknown, Network::Up),
-                        },
-                    }
-                })
-                .await;
+            let (session, state, network, definite) = cx.background_executor().spawn(async move { ask_session(&gpt) }).await;
             let _ = this.update(cx, |v, cx| {
                 os::log(&format!("session check: {state:?}, network {network:?}"));
                 v.session = session;
+                v.watch_expiry(state, definite, cx);
                 let r = Readiness { session: state, network, ..v.flow.readiness() };
                 if r != v.flow.readiness() {
                     v.handle(Event::Readiness(r), cx);
@@ -511,14 +559,114 @@ impl Voxa {
         .detach();
     }
 
+    /// D1: say "You're signed out" only for a definite answer (ChatGPT's session call returned no
+    /// token, not Cloudflare, not a failed transcription), after the session was known good, and
+    /// once a second check 2 minutes later says the same. Once per expiry episode.
+    fn watch_expiry(&mut self, state: Session, definite: bool, cx: &mut Context<Self>) {
+        match state {
+            Session::Valid => {
+                if self.session_known == Some(Session::Expired) {
+                    // Signed back in after an expiry: the moment macOS may ask to notify.
+                    self.notifier.ask_permission();
+                }
+                self.session_known = Some(Session::Valid);
+                self.notifier.clear_signin();
+            }
+            Session::Expired if definite => {
+                let was_valid = self.session_known == Some(Session::Valid);
+                self.session_known = Some(Session::Expired);
+                if was_valid && !self.confirming {
+                    self.confirming = true;
+                    let wait = confirm_after();
+                    os::log(&format!("session ended: checking again in {} s before saying so", wait.as_secs()));
+                    let gpt = self.gpt.clone();
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(wait).await;
+                        let (_, again, _, definite) = cx.background_executor().spawn(async move { ask_session(&gpt) }).await;
+                        let _ = this.update(cx, |v, cx| {
+                            v.confirming = false;
+                            os::log(&format!("session check (confirming): {again:?}, definite {definite}"));
+                            if again == Session::Expired && definite && v.session_known == Some(Session::Expired) {
+                                let waiting = v.history.entries.iter().filter(|e| matches!(&e.status, Status::Waiting(r) if r == "Sign in to send")).count() as u32;
+                                let looking = v.user_is_looking();
+                                v.notifier.signed_out(waiting, looking);
+                            } else if again == Session::Valid {
+                                v.watch_expiry(again, definite, cx);
+                            }
+                        });
+                    })
+                    .detach();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The strip is up, or Voxa's window is in front: never post a toast then.
+    fn user_is_looking(&self) -> bool {
+        !matches!(self.flow.state(), State::Idle) || os::is_own_window(os::foreground())
+    }
+
+    fn on_notification(&mut self, click: notify::Click, cx: &mut Context<Self>) {
+        match click {
+            notify::Click::SignIn => self.sign_in(cx),
+            notify::Click::Open => self.open_home(Some(Page::History), cx),
+            notify::Click::Copy(id) => {
+                if let Some(e) = self.history.get(id).filter(|e| !e.text.is_empty()) {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(e.text.clone()));
+                    os::log("notification: dictation copied");
+                }
+                self.notifier.clear_dictations();
+            }
+            notify::Click::SendNow => {
+                self.notifier.clear_dictations();
+                // A dictation of this run that failed is retried by the flow; older ones are resent.
+                let failed = self.job_entries.keys().copied().find(|j| self.flow.job(*j).is_some_and(|j| matches!(j.state, voxa_core::JobState::Failed(_))));
+                if let Some(job) = failed {
+                    self.handle(Event::Retry { job }, cx);
+                }
+                self.resend_all(cx);
+            }
+        }
+    }
+
+    /// D2 / D3: a dictation that wasn't on screen finished. Ready: it waits in History, ready to
+    /// copy. Failed (not for sign-in, not "no speech"): it couldn't be sent.
+    fn notify_background(&mut self, job: JobId) {
+        use voxa_core::JobState;
+        let Some(j) = self.flow.job(job) else { return };
+        let Some(&id) = self.job_entries.get(&job) else { return };
+        let looking = self.user_is_looking();
+        match &j.state {
+            JobState::Ready(t) if !t.trim().is_empty() => {
+                let app = self.history.get(id).map(|e| e.app.clone()).unwrap_or_else(|| j.target.app.clone());
+                self.notifier.ready(id, &app, looking);
+            }
+            JobState::Failed(e) if !e.needs_sign_in() && *e != TranscribeError::Server(204) => self.notifier.not_sent(looking),
+            _ => {}
+        }
+    }
+
     fn handle(&mut self, event: Event, cx: &mut Context<Self>) {
         os::log(&format!("event {event:?}"));
+        // A dictation finishing while another (or none) is on the strip: written in the background.
+        let background = match &event {
+            Event::Transcribed { job, .. } => Some(*job).filter(|j| !matches!(self.flow.state(), State::Transcribing { job: on } if on == j)),
+            _ => None,
+        };
+        if matches!(event, Event::Delivered { result: Delivery::Pasted, .. }) {
+            // The first dictation worked: the other moment macOS may ask to notify (once).
+            self.notifier.ask_permission();
+        }
         let effects = self.flow.handle(event);
         os::log(&format!("  -> {:?} | effects {effects:?}", self.flow.state()));
         for e in effects {
             self.run(e, cx);
         }
         self.sync_history();
+        if let Some(job) = background {
+            self.notify_background(job);
+        }
         self.publish();
         self.sync_esc();
         self.sync_tray();
@@ -829,6 +977,11 @@ impl Voxa {
         if page == Some(Page::Settings) {
             c.arg("--page=settings");
         }
+        if page == Some(Page::History) {
+            c.arg("--page=history");
+        }
+        // The user is looking at Voxa now: its dictations notification has done its job.
+        self.notifier.clear_dictations();
         if page.is_none() && !self.settings.onboarded {
             c.arg("--tour");
         }
@@ -929,6 +1082,9 @@ impl Voxa {
         let _ = std::fs::remove_file(dir.join("account.json"));
         let _ = std::fs::remove_file(dir.join("avatar.png"));
         self.session = None;
+        // On purpose: never a "signed out" toast, and any showing one goes.
+        self.session_known = None;
+        self.notifier.clear_signin();
         os::log("signed out");
         let r = Readiness { session: Session::Expired, ..self.flow.readiness() };
         self.handle(Event::Readiness(r), cx);
