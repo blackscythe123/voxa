@@ -18,18 +18,21 @@ import android.util.Log
 import uniffi.voxa_ffi.meterLevel
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * The microphone: 16 kHz mono PCM16 straight to a raw file from the first byte, so a take survives
  * the keyboard's process dying. Levels go to [onLevel] (the core's meter scale). Losing audio focus
- * or being silenced by the system calls [onInterrupted]: the keyboard treats it as Stop.
+ * for good, being silenced by the system or the mic failing calls [onInterrupted]: the keyboard
+ * treats it as Stop. A write that fails (storage full) calls [onCantSave]; what was written is kept.
  */
 class Recorder(
     private val context: Context,
     private val onLevel: (Float) -> Unit,
     private val onInterrupted: () -> Unit,
+    private val onCantSave: () -> Unit,
 ) {
-    enum class StartError { Denied, Missing }
+    enum class StartError { Denied, Missing, CantSave }
 
     private val main = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -138,8 +141,9 @@ class Recorder(
                 }
             }
         } catch (e: Exception) {
+            // The file can't be created or written: storage full (or the folder is gone).
             r.release()
-            return StartError.Missing
+            return StartError.CantSave
         }
         requestFocus()
         try {
@@ -158,19 +162,39 @@ class Recorder(
         startedAt = SystemClock.elapsedRealtime()
         thread = Thread({
             val buf = ByteArray(CHUNK_BYTES)
-            out.use {
-                while (running) {
-                    val n = r.read(buf, 0, buf.size)
-                    if (n <= 0) continue
-                    it.write(buf, 0, n)
-                    bytesWritten += n
-                    val lvl = meterLevel(buf.copyOf(n))
-                    if (lvl > peakLevel) peakLevel = lvl
+            var errors = 0
+            try {
+                out.use {
+                    while (running) {
+                        val n = r.read(buf, 0, buf.size)
+                        if (n <= 0) {
+                            // A dead or invalid recorder returns at once, forever: never spin. A
+                            // short run of errors is a hiccup; a lasting one ends the take.
+                            if (n < 0 && ++errors >= MAX_READ_ERRORS) {
+                                com.voxa.android.diag.Diag.log("mic", "read failed $errors times (code $n): stopping")
+                                main.post { if (running) onInterrupted() }
+                                break
+                            }
+                            Thread.sleep(READ_ERROR_WAIT_MS)
+                            continue
+                        }
+                        errors = 0
+                        it.write(buf, 0, n)
+                        bytesWritten += n
+                        val lvl = meterLevel(buf.copyOf(n))
+                        if (lvl > peakLevel) peakLevel = lvl
 
-                    main.post { onLevel(lvl) }
+                        main.post { onLevel(lvl) }
+                    }
+                    it.flush()
+                    it.fd.sync()
                 }
-                it.flush()
-                it.fd.sync()
+            } catch (e: IOException) {
+                // Storage full mid-take: never crash the keyboard. What reached the file is kept.
+                com.voxa.android.diag.Diag.log("mic", "write failed: ${e.javaClass.simpleName}")
+                main.post { if (running) onCantSave() }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
             }
         }, "voxa-mic").apply { start() }
         return null
@@ -215,11 +239,15 @@ class Recorder(
         val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setOnAudioFocusChangeListener({ change ->
-                if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                    val sinceStart = SystemClock.elapsedRealtime() - startedAt
+                val sinceStart = SystemClock.elapsedRealtime() - startedAt
+                if (change == AudioManager.AUDIOFOCUS_LOSS) {
                     com.voxa.android.diag.Diag.log("mic", "audio focus lost after $sinceStart ms")
                     // A focus change in the first second is the system settling, not a call.
                     if (running && sinceStart > 1000) onInterrupted()
+                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    // An alarm, a timer or a navigation prompt: recording still works, so the take
+                    // goes on. A call silences the mic, and that is caught separately.
+                    com.voxa.android.diag.Diag.log("mic", "audio focus lost for a moment after $sinceStart ms: still listening")
                 }
             }, main)
             .build()
@@ -242,5 +270,8 @@ class Recorder(
         const val GAP_BYTES = BYTES_PER_SEC * 3 / 10
         /** After this many pauses in one take, resume without adding more silence. */
         const val MAX_GAPS = 50
+        /** Read errors in a row (about half a second) before the take ends. */
+        const val MAX_READ_ERRORS = 25
+        const val READ_ERROR_WAIT_MS = 20L
     }
 }
