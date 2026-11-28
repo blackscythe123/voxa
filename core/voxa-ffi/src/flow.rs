@@ -138,7 +138,8 @@ pub enum ProblemInfo {
 pub enum FlowState {
     Idle,
     Blocked { blocker: BlockerKind },
-    Recording { job: u64, offline: bool },
+    /// `paused`: the mic is off; still the same take (Stop sends it, Cancel drops it).
+    Recording { job: u64, offline: bool, paused: bool },
     Transcribing { job: u64 },
     Delivering { job: u64 },
     Delivered { job: u64 },
@@ -158,7 +159,7 @@ impl From<&State> for FlowState {
                     Blocker::SignedOut => BlockerKind::SignedOut,
                 },
             },
-            State::Recording { job, offline } => FlowState::Recording { job: job.0, offline },
+            State::Recording { job, offline, paused } => FlowState::Recording { job: job.0, offline, paused },
             State::Transcribing { job } => FlowState::Transcribing { job: job.0 },
             State::Delivering { job } => FlowState::Delivering { job: job.0 },
             State::Delivered { job } => FlowState::Delivered { job: job.0 },
@@ -192,6 +193,10 @@ pub enum FlowEvent {
     MicPressed { target: FfiTarget, private: bool },
     Stop,
     Cancel,
+    /// The wide key's "Pause": mic off, take kept open.
+    Pause,
+    /// The wide key's "Resume": mic back on, same take.
+    Resume,
     /// The status line's one primary action.
     Action,
     Dismiss,
@@ -209,6 +214,8 @@ impl From<FlowEvent> for Event {
             FlowEvent::MicPressed { target, .. } => Event::Hotkey { target: target.into() },
             FlowEvent::Stop => Event::Stop,
             FlowEvent::Cancel => Event::Cancel,
+            FlowEvent::Pause => Event::Pause,
+            FlowEvent::Resume => Event::Resume,
             FlowEvent::Action => Event::Action,
             FlowEvent::Dismiss => Event::Dismiss,
             FlowEvent::Transcribed { job, text } => Event::Transcribed { job: JobId(job), result: Ok(text) },
@@ -237,6 +244,10 @@ pub enum FlowEffect {
     HideStatus { after_ms: u32 },
     StartCapture { job: u64, pcm_path: String },
     StopCapture { job: u64 },
+    /// Close the mic but keep the take's file; nothing is recorded until `ResumeCapture`.
+    PauseCapture { job: u64 },
+    /// Reopen the mic and append to the same file, after ~300 ms of silence.
+    ResumeCapture { job: u64 },
     DiscardCapture { job: u64 },
     Transcribe { job: u64, pcm_path: String, app: String },
     /// Insert into the original field; the keyboard must check it is still the one in front.
@@ -322,6 +333,8 @@ impl VoxaFlow {
                     FlowEffect::StartCapture { job: job.0, pcm_path: pcm }
                 }
                 Effect::StopCapture { job } => FlowEffect::StopCapture { job: job.0 },
+                Effect::PauseCapture { job } => FlowEffect::PauseCapture { job: job.0 },
+                Effect::ResumeCapture { job } => FlowEffect::ResumeCapture { job: job.0 },
                 Effect::DiscardCapture { job } => {
                     if let Some(m) = inner.meta.get(&job) {
                         let _ = std::fs::remove_file(&m.pcm);
@@ -410,6 +423,12 @@ pub fn status_text(flow: &Flow) -> Option<StatusText> {
         _ => {}
     }
     Some(st)
+}
+
+/// The wide key's label during a take: "Pause" while listening, "Resume" while paused.
+#[uniffi::export]
+pub fn pause_key_label(paused: bool) -> String {
+    if paused { voxa_core::copy::RESUME_LABEL } else { voxa_core::copy::PAUSE_LABEL }.to_string()
 }
 
 /// Takes left recording or being written out by a process that died become "Not sent".

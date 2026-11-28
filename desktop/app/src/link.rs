@@ -24,7 +24,7 @@ pub struct Live {
     pub live_ids: Vec<u64>,
     /// Answer to the last shortcut change: (shortcut asked for, error if refused).
     pub hotkey_result: Option<(String, Option<String>)>,
-    /// What the strip shows: idle, recording, writing, pasted, needs, blocked.
+    /// What the strip shows: idle, recording, paused, writing, pasted, needs, blocked.
     pub state: String,
 }
 

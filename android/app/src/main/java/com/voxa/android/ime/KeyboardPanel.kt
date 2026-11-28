@@ -247,13 +247,17 @@ class KeyboardPanel(context: Context, val colors: KbColors) : LinearLayout(conte
         val saved: String = "",
         /** Disabled (writing, or a password field): 40 % and not tappable. */
         val micOff: Boolean = false,
+        /** A take on hold: no red dot, bars flat. */
+        val paused: Boolean = false,
+        /** The wide key's label while recording ("Pause" / "Resume"). */
+        val wideKey: String? = null,
     )
 
     fun show(s: State) {
         val c = colors
         title.text = s.title
         title.setTextColor(if (s.done) c.goodTitle else c.text)
-        dot.visibility = if (s.recording) VISIBLE else GONE
+        dot.visibility = if (s.recording && !s.paused) VISIBLE else GONE
         detail.text = s.detail ?: ""
         detail.visibility = if (s.detail.isNullOrEmpty()) INVISIBLE else VISIBLE
         action.text = s.action ?: ""
@@ -273,8 +277,8 @@ class KeyboardPanel(context: Context, val colors: KbColors) : LinearLayout(conte
         mic.contentDescription = if (s.recording) "Stop" else "Talk"
         mic.alpha = if (s.micOff) 0.4f else 1f
         mic.isEnabled = !s.micOff
-        spaceKey.text = if (s.recording) "Tap to stop" else "space"
-        spaceKey.contentDescription = if (s.recording) "Stop" else "Space"
+        spaceKey.text = if (s.recording) s.wideKey ?: "Tap to stop" else "space"
+        spaceKey.contentDescription = if (s.recording) s.wideKey ?: "Stop" else "Space"
     }
 
     /** The app's preview: 0 ready, 1 listening, 2 done, with sample words. */

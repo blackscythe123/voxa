@@ -70,7 +70,10 @@ delivering text (desktop paste to the captured target with clipboard restore; An
 rendering the state on its one surface; OS permission prompts and deep links; launch triggers (hotkey, keyboard mic, login item).
 
 **Cut:** desktop `preferences.html`; the Android voice-only keyboard and `OverlayService` (keep one keyboard with the mic built in, always visible);
-pause/resume; settings that are not wired.
+settings that are not wired.
+
+**Brought back (2026-11-28):** pause/resume, as a `paused` flag on `Recording` (one take, mic off while paused, paused
+time left out of the file; on-screen Pause/Resume only, no new shortcut, no auto-finish). See `core/voxa-core/src/flow.rs`.
 
 ## Interim fixes already in the Android working tree (not released)
 

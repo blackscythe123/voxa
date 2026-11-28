@@ -244,3 +244,25 @@ fn diagnostics_log_events_but_never_the_transcript() {
     assert!(log.contains("<26 chars>"), "{log}");
     assert!(!log.contains("secret"), "transcript text must never reach the log");
 }
+
+#[test]
+fn pause_and_resume_keep_one_take_and_history_entry() {
+    let dir = tmp("pause");
+    let flow = VoxaFlow::new(dir.clone(), ready());
+    let (job, pcm) = start(&flow, mic("Notes", 1));
+    assert_eq!(pause_key_label(false), "Pause");
+    assert_eq!(flow.handle(FlowEvent::Pause), vec![FlowEffect::PauseCapture { job }]);
+    assert_eq!(flow.state(), FlowState::Recording { job, offline: false, paused: true });
+    let st = flow.status().unwrap();
+    assert_eq!((st.title.as_str(), st.detail.as_deref(), st.dismissable), ("Paused", Some("The microphone is off"), false));
+    assert_eq!(pause_key_label(true), "Resume");
+    let core = VoxaCore::new(dir.clone());
+    assert_eq!(core.history(String::new())[0].status, EntryStatus::Waiting("Recording".into()), "kept while paused");
+    assert!(flow.handle(FlowEvent::Pause).is_empty());
+    assert_eq!(flow.handle(FlowEvent::Resume), vec![FlowEffect::ResumeCapture { job }]);
+    flow.handle(FlowEvent::Pause);
+    let fx = flow.handle(FlowEvent::Stop);
+    assert!(fx.contains(&FlowEffect::StopCapture { job }));
+    assert!(fx.iter().any(|e| matches!(e, FlowEffect::Transcribe { job: j, pcm_path, .. } if *j == job && *pcm_path == pcm)));
+    assert_eq!(core.history(String::new()).len(), 1);
+}
