@@ -11,7 +11,9 @@ use std::sync::Mutex;
 
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::Foundation::TypedEventHandler;
-use windows::UI::Notifications::{ToastActivatedEventArgs, ToastNotification, ToastNotificationManager};
+use windows::UI::Notifications::{
+    NotificationSetting, ToastActivatedEventArgs, ToastDismissalReason, ToastDismissedEventArgs, ToastNotification, ToastNotificationManager,
+};
 use windows::core::{HSTRING, IInspectable, Interface};
 
 const GROUP: &str = "voxa";
@@ -23,6 +25,20 @@ fn aumid() -> &'static str {
 
 /// Toasts shown and not yet removed, kept alive so their Activated events still arrive.
 static LIVE: Mutex<Vec<(String, ToastNotification)>> = Mutex::new(Vec::new());
+
+/// Tags of toasts the user closed (or clicked), collected on the toast's thread.
+static DISMISSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Toasts the user closed since the last call: they are no longer on screen.
+pub fn take_dismissed() -> Vec<String> {
+    std::mem::take(&mut *DISMISSED.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+fn gone(toast: Option<&ToastNotification>) {
+    if let Some(tag) = toast.and_then(|t| t.Tag().ok()) {
+        DISMISSED.lock().unwrap_or_else(|e| e.into_inner()).push(tag.to_string());
+    }
+}
 
 pub fn init() -> bool {
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
@@ -53,18 +69,19 @@ fn esc(s: &str) -> String {
 
 /// Show (or replace) the toast with `tag`. `button`: (label, arguments). `active`: may make a
 /// sound; otherwise it arrives silently (Focus and Do Not Disturb are always respected).
-pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, launch: &str, active: bool) -> bool {
+/// `update`: it replaces one already showing, quietly, in Action Center only (no new banner).
+pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, launch: &str, active: bool, update: bool) -> bool {
     let actions = button
         .map(|(label, args)| format!(r#"<actions><action content="{}" arguments="{}" activationType="foreground"/></actions>"#, esc(label), esc(args)))
         .unwrap_or_default();
-    let audio = if active { "" } else { r#"<audio silent="true"/>"# };
+    let audio = if active && !update { "" } else { r#"<audio silent="true"/>"# };
     let xml = format!(
         r#"<toast launch="{}"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual>{actions}{audio}</toast>"#,
         esc(launch),
         esc(title),
         esc(body)
     );
-    match post(tag, &xml) {
+    match post(tag, &xml, update) {
         Ok(()) => {
             crate::os::log(&format!("toast shown: {tag}"));
             true
@@ -76,12 +93,27 @@ pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, la
     }
 }
 
-fn post(tag: &str, xml: &str) -> windows::core::Result<()> {
+fn post(tag: &str, xml: &str, update: bool) -> windows::core::Result<()> {
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(aumid()))?;
+    // Turned off for Voxa in Windows settings: not shown, so it must not count as posted.
+    if notifier.Setting()? != NotificationSetting::Enabled {
+        return Err(windows::core::Error::new(windows::core::HRESULT(0x80070005u32 as i32), "notifications are off for Voxa"));
+    }
     let doc = XmlDocument::new()?;
     doc.LoadXml(&HSTRING::from(xml))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
     toast.SetTag(&HSTRING::from(tag))?;
     toast.SetGroup(&HSTRING::from(GROUP))?;
+    if update {
+        toast.SetSuppressPopup(true)?;
+    }
+    toast.Dismissed(&TypedEventHandler::<ToastNotification, ToastDismissedEventArgs>::new(|t, args| {
+        // Timed out means it moved to Action Center and is still there.
+        if args.as_ref().and_then(|a| a.Reason().ok()) == Some(ToastDismissalReason::UserCanceled) {
+            gone(t.as_ref());
+        }
+        Ok(())
+    }))?;
     toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(|_, args| {
         let args = args.as_ref().and_then(|a| a.cast::<ToastActivatedEventArgs>().ok());
         let a = args.and_then(|a| a.Arguments().ok()).map(|s| s.to_string()).unwrap_or_default();
@@ -90,7 +122,7 @@ fn post(tag: &str, xml: &str) -> windows::core::Result<()> {
         }
         Ok(())
     }))?;
-    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(aumid()))?.Show(&toast)?;
+    notifier.Show(&toast)?;
     let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
     live.retain(|(t, _)| t != tag);
     live.push((tag.to_string(), toast));

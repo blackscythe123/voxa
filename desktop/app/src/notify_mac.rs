@@ -88,22 +88,41 @@ pub fn init() -> bool {
         // Kept for the life of the app (the center holds its delegate weakly).
         let obj: id = msg_send![cls, new];
         let _: () = msg_send![c, setDelegate: obj];
+        // Every button category, registered once: setNotificationCategories replaces them all,
+        // so registering one per toast removed the other toast's button.
+        let signin = voxa_core::notices::signed_out(0).action.unwrap_or_else(|| "Sign in".into());
+        let copy = voxa_core::notices::ready(1, None).action.unwrap_or_else(|| "Copy".into());
+        let cats = [category(super::TAG_SIGNIN, &signin, true), category(super::TAG_DICTATIONS, &copy, false), category(super::TAG_DICTATIONS, "Send now", false)];
+        let list: id = msg_send![class!(NSArray), arrayWithObjects: cats.as_ptr() count: cats.len()];
+        let set: id = msg_send![class!(NSSet), setWithArray: list];
+        let _: () = msg_send![c, setNotificationCategories: set];
     });
     true
 }
 
-/// One category per tag, whose single button carries the tag as its identifier.
-fn category(tag: &str, label: &str) -> id {
+/// macOS can't report closed notifications without an async query: nothing to forget here.
+pub fn take_dismissed() -> Vec<String> {
+    Vec::new()
+}
+
+/// One category per tag and button label, whose single button carries the tag as its identifier.
+/// `foreground`: the button opens Voxa (Sign in). Copy and Send now run in the background and
+/// never bring Voxa to the front or take focus.
+fn category(tag: &str, label: &str, foreground: bool) -> id {
     unsafe {
-        // UNNotificationActionOptionForeground
-        let action: id = msg_send![class!(UNNotificationAction), actionWithIdentifier: ns(tag) title: ns(label) options: 1u64 << 2];
+        // UNNotificationActionOptionForeground = 1 << 2; none = 0.
+        let options: u64 = if foreground { 1 << 2 } else { 0 };
+        let action: id = msg_send![class!(UNNotificationAction), actionWithIdentifier: ns(tag) title: ns(label) options: options];
         let actions: id = msg_send![class!(NSArray), arrayWithObject: action];
         let empty: id = msg_send![class!(NSArray), array];
         msg_send![class!(UNNotificationCategory), categoryWithIdentifier: ns(&format!("{tag}:{label}")) actions: actions intentIdentifiers: empty options: 0u64]
     }
 }
 
-pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, launch: &str, active: bool) -> bool {
+/// `update`: it replaces one already showing: passive and silent, so it changes the count
+/// without a new banner or sound.
+pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, launch: &str, active: bool, update: bool) -> bool {
+    let active = active && !update;
     let Some(c) = center() else { return false };
     unsafe {
         let content: id = msg_send![class!(UNMutableNotificationContent), new];
@@ -113,9 +132,7 @@ pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, la
         let _: () = msg_send![info, setObject: ns(launch) forKey: ns("launch")];
         if let Some((label, args)) = button {
             let _: () = msg_send![info, setObject: ns(args) forKey: ns("button")];
-            let cat = category(tag, label);
-            let set: id = msg_send![class!(NSSet), setWithObject: cat];
-            let _: () = msg_send![c, setNotificationCategories: set];
+            // Registered once in init (see there).
             let _: () = msg_send![content, setCategoryIdentifier: ns(&format!("{tag}:{label}"))];
         }
         let _: () = msg_send![content, setUserInfo: info];

@@ -61,6 +61,16 @@ pub struct Notifier {
     /// The dictations notification on screen, and what it counts.
     dictations: Option<Dictations>,
     ready: bool,
+    /// Held back while the user was looking at Voxa; posted by [`Notifier::flush`] once they
+    /// aren't (never dropped).
+    pending: Pending,
+}
+
+#[derive(Default)]
+struct Pending {
+    signed_out: Option<u32>,
+    ready: Vec<(u64, String)>,
+    not_sent: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,7 +88,7 @@ impl Notifier {
         let pacing = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let ready = backend::init();
         crate::os::log(&format!("notifications {}", if ready { "ready" } else { "unavailable" }));
-        Self { pacing, signin_showing: false, dictations: None, ready }
+        Self { pacing, signin_showing: false, dictations: None, ready, pending: Pending::default() }
     }
 
     fn save(&self) {
@@ -87,8 +97,43 @@ impl Notifier {
         }
     }
 
-    fn decide(&self, kind: Kind, showing: bool) -> Decision {
+    fn decide(&mut self, kind: Kind, showing: bool) -> Decision {
+        self.forget_dismissed();
+        let showing = showing && match kind {
+            Kind::SignIn => self.signin_showing,
+            Kind::Dictations => self.dictations.is_some(),
+        };
         notices::decide(kind, crate::now_ms(), showing, &self.pacing.posted, self.pacing.last_dictations)
+    }
+
+    /// Toasts the user closed are gone: the next one is a new post, counted against the limits,
+    /// not a silent update of one that isn't there.
+    fn forget_dismissed(&mut self) {
+        for tag in backend::take_dismissed() {
+            match tag.as_str() {
+                TAG_SIGNIN => self.signin_showing = false,
+                TAG_DICTATIONS => self.dictations = None,
+                _ => {}
+            }
+        }
+    }
+
+    /// Post what was held back while the user was looking, now that they aren't.
+    pub fn flush(&mut self, looking: bool) {
+        if looking || !self.ready {
+            return;
+        }
+        let p = std::mem::take(&mut self.pending);
+        if let Some(waiting) = p.signed_out {
+            crate::os::log("sign-in notification: posting the one held back");
+            self.signed_out(waiting, false);
+        }
+        for (entry, app) in p.ready {
+            self.ready(entry, &app, false);
+        }
+        for _ in 0..p.not_sent {
+            self.not_sent(false);
+        }
     }
 
     fn posted(&mut self, kind: Kind) {
@@ -102,17 +147,22 @@ impl Notifier {
 
     /// D1: a definite, confirmed expiry. `looking`: the strip is up or Voxa's window is in front.
     pub fn signed_out(&mut self, waiting: u32, looking: bool) {
-        if !self.ready || looking {
-            crate::os::log(&format!("sign-in notification not shown ({})", if looking { "user is looking" } else { "unavailable" }));
+        if !self.ready {
+            crate::os::log("sign-in notification not shown (unavailable)");
             return;
         }
-        let d = self.decide(Kind::SignIn, self.signin_showing);
+        if looking {
+            crate::os::log("sign-in notification held back until the user stops looking at Voxa");
+            self.pending.signed_out = Some(waiting);
+            return;
+        }
+        let d = self.decide(Kind::SignIn, true);
         crate::os::log(&format!("sign-in notification: {d:?} ({waiting} waiting)"));
         if d == Decision::Skip {
             return;
         }
         let n = notices::signed_out(waiting);
-        if backend::show(TAG_SIGNIN, &n.title, &n.body, n.action.as_deref().map(|a| (a, "signin")), "signin", true) && d == Decision::Post {
+        if backend::show(TAG_SIGNIN, &n.title, &n.body, n.action.as_deref().map(|a| (a, "signin")), "signin", true, d == Decision::Update) && d == Decision::Post {
             self.posted(Kind::SignIn);
         }
         self.signin_showing = true;
@@ -120,6 +170,7 @@ impl Notifier {
 
     /// The session is good again, or the user signed out on purpose: the sign-in toast goes.
     pub fn clear_signin(&mut self) {
+        self.pending.signed_out = None;
         if self.signin_showing {
             crate::os::log("sign-in notification removed");
         }
@@ -131,7 +182,11 @@ impl Notifier {
 
     /// D2: a dictation that wasn't on screen was written out and waits in History.
     pub fn ready(&mut self, entry: u64, app: &str, looking: bool) {
-        if !self.ready || looking {
+        if !self.ready {
+            return;
+        }
+        if looking {
+            self.pending.ready.push((entry, app.to_string()));
             return;
         }
         let mut ids = match &self.dictations {
@@ -141,8 +196,11 @@ impl Notifier {
         if !ids.contains(&entry) {
             ids.push(entry);
         }
-        let showing = self.dictations.is_some();
-        let d = self.decide(Kind::Dictations, showing);
+        let d = self.decide(Kind::Dictations, true);
+        if self.dictations.is_none() {
+            // The last one was closed: start counting again.
+            ids.retain(|i| *i == entry);
+        }
         crate::os::log(&format!("dictations notification (ready {}): {d:?}", ids.len()));
         if d == Decision::Skip {
             return;
@@ -150,7 +208,7 @@ impl Notifier {
         let n = notices::ready(ids.len() as u32, Some(app));
         let copy = format!("copy:{entry}");
         let button = if ids.len() == 1 { n.action.as_deref().map(|a| (a, copy.as_str())) } else { None };
-        if backend::show(TAG_DICTATIONS, &n.title, &n.body, button, "open", false) && d == Decision::Post {
+        if backend::show(TAG_DICTATIONS, &n.title, &n.body, button, "open", false, d == Decision::Update) && d == Decision::Post {
             self.posted(Kind::Dictations);
         }
         self.dictations = Some(Dictations::Ready(ids));
@@ -158,20 +216,24 @@ impl Notifier {
 
     /// D3: a send after a reconnect failed. Most recent wins over a ready notice.
     pub fn not_sent(&mut self, looking: bool) {
-        if !self.ready || looking {
+        if !self.ready {
             return;
         }
+        if looking {
+            self.pending.not_sent += 1;
+            return;
+        }
+        let d = self.decide(Kind::Dictations, true);
         let count = match &self.dictations {
             Some(Dictations::NotSent(n)) => n + 1,
             _ => 1,
         };
-        let d = self.decide(Kind::Dictations, self.dictations.is_some());
         crate::os::log(&format!("dictations notification (not sent {count}): {d:?}"));
         if d == Decision::Skip {
             return;
         }
         let n = notices::not_sent(count, "Send now");
-        if backend::show(TAG_DICTATIONS, &n.title, &n.body, n.action.as_deref().map(|a| (a, "send")), "open", false) && d == Decision::Post {
+        if backend::show(TAG_DICTATIONS, &n.title, &n.body, n.action.as_deref().map(|a| (a, "send")), "open", false, d == Decision::Update) && d == Decision::Post {
             self.posted(Kind::Dictations);
         }
         self.dictations = Some(Dictations::NotSent(count));
@@ -179,6 +241,8 @@ impl Notifier {
 
     /// History was opened, the dictation copied or resent: the dictations toast goes.
     pub fn clear_dictations(&mut self) {
+        self.pending.ready.clear();
+        self.pending.not_sent = 0;
         if self.dictations.take().is_some() && self.ready {
             crate::os::log("dictations notification removed");
             backend::remove(TAG_DICTATIONS);
