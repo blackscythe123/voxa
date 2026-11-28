@@ -10,7 +10,7 @@ Writes (all committed, never edit by hand):
     tools/licences/inventory.tsv                    kind, name, version, licence, apps (read by the lint)
     tools/licences/android-deps.txt                 with --gradle: the release runtime classpath
     desktop/app/assets/licences-{windows,macos}.json.gz   the desktop's Open source licences page
-    android/app/src/main/assets/licences.json.gz         the Android app's Open source licences page
+    android/app/src/main/assets/licences.json.gzip       the Android app's Open source licences page
 
 Rust: the crates linked into each artefact (`cargo tree -e normal,no-proc-macro`, per target, for
 voxa-desktop + voxa-signin on Windows and macOS, voxa-ffi on Android), their licence from

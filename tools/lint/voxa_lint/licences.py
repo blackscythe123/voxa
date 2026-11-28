@@ -3,7 +3,7 @@
 apps' "Open source licences" pages from the real dependency graph; this rule keeps them honest.
 
   licences-stale    THIRD_PARTY_NOTICES.txt, tools/licences/inventory.tsv and the three app copies
-                    (desktop/app/assets/licences-*.json.gz, android/app/src/main/assets/licences.json.gz)
+                    (desktop/app/assets/licences-*.json.gz, android/app/src/main/assets/licences.json.gzip)
                     carry the dependency fingerprint of today's tree: Cargo.lock, the dependency
                     sections of the workspace's Cargo.toml files, the committed Android dependency
                     list (tools/licences/android-deps.txt, itself checked against libs.versions.toml
@@ -38,7 +38,7 @@ TEXTS_DIR = "tools/licences/texts"
 RESOURCES = {
     "windows": "desktop/app/assets/licences-windows.json.gz",
     "macos": "desktop/app/assets/licences-macos.json.gz",
-    "android": "android/app/src/main/assets/licences.json.gz",
+    "android": "android/app/src/main/assets/licences.json.gzip",
 }
 VERSIONS_TOML = "android/gradle/libs.versions.toml"
 APP_GRADLE = "android/app/build.gradle.kts"

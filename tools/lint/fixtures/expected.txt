@@ -79,7 +79,7 @@
 1 licences-stale tools/licences/android-deps.txt                    # resolved from older Gradle inputs
 1 licences-stale desktop/app/assets/licences-windows.json.gz
 1 licences-stale desktop/app/assets/licences-macos.json.gz
-1 licences-stale android/app/src/main/assets/licences.json.gz
+1 licences-stale android/app/src/main/assets/licences.json.gzip
 8 licences-allowed tools/licences/inventory.tsv                     # GPL, AGPL, LGPL-only, SSPL, Unknown, X AND GPL, empty, unbalanced; the good-* rows pass
 1 licences-asset android/app/src/main/res/font/comic.ttf
 1 licences-asset android/app/src/main/res/raw/ding.ogg
