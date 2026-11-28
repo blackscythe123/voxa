@@ -296,10 +296,10 @@ dependencies changed), commit the outputs.
   `libs.versions.toml` and the app's `dependencies { }` block it was resolved from.
 - `licences-allowed`: every inventory licence passes the allow-list: MIT, MIT-0, Apache-2.0,
   BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, Unicode-DFS-2016, MPL-2.0 (file level, fine
-  unmodified), CC0-1.0, OFL-1.1, BSL-1.0, 0BSD, Unlicense, with `WITH LLVM-exception`. An `OR`
+  unmodified), CC0-1.0, OFL-1.1, BSL-1.0, 0BSD, Unlicense, CDLA-Permissive-2.0 (webpki-roots' root
+  certificate data, approved by the owner on 2026-11-28), with `WITH LLVM-exception`. An `OR`
   passes when one side does, an `AND` when both do. GPL, AGPL, LGPL-only, SSPL and anything unknown
-  fail. One exception is on the allow-list with its reason: webpki-roots (CDLA-Permissive-2.0, the
-  root certificate data).
+  fail.
 - `licences-asset`: every font, sound, model and native library in the app trees (`res/font`,
   `res/raw`, Android `assets`, desktop `assets/*.ttf`, `core/*/model/*.onnx`, `vendor/`) is listed in
   `ASSETS`.
