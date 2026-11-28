@@ -188,8 +188,8 @@ pub struct UsualHour {
 }
 impl Policy for UsualHour {
     fn decide(&mut self, ctx: &Context, _: &NudgeState, _: &mut Rng) -> Option<Style> {
-        let target = ctx.usual_hour.unwrap_or(19.0) as f64;
-        (hour_gap(ctx.hour as f64, target) <= 1.5 && ctx.hours_since_nudge.is_none_or(|h| h >= 72.0)).then_some(self.style)
+        let target = ctx.usual_hour.unwrap_or(engine::DEFAULT_HOUR) as f64;
+        (hour_gap(ctx.hour as f64, target) <= engine::USUAL_HOUR_WINDOW as f64 && ctx.hours_since_nudge.is_none_or(|h| h >= 72.0)).then_some(self.style)
     }
 }
 

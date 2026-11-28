@@ -1,6 +1,6 @@
 [package]
 name = "voxa-nudge"
-description = "Voxa's come back reminder engine: a tiny evolved network decides when to remind and which wording, a Thompson sampling bandit personalises it on the device, and hard rules outside the model keep it polite."
+description = "Voxa's come back reminder engine: hard rules keep it polite and a usual hour rule decides when; an evolved network and a Thompson sampling bandit stay as an experiment behind a switch."
 edition.workspace = true
 version.workspace = true
 license.workspace = true

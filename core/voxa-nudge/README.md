@@ -16,10 +16,33 @@ phone, in under a microsecond, with no server and no ML framework.
 Results are from a simulator, not from real users. Read [Limitations](#honest-limitations)
 before quoting them.
 
+## What the app uses
+
+**The default policy is a simple rule, not the network.** In this crate's own simulator the
+shipped configuration (evolved network plus bandit) scored 11.23 per user, and the hand-written
+rule "remind near the user's usual dictation hour, in the tip wording" scored 11.38. The network
+alone tied that rule (+0.02, not significant) and the bandit made it slightly worse when the
+simulator was right. So `Engine` now decides with `Policy::UsualHour` by default:
+
+- the hard rules first (unchanged);
+- then send only within 1.5 hours of the user's usual dictation hour (19:00 when there is no
+  history yet), in the tip wording, or plain when the tip is not allowed.
+
+The evolved network and the bandit are kept as an experiment behind `Policy::Network` (set
+`engine.policy`). Their code, the simulator and `bin/train` still build and are tested, so the
+comparison can be rerun; the app does not use them. Taps and swipes are still counted in the
+bandit's tallies, which costs nothing and keeps the experiment's data.
+
+A `nudge.json` that can't be read, can't be parsed, or comes from a newer format version keeps
+reminders off (unless the file itself still clearly says `"enabled": true`); a missing file is a
+fresh start with reminders on. Bandit counts read from a file are clamped to 0..100000, so a
+damaged file can't break the sampling.
+
+Everything below describes the experiment as it was built and measured.
+
 ## The problem
 
-Every couple of hours the app's background job asks: should Voxa remind this person now, and if
-so, with what words? The four wordings (plain sentence case, no emojis, no dashes, no guilt):
+The app's background job asks: should Voxa remind this person now, and if so, with what words? The four wordings (plain sentence case, no emojis, no dashes, no guilt):
 
 | Style | Title | Body |
 |---|---|---|
@@ -204,7 +227,8 @@ away from when they dictate, and tips work much worse while the plain wording wo
 
 When the simulator is right, exploration costs about 0.15 to 0.3 points; when it is wrong, the
 bandit recovers 0.27 points in the first month and 0.81 over six months, and its open rate
-triples. Real users will differ from my simulator, so the app ships with the bandit on. I tried
+triples. Real users will differ from my simulator, which was the case for the bandit; it was
+not strong enough to keep, and the app uses the usual hour rule instead (see above). I tried
 variants before settling: using the slot posterior mean instead of a sample (no exploration) let
 slots that failed early go silent for good and cut reminders by half; applying slot evidence from
 the first outcome cost more than it earned.
@@ -219,10 +243,17 @@ the first outcome cost more than it earned.
 - **The learned policy is simple.** It matches a hand-written heuristic once that heuristic uses
   the same wording. The project's honest claim is "evolution found and tuned an interpretable
   13-parameter rule", not "the network discovered something a person could not".
-- **Users with no history are never reminded** (the model keys on the usual hour). Onboarding
-  reminders for people who installed but never dictated are a different problem.
-- **One check grid.** The model was trained on decisions every 2 hours; a much different schedule
-  on the phone changes how often it fires. The wiring doc asks for a 2-hour periodic job.
+- **The network never reminds users with no history** (it keys on the usual hour). The default
+  rule falls back to 19:00 for them. Onboarding reminders for people who installed but never
+  dictated are really a different problem.
+- **One check grid.** The network was trained on decisions every 2 hours; a much different
+  schedule changes how often it fires. The default rule only needs one check inside its 3 hour
+  window, so the wiring doc schedules one one-shot job near the usual hour instead of waking the
+  phone every 2 hours.
+- **The training artifacts live in the source tree** (`model/`). Only `champion.json` (661 bytes)
+  is compiled in; the network, the evolution and the simulator are compiled into the library but
+  unused by the app, and link time optimisation should drop them from the Android library
+  (reasoned, not measured).
 - **Short horizon for the bandit.** With at most one reminder every 3 days, the bandit learns
   slowly; most users will never give it more than a handful of outcomes per arm.
 - **No offline evaluation on real logs yet.** If Voxa ever has consented reminder logs, the next
@@ -238,15 +269,17 @@ let mut engine = Engine::open(data_dir);            // state in data_dir/nudge.j
 let usage = Usage { dictations_ms, saved_secs_month };
 match engine.decide(now_ms, utc_offset_minutes, &usage, &mut Rng::new(now_ms)) {
     Ok(nudge) => post_notification(&nudge.title, &nudge.body),
-    Err(_skip) => {} // a rule blocked it, or the model chose to wait
+    Err(_skip) => {} // a rule blocked it, or it isn't the usual hour
 }
+// when to run the job next (the next usual hour, in daytime):
+let next_ms = engine.next_check_ms(now_ms, utc_offset_minutes, &usage);
 // later, from the notification:
 engine.record_outcome(voxa_nudge::Outcome::Opened);
 ```
 
 Android goes through `ReminderEngine` in `core/voxa-ffi/src/nudge.rs`, which reads History
-itself; the wiring (channel, periodic job, tap and swipe, the Settings switch) and the desktop
-plan are in `docs/reminders.md`.
+itself; the wiring (channel, the one-shot job, tap and swipe, the Settings switch) and the
+desktop plan are in `docs/reminders.md`.
 
 Retrain: `cargo run -p voxa-nudge --release --bin train -- --generations 100 --population 96
 --seed 1`. Tests: `cargo test -p voxa-nudge`.

@@ -1,9 +1,10 @@
 //! The "come back" reminder engine (`voxa-nudge`) for the Android app.
 //!
-//! The app's periodic background job calls [`ReminderEngine::check`] every couple of hours; it
-//! returns the reminder to post, or nothing. The hard rules (at most one every 3 days, never 21:00
-//! to 09:00, never within 48 hours of a dictation, stop after 2 ignored, the off switch) are
-//! enforced here, in Rust, whatever the model says. Notification taps and swipes come back through
+//! The app's background job calls [`ReminderEngine::check`]; it returns the reminder to post, or
+//! nothing. The hard rules (at most one every 3 days, never 21:00 to 09:00, never within 48 hours
+//! of a dictation, stop after 2 ignored, the off switch) are enforced here, in Rust. Within them
+//! the default policy is the simple usual hour rule (`voxa_nudge::engine::Policy`); the evolved
+//! network is an experiment and is not used by the app. A damaged `nudge.json` keeps reminders off. Notification taps and swipes come back through
 //! [`ReminderEngine::record_outcome`]. The state is `nudge.json` in the app's data folder.
 //!
 //! Wiring is described in docs/reminders.md.
@@ -97,7 +98,7 @@ impl ReminderEngine {
         Arc::new(Self { dir: PathBuf::from(data_dir) })
     }
 
-    /// Asked by the periodic job (every 2 hours suits the model). `utc_offset_minutes`: the
+    /// Asked by the reminder job, once in or near the user's usual hour. `utc_offset_minutes`: the
     /// phone's current offset from UTC. Returns the reminder to post now, or None. A returned
     /// reminder is already counted as sent.
     pub fn check(&self, now_ms: u64, utc_offset_minutes: i32) -> Option<Reminder> {
@@ -110,6 +111,14 @@ impl ReminderEngine {
             title: n.title,
             body: n.body,
         })
+    }
+
+    /// When to schedule the next one-shot reminder job (ms since the epoch): the next time the
+    /// local clock reaches the user's usual hour, inside 09:00 to 21:00. Saves nothing.
+    pub fn next_check_ms(&self, now_ms: u64, utc_offset_minutes: i32) -> u64 {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let usage = usage_from_history(&self.dir, now_ms, utc_offset_minutes);
+        vn::Engine::open(&self.dir).next_check_ms(now_ms, utc_offset_minutes, &usage)
     }
 
     /// The user tapped or swiped away the last reminder.
@@ -190,6 +199,18 @@ mod tests {
         // A tap with nothing waiting is harmless.
         engine.record_outcome(ReminderOutcome::Opened);
         assert!(dir.join("nudge.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_damaged_state_file_keeps_reminders_off() {
+        let dir = std::env::temp_dir().join(format!("voxa-ffi-reminders-damaged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("nudge.json"), b"{ not json").unwrap();
+        let engine = ReminderEngine::new(dir.to_string_lossy().to_string());
+        assert!(!engine.enabled());
+        assert_eq!(engine.check(20_440 * DAY + 19 * 3_600_000, 0), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
