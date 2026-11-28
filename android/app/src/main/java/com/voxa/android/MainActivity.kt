@@ -12,31 +12,48 @@ import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.FileProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.voxa.android.diag.Diag
-import java.io.File
+import com.voxa.android.ui.DetailScreen
 import com.voxa.android.ui.HistoryScreen
 import com.voxa.android.ui.HomeScreen
+import com.voxa.android.ui.LaunchOverlay
 import com.voxa.android.ui.SettingsScreen
+import com.voxa.android.ui.SetupScreen
 import com.voxa.android.ui.SignInScreen
-import com.voxa.android.ui.TourScreen
+import com.voxa.android.ui.Tab
+import com.voxa.android.ui.TabBar
 import com.voxa.android.ui.VoxaTheme
 import com.voxa.android.ui.WordsScreen
+import com.voxa.android.ui.vx
+import java.io.File
 
-enum class Screen { Home, History, Settings, Words, SignIn, Tour }
+/** Where the app is. Tabs sit at the bottom of the stack; a dictation, sign-in and setup on top. */
+sealed interface Route {
+    data class Tabbed(val tab: Tab) : Route
+    data class Detail(val id: ULong) : Route
+    data object SignIn : Route
+    data object Setup : Route
+}
 
-/** The companion app: sign in, set up the keyboard and the mic, History, Settings, Words. */
+/** The companion app: setup, Home, History, Words and Settings. */
 class MainActivity : ComponentActivity() {
     /** Bumped on resume and when keyboard settings change, so setup state is re-read live. */
     val tick = mutableIntStateOf(0)
@@ -51,15 +68,24 @@ class MainActivity : ComponentActivity() {
         Diag.log("permission", "microphone ${if (granted) "granted" else "denied"}")
         tick.intValue++
     }
+    private val stack = mutableStateListOf<Route>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         openRequest = intent.getStringExtra(EXTRA_OPEN)
         debugSeams(intent)
         for (key in listOf(Settings.Secure.ENABLED_INPUT_METHODS, Settings.Secure.DEFAULT_INPUT_METHOD)) {
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(key), false, imeObserver)
         }
-        setContent { VoxaTheme { Root() } }
+        stack.add(if (voxa.core.settings().onboarded) Route.Tabbed(Tab.Home) else Route.Setup)
+        // The launch animation: cold start only, and never when the user turned animations off.
+        val animationsOff = Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        val freeze = if (BuildConfig.DEBUG && intent.hasExtra("debug_launch_at")) intent.getFloatExtra("debug_launch_at", 0.5f) else null
+        val showLaunch = freeze != null || (savedInstanceState == null && !launchShown && !animationsOff)
+        launchShown = true
+        setContent { VoxaTheme { Root(showLaunch, freeze) } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -72,11 +98,22 @@ class MainActivity : ComponentActivity() {
      *  `adb shell am start -n com.voxa.android/.MainActivity --ez debug_fake_session true`
      *  stores a dummy session (ChatGPT rejects it, so nothing is ever transcribed with it). */
     private fun debugSeams(intent: Intent) {
-        if (!BuildConfig.DEBUG || !intent.getBooleanExtra("debug_fake_session", false)) return
-        Diag.log("debug", "dummy session stored for testing")
-        voxa.signedIn("voxa-debug=1", android.webkit.WebSettings.getDefaultUserAgent(this))
+        if (!BuildConfig.DEBUG) return
+        if (intent.getBooleanExtra("debug_fake_session", false)) {
+            Diag.log("debug", "dummy session stored for testing")
+            voxa.signedIn("voxa-debug=1", android.webkit.WebSettings.getDefaultUserAgent(this))
+        }
+        intent.getStringExtra("debug_route")?.let { r ->
+            stack.clear()
+            stack.add(
+                when {
+                    r == "setup" -> Route.Setup
+                    r.startsWith("detail:") -> Route.Detail(r.removePrefix("detail:").toULong())
+                    else -> Route.Tabbed(Tab.entries.firstOrNull { it.name.equals(r, true) } ?: Tab.Home)
+                },
+            )
+        }
     }
-
 
     override fun onResume() {
         super.onResume()
@@ -89,6 +126,39 @@ class MainActivity : ComponentActivity() {
         contentResolver.unregisterContentObserver(imeObserver)
         super.onDestroy()
     }
+
+    // ── navigation ───────────────────────────────────────────────────────────
+
+    fun go(route: Route) {
+        if (route is Route.Tabbed) {
+            // A fresh visit to History starts without the last search.
+            if (route.tab == Tab.History) getSharedPreferences("ui", MODE_PRIVATE).edit().remove("history_query").apply()
+            stack.clear()
+            if (route.tab != Tab.Home) stack.add(Route.Tabbed(Tab.Home))
+            stack.add(route)
+        } else {
+            stack.add(route)
+        }
+    }
+
+    fun back() {
+        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+    }
+
+    /** Setup finished (or skipped): Home. */
+    fun finishSetup() {
+        voxa.core.setSettings(voxa.core.settings().copy(onboarded = true))
+        stack.clear()
+        stack.add(Route.Tabbed(Tab.Home))
+    }
+
+    fun restartSetup() {
+        getSharedPreferences("ui", MODE_PRIVATE).edit().putInt("setup_step", 0).apply()
+        stack.clear()
+        stack.add(Route.Setup)
+    }
+
+    // ── system actions ───────────────────────────────────────────────────────
 
     /** Ask for the mic; after a permanent "Don't allow", open Voxa's page in Android settings. */
     fun requestMic() {
@@ -115,8 +185,11 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent.createChooser(send, "Share diagnostics"))
     }
 
-    fun openKeyboardSettings() {
+    fun shareText(text: String) {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
+    }
 
+    fun openKeyboardSettings() {
         startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
     }
 
@@ -125,34 +198,39 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Root() {
-        val first = remember { if (voxa.core.settings().onboarded) Screen.Home else Screen.Tour }
-        var screen by remember { mutableStateOf(first) }
-        var back by remember { mutableStateOf(Screen.Home) }
-        val go = { to: Screen ->
-            back = if (to == Screen.SignIn || to == Screen.Words) screen else Screen.Home
-            screen = to
-        }
+    private fun Root(showLaunch: Boolean, freeze: Float?) {
+        var launching by remember { mutableStateOf(showLaunch) }
         openRequest?.let {
             openRequest = null
             when (it) {
-                OPEN_SIGN_IN -> go(Screen.SignIn)
+                OPEN_SIGN_IN -> if (stack.lastOrNull() != Route.SignIn) go(Route.SignIn)
                 OPEN_MIC -> {
-                    if (screen == Screen.SignIn) screen = Screen.Home
+                    if (stack.lastOrNull() == Route.SignIn) back()
                     requestMic()
                 }
             }
         }
-        BackHandler(screen != Screen.Home && screen != Screen.Tour) { screen = back.takeIf { it != screen } ?: Screen.Home }
-        Box(Modifier.fillMaxSize().systemBarsPadding()) {
-            when (screen) {
-                Screen.Home -> HomeScreen(this@MainActivity, go)
-                Screen.History -> HistoryScreen(this@MainActivity, go)
-                Screen.Settings -> SettingsScreen(this@MainActivity, go)
-                Screen.Words -> WordsScreen { screen = Screen.Settings }
-                Screen.SignIn -> SignInScreen(onDone = { screen = back }, onClose = { screen = back })
-                Screen.Tour -> TourScreen(this@MainActivity, onSignIn = { go(Screen.SignIn); back = Screen.Tour }, onDone = { screen = Screen.Home })
+        val route = stack.lastOrNull() ?: Route.Tabbed(Tab.Home)
+        BackHandler(stack.size > 1) { back() }
+        val c = vx
+        Box(Modifier.fillMaxSize().background(c.base)) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth().statusBarsPadding()) {
+                    when (route) {
+                        is Route.Tabbed -> when (route.tab) {
+                            Tab.Home -> HomeScreen(this@MainActivity)
+                            Tab.History -> HistoryScreen(this@MainActivity)
+                            Tab.Words -> WordsScreen()
+                            Tab.Settings -> SettingsScreen(this@MainActivity)
+                        }
+                        is Route.Detail -> DetailScreen(this@MainActivity, route.id)
+                        Route.SignIn -> SignInScreen(onDone = { back() }, onClose = { back() })
+                        Route.Setup -> SetupScreen(this@MainActivity)
+                    }
+                }
+                if (route is Route.Tabbed) TabBar(route.tab) { go(Route.Tabbed(it)) }
             }
+            if (launching) LaunchOverlay(freeze) { launching = false }
         }
     }
 
@@ -160,5 +238,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN = "open"
         const val OPEN_SIGN_IN = "sign-in"
         const val OPEN_MIC = "mic"
+
+        /** The launch animation plays once per process (a cold start). */
+        private var launchShown = false
     }
 }

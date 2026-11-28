@@ -62,6 +62,8 @@ class VoxaKeyboard : InputMethodService() {
     private var pendingPaste: FlowEffect.Paste? = null
     private var recordingSince = 0L
     private var haptics = true
+    /** Settings, "Hold to talk": a press held past [HOLD_MS] stops on release. Off: taps only. */
+    private var holdToTalk = true
 
     // Mic key: press-and-hold over 400 ms then release stops (hold to talk); a quick tap stays on.
     private var pressStarted = false
@@ -77,7 +79,7 @@ class VoxaKeyboard : InputMethodService() {
         override fun run() {
             val p = panel ?: return
             val secs = (SystemClock.elapsedRealtime() - recordingSince) / 1000
-            p.timer.text = "%d:%02d".format(secs / 60, secs % 60)
+            p.right.text = "%d:%02d".format(secs / 60, secs % 60)
             main.postDelayed(this, 500)
         }
     }
@@ -86,7 +88,7 @@ class VoxaKeyboard : InputMethodService() {
         super.onCreate()
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
-        recorder = Recorder(this, onLevel = { panel?.ink?.level(it) }, onInterrupted = { onMicInterrupted() })
+        recorder = Recorder(this, onLevel = { panel?.bars?.level(it) }, onInterrupted = { onMicInterrupted() })
         app.historyChanged()
         scope.launch {
             combine(app.session, app.online) { _, _ -> }.collect { pushReadiness() }
@@ -149,6 +151,7 @@ class VoxaKeyboard : InputMethodService() {
         Diag.memory("keyboard shown")
         val s = app.core.settings()
         haptics = s.haptics
+        holdToTalk = s.holdToTalk
         pushReadiness()
         app.checkSession()
         render()
@@ -212,7 +215,9 @@ class VoxaKeyboard : InputMethodService() {
             is FlowEffect.ShowStatus -> Unit
             is FlowEffect.HideStatus -> if (effect.afterMs > 0u) {
                 val shown = flow.state()
-                main.postDelayed({ if (flow.state() == shown) dispatch(FlowEvent.Dismiss) }, effect.afterMs.toLong())
+                // "Pasted in X" gets out of the way after a moment and a half.
+                val after = if (shown is FlowState.Delivered) minOf(effect.afterMs.toLong(), DONE_MS) else effect.afterMs.toLong()
+                main.postDelayed({ if (!destroyed && flow.state() == shown) dispatch(FlowEvent.Dismiss) }, after)
             }
             is FlowEffect.StartCapture -> startCapture(effect)
             is FlowEffect.StopCapture -> {
@@ -248,7 +253,7 @@ class VoxaKeyboard : InputMethodService() {
             recordingSince = SystemClock.elapsedRealtime()
             main.removeCallbacks(timerTick)
             main.post(timerTick)
-            panel?.ink?.start()
+            panel?.bars?.reset()
             return
         }
         // The mic would not open: undo the take and show why instead (as the desktop does).
@@ -326,6 +331,8 @@ class VoxaKeyboard : InputMethodService() {
         p.mic.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    // Only the circle itself, not its glow.
+                    if (!p.mic.hit(ev.x, ev.y) || !v.isEnabled) return@setOnTouchListener false
                     v.isPressed = true
                     tap(v)
                     // Only a press that starts the recording can be a hold-to-talk press; a tap
@@ -344,7 +351,7 @@ class VoxaKeyboard : InputMethodService() {
                     // block the main thread for a few hundred ms, which must not turn a tap into a hold.
                     val held = ev.eventTime - ev.downTime
                     val recording = flow.state() is FlowState.Recording
-                    val stop = recording && (!pressStarted || held > HOLD_MS)
+                    val stop = recording && (!pressStarted || (holdToTalk && held > HOLD_MS))
                     Diag.log("ime", "mic up after $held ms: ${if (stop) "stop" else if (recording) "keep listening (tap)" else "not recording"}")
                     if (stop) dispatch(FlowEvent.Stop)
                     v.performClick()
@@ -371,7 +378,11 @@ class VoxaKeyboard : InputMethodService() {
             getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             true
         }
-        p.spaceKey.setOnClickListener { tap(it); currentInputConnection?.commitText(" ", 1) }
+        // While listening the wide key reads "Tap to stop" and stops; otherwise it is space.
+        p.spaceKey.setOnClickListener {
+            tap(it)
+            if (flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop) else currentInputConnection?.commitText(" ", 1)
+        }
         p.enterKey.setOnClickListener { tap(it); enter() }
         repeating(p.backspaceKey) { backspace() }
     }
@@ -474,66 +485,85 @@ class VoxaKeyboard : InputMethodService() {
 
     private fun render() {
         val p = panel ?: return
+        val c = p.colors
         val state = flow.state()
         val status = flow.status()
         val recording = state is FlowState.Recording
         val busy = state is FlowState.Transcribing || state is FlowState.Delivering
-
-        p.inkRow.visibility = if (recording) View.VISIBLE else View.INVISIBLE
-        if (recording) p.ink.start() else p.ink.stop()
-        p.spinner.visibility = if (busy) View.VISIBLE else View.GONE
-
+        val done = if (state is FlowState.Delivered) flow.delivered() else null
         val password = field == FieldKind.PASSWORD && state is FlowState.Idle
+
+        // The status line.
         val shown = when {
             password -> passwordFieldText()
             status != null -> status
             else -> null
         }
+        var detail: String? = null
+        var action: String? = null
+        var closable = false
         val n = notice
         if (shown == null && n != null && state is FlowState.Idle) {
             p.title.text = n.first
-            p.detail.text = n.second
-            p.detail.visibility = View.VISIBLE
-            p.action.visibility = View.GONE
-            p.close.visibility = View.GONE
+            detail = n.second
         } else if (shown != null) {
             p.title.text = shown.title
-            p.detail.text = shown.detail ?: ""
-            p.detail.visibility = if (shown.detail.isNullOrEmpty()) View.GONE else View.VISIBLE
-            p.action.text = shown.action ?: ""
+            detail = shown.detail
             // While listening the action is the big mic itself (Stop); the bar offers Cancel.
-            p.action.visibility = if (shown.action != null && !recording) View.VISIBLE else View.GONE
-            p.close.visibility = if (shown.dismissable || recording || state is FlowState.Transcribing) View.VISIBLE else View.GONE
+            action = shown.action.takeIf { !recording }
+            closable = shown.dismissable || recording || state is FlowState.Transcribing
         } else {
-            idleBar(p)
+            // Idle: the desktop home's one-line readiness.
+            val signedOut = app.session.value == SessionState.EXPIRED
+            p.title.text = if (signedOut) "Sign in to ChatGPT to dictate" else "Ready to dictate"
+            if (signedOut) action = "Sign in"
         }
+        if (done != null) {
+            detail = null
+            closable = false
+        }
+        p.title.setTextColor(if (done != null) c.good else c.text)
+        p.dot.visibility = if (recording) View.VISIBLE else View.GONE
+        p.detail.text = detail ?: ""
+        p.detail.visibility = if (detail.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE
+        p.action.text = action ?: ""
+        p.action.visibility = if (action != null) View.VISIBLE else View.GONE
+        p.close.visibility = if (closable) View.VISIBLE else View.GONE
         p.close.contentDescription = if (recording || state is FlowState.Transcribing) "Cancel" else "Close"
+        p.right.text = when {
+            recording -> ((SystemClock.elapsedRealtime() - recordingSince) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
+            done != null -> if (done.words == 1u) "1 word" else "${done.words} words"
+            else -> ""
+        }
 
-        p.micIcon.setImageResource(if (recording) R.drawable.ic_stop else R.drawable.ic_mic)
+        // The stage: bars and the mic, the spinner while writing, or the green check.
+        p.bars.visibility = if (recording) View.VISIBLE else View.INVISIBLE
+        p.spinner.visibility = if (busy) View.VISIBLE else View.GONE
+        p.done.visibility = if (done != null) View.VISIBLE else View.GONE
+        p.mic.visibility = if (done != null) View.INVISIBLE else View.VISIBLE
+        p.saved.text = done?.let { savedLine(it.savedSecs.toInt()) } ?: ""
+        p.saved.visibility = if (p.saved.text.isEmpty()) View.GONE else View.VISIBLE
+        p.mic.icon = getDrawable(if (recording) R.drawable.ic_stop else R.drawable.ic_mic)?.mutate()?.apply { setTint(c.onAccent) }
         p.mic.contentDescription = if (recording) "Stop" else "Talk"
         val micOff = busy || password
         p.mic.alpha = if (micOff) 0.4f else 1f
         p.mic.isEnabled = !micOff
-        p.hint.text = when {
-            password -> ""
-            recording -> "Tap to stop"
-            busy -> ""
-            else -> "Tap to talk"
-        }
+        p.spaceKey.text = if (recording) "Tap to stop" else "space"
+        p.spaceKey.contentDescription = if (recording) "Stop" else "Space"
     }
 
-    /** Idle: the desktop home's one-line readiness ("Ready to dictate"). */
-    private fun idleBar(p: KeyboardPanel) {
-        val signedOut = app.session.value == SessionState.EXPIRED
-        p.title.text = if (signedOut) "Sign in to ChatGPT to dictate" else "Ready to dictate"
-        p.detail.visibility = View.GONE
-        p.action.text = "Sign in"
-        p.action.visibility = if (signedOut) View.VISIBLE else View.GONE
-        p.close.visibility = View.GONE
+    /** "That's 6 seconds of typing saved"; nothing when speaking wasn't faster. */
+    private fun savedLine(secs: Int): String = when {
+        secs < 1 -> ""
+        secs == 1 -> "That's 1 second of typing saved"
+        secs < 60 -> "That's $secs seconds of typing saved"
+        else -> "That's ${secs / 60} min ${secs % 60} s of typing saved"
     }
 
     companion object {
         const val TAG = "VoxaKeyboard"
         const val HOLD_MS = 400L
+        /** How long "Pasted in X" stays before the keyboard is back to idle. */
+        const val DONE_MS = 1500L
     }
 }

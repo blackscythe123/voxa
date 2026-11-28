@@ -388,19 +388,6 @@ pub fn meter_level(pcm: Vec<u8>) -> f32 {
     voxa_store::audio::meter_level(&voxa_store::audio::samples_from_pcm(&pcm))
 }
 
-/// Seconds saved by saying `words` in `recording_secs` instead of typing them at 40 words a
-/// minute (0 when speaking was not faster). The keyboard's "That's N seconds of typing saved".
-#[uniffi::export]
-pub fn typing_saved_secs(words: u32, recording_secs: f32) -> u32 {
-    voxa_store::typing_saved_secs(words as usize, recording_secs)
-}
-
-/// Words in a text, as History counts them.
-#[uniffi::export]
-pub fn word_count(text: String) -> u32 {
-    voxa_store::word_count(&text) as u32
-}
-
 /// A recording's loudness as `bars` levels 0..1 (History's waveform). Empty if unreadable.
 #[uniffi::export]
 pub fn recording_levels(pcm_path: String, bars: u32) -> Vec<f32> {

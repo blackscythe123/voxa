@@ -65,8 +65,19 @@ class VoxaApp : Application() {
         Diag.log("app", "saved session: ${if (saved != null) "yes" else "none"}; mic ${if (micGranted()) "granted" else "not granted"}")
         session.value = if (saved != null) SessionState.UNKNOWN else SessionState.EXPIRED
         account.value = core.cachedAccount()
+        holdToTalkOnByDefault()
         watchNetwork()
         checkSession(force = true)
+    }
+
+    /** On a phone, hold to talk has always been on (hold the mic, let go to stop); the shared
+     *  settings default it off (the desktop's hotkey mode). Turn it on once, then the user decides. */
+    private fun holdToTalkOnByDefault() {
+        val prefs = getSharedPreferences("ui", MODE_PRIVATE)
+        if (prefs.getBoolean("hold_default_set", false)) return
+        val s = core.settings()
+        if (!s.holdToTalk) core.setSettings(s.copy(holdToTalk = true))
+        prefs.edit().putBoolean("hold_default_set", true).apply()
     }
 
     fun micGranted(): Boolean = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -125,7 +136,6 @@ class VoxaApp : Application() {
     }
 
     fun historyChanged() {
-
         historyVersion.value++
     }
 

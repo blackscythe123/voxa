@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Dark paper, as the dark keyboard in the v5 mockup. -->
-    <color name="paper">#141110</color>
-    <color name="ink">#E2B48F</color>
+    <!-- The v6 dark palette: neutral near-black base, sepia lightened for contrast. -->
+    <color name="base">#121212</color>
+    <color name="accent">#D9946D</color>
 </resources>

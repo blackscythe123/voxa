@@ -32,9 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.voxa.android.R
 import com.voxa.android.data.hasSessionToken
@@ -78,13 +76,14 @@ fun SignInScreen(onDone: () -> Unit, onClose: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(V.Page)) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val c = vx
+    Column(Modifier.fillMaxSize().background(c.base)) {
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 8.dp, top = 8.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Sign in to ChatGPT", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = V.Text)
-                Muted("This is ChatGPT's own page. Voxa never sees your password.")
+                Text("Sign in to ChatGPT", style = Type.L, color = c.text)
+                Text("This is ChatGPT's own page. Voxa never sees your password.", style = Type.S, color = c.text56)
             }
-            IconButton(onClose) { Icon(painterResource(R.drawable.ic_close), "Close", tint = V.Text) }
+            IconButton(onClose) { Icon(painterResource(R.drawable.ic_close), "Close", tint = c.text) }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             AndroidView(
@@ -115,10 +114,10 @@ fun SignInScreen(onDone: () -> Unit, onClose: () -> Unit) {
                 },
             )
             if (loading || linking) {
-                Column(Modifier.fillMaxSize().background(V.Page.copy(alpha = if (linking) 0.94f else 1f)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    CircularProgressIndicator(color = V.Ink, modifier = Modifier.size(36.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text(if (linking) "Linking your ChatGPT account" else "Opening ChatGPT", fontSize = 15.sp, color = V.Text)
+                Column(Modifier.fillMaxSize().background(c.base.copy(alpha = if (linking) 0.94f else 1f)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    CircularProgressIndicator(color = c.accent, modifier = Modifier.size(36.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Text(if (linking) "Linking your ChatGPT account" else "Opening ChatGPT", style = Type.M, color = c.text)
                 }
             }
         }

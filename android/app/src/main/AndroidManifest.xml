@@ -7,6 +7,14 @@
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
+    <!-- History shows the real icon of the apps you dictate into: launchable apps only. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <!-- The session (cookies) must never leave the phone: no cloud backup, no device transfer. -->
     <application
         android:name=".VoxaApp"
