@@ -11,8 +11,9 @@ Native, fast and light: the strip appears in about 30 ms and Voxa uses about 65 
 | Platform | Get it |
 |---|---|
 | **Windows 10/11** | [Voxa-Setup-1.0.0.exe](https://github.com/blackscythe123/voxa/releases/download/v1.0.0/Voxa-Setup-1.0.0.exe) |
-| **Mac** (Apple Silicon and Intel) | [Voxa-1.0.0-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v1.0.0/Voxa-1.0.0-mac.dmg) |
-| **Android** (voice keyboard, Android 10+) | [Voxa-Android-1.0.0.apk](https://github.com/blackscythe123/voxa/releases/download/android-v1.0.0/Voxa-Android-1.0.0.apk) |
+| **Mac** (Apple Silicon and Intel; not yet tested on a real Mac) | [Voxa-1.0.0-mac.dmg](https://github.com/blackscythe123/voxa/releases/download/v1.0.0/Voxa-1.0.0-mac.dmg) |
+| **Android** (voice keyboard, Android 10+), works on any phone | [Voxa-Android-1.0.0-universal.apk](https://github.com/blackscythe123/voxa/releases/download/android-v1.0.0/Voxa-Android-1.0.0-universal.apk) |
+| **Android**, smaller, for most phones (64-bit ARM) | [Voxa-Android-1.0.0-arm64-v8a.apk](https://github.com/blackscythe123/voxa/releases/download/android-v1.0.0/Voxa-Android-1.0.0-arm64-v8a.apk) |
 
 Always the newest version: [Windows](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-Setup.exe)
 · [Mac](https://github.com/blackscythe123/voxa/releases/latest/download/Voxa-mac.dmg)
@@ -21,17 +22,26 @@ Always the newest version: [Windows](https://github.com/blackscythe123/voxa/rele
 
 - **Windows:** run the installer (no admin needed). If SmartScreen says "Windows protected your PC",
   click *More info* > *Run anyway*. It updates the old Voxa and keeps your history and sign-in.
-- **Mac:** drag Voxa to Applications, then the first time **right-click > Open** (not notarized yet).
-  Allow the microphone, and Accessibility so Voxa can paste.
-- **Android:** if you had an older Voxa for Android, uninstall it first, then install the APK. Send it as a file (Drive, or a WhatsApp/Telegram document); a broken copy shows "problem while parsing the package".
+- **Mac:** drag Voxa to Applications and open it. macOS blocks it the first time (not notarized
+  yet): open **System Settings > Privacy & Security**, scroll down and click **Open Anyway**. Allow
+  the microphone, and Accessibility so Voxa can paste. After an update macOS may ask for
+  Accessibility once more; Voxa tells you when.
+- **Android:** not sure which file? Take the universal one, it works on any phone. Open the APK
+  on the phone; Android asks you to allow "Install unknown apps" for the app you opened it from
+  (Files, Chrome, Drive or WhatsApp), and Play Protect may ask to scan it, which is fine. Send it as
+  a file (Drive, or a WhatsApp/Telegram document); a broken copy shows "problem while parsing the
+  package". If you installed a Voxa test build before 1.0.0, uninstall it once, then install
+  1.0.0; test-build History isn't kept. Every version from 1.0.0 on updates in place and keeps
+  your History and sign-in. Voxa asks once for permission to install its own updates.
 
 Updates: 1.0.0 is the first version that updates itself (Windows installs new versions when you're
 not using Voxa; Android downloads on Wi-Fi and asks you to tap Install; Mac tells you when one is
-out). Older versions (0.4.7 and before on Windows and Mac, 0.3.0 on Android) have no updater, so
-install 1.0.0 by hand once. Settings has "Check for updates" and "What's new".
+out). Older versions (0.4.7 and before on Windows and Mac, the Android test builds) have no
+updater, so install 1.0.0 by hand once. Settings has "Check for updates" and "What's new".
 
 You need a ChatGPT account (free works). Voxa signs in on ChatGPT's own page and never sees your
-password.
+password. It uses your ChatGPT web session (not an official API) and keeps that session's cookies
+on your device so you stay signed in.
 
 ## What it does
 
@@ -70,14 +80,15 @@ desktop/
   windows/         Windows packaging: installer (Inno Setup), ONNX runtime download
   macos/           macOS packaging: Info.plist, entitlements, .app and .dmg script
 android/         Android voice keyboard and companion app (Kotlin, Compose), calling core/ via voxa-ffi
-docs/            flow audit, design mockups, reviews, measurements
+docs/            release runbook, update design and keys, guardrails, regressions, mockups, reviews
 ```
 
 **Build on Windows**
 ```
 cargo build --release -p voxa-desktop -p voxa-signin
 desktop\windows\fetch-onnxruntime.ps1     # once, for silence trimming
-ISCC desktop\windows\voxa.iss             # installer -> target\dist
+ISCC desktop\windows\voxa.iss             # installer -> target\dist (refuses placeholder update keys;
+                                          # /DAllowPlaceholderKeys builds a local test copy)
 ```
 
 **Build on macOS:** `bash desktop/macos/package.sh` -> `target/dist/Voxa-<version>-mac.dmg`
@@ -89,16 +100,21 @@ cargo install cargo-ndk                                          # once
 cd android && ./gradlew assembleDebug                            # -> app/build/outputs/apk/debug
 ```
 Needs the Android SDK with NDK 28.0.13004108 (`android/local.properties`: `sdk.dir=...`) and JDK 17+
-(Android Studio's JBR works). Gradle's `preBuild` runs `cargo ndk` for arm64-v8a (phones) and
-x86_64 (emulator), then generates the Kotlin bindings with UniFFI (`voxa-ffi`'s `uniffi-bindgen`
-bin). `-PskipRust` reuses the last Rust build; `-PrustProfile=debug` builds Rust faster.
-Instrumented tests (FFI, flow, ChatGPT reachability): `./gradlew connectedDebugAndroidTest`.
+(Android Studio's JBR works). Gradle's `preBuild` runs `cargo ndk` for arm64-v8a only by default;
+add the x86_64 emulator with `-Pabis=arm64-v8a,x86_64`. Then it generates the Kotlin bindings with
+UniFFI (`voxa-ffi`'s `uniffi-bindgen` bin). `-PskipRust` reuses the last Rust build;
+`-PrustProfile=debug` builds Rust faster. A release build (`assembleRelease`) refuses placeholder
+update keys and the debug key; `-Pvoxa.devRelease=true` builds a local test copy that is never
+handed out. Instrumented tests (FFI, flow, ChatGPT reachability) run on an emulator only, because
+they uninstall the app and its data: `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest`.
 
-**Tests:** `cargo test --workspace`
+**Tests:** `cargo test --workspace` and `python tools/lint/run.py` (the guardrails). Turn on the
+git hooks once per clone: `git config core.hooksPath .githooks`.
 
-**Releases:** GitHub Actions (`.github/workflows/desktop.yml`) builds and tests Windows and macOS on
-every push to `main`. Push a tag like `v0.4.1` to publish a release with the Windows installer and
-the Mac `.dmg`.
+**Releases:** follow [docs/release-runbook.md](docs/release-runbook.md) step by step (keys, the
+update feed, tags, Android and the real-hardware release gate). GitHub Actions
+(`.github/workflows/desktop.yml`) builds and tests Windows and macOS on every push to `main`; a tag
+like `v1.0.1` publishes the Windows installer and the Mac `.dmg`, then the signed update feed.
 
 The earlier Electron app is in git history (removed in `110ea43`).
 

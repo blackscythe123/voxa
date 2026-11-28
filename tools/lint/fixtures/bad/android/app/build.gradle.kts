@@ -30,3 +30,5 @@ android {
         }
     }
 }
+
+// Bad (release-android-signing): a rotation lineage, "--lineage", lineage.bin

@@ -171,8 +171,8 @@ def check_android_signing(ctx: Ctx) -> list[Violation]:
             block = src.code[ro:re_end]
             for d in re.finditer(r"signingConfigs\.getByName\(\s*\"debug\"\s*\)", block):
                 out.append(Violation("android-release-key", rel, src.line_of(ro + d.start()), "the release build type signs with the debug key "
-                                     "directly. Rule: release APKs use the release key (with the v3 lineage); the debug fallback lives in "
-                                     f"a helper that only applies while no release key is configured and warns loudly {DOC}",
+                                     "directly. Rule: release APKs use the one permanent release key; the debug fallback lives in "
+                                     f"a helper that only a dev release (-Pvoxa.devRelease=true) reaches {DOC}",
                                      key="release: debug signing"))
     return out
 
