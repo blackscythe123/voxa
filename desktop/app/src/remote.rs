@@ -27,6 +27,8 @@ pub(crate) struct Backend {
     pub(crate) signing_in: bool,
     /// A setting couldn't be saved (settings.json unreadable): shown on the Settings page.
     pub(crate) settings_error: Option<String>,
+    /// A word list change couldn't be saved (words.json unreadable): shown on the Words page.
+    pub(crate) words_error: Option<String>,
     live: Live,
     stamps: [Option<SystemTime>; 3],
     /// The setup's mic check: this process opens the mic itself, only while that step shows.
@@ -44,6 +46,7 @@ impl Backend {
             levels: VecDeque::new(),
             signing_in: live.signing_in,
             settings_error: None,
+            words_error: None,
             live,
             stamps: [None; 3],
             mic: None,
@@ -235,10 +238,16 @@ impl Backend {
     }
 
     /// The window process is the only writer of words.json; the tray process reads it per dictation.
+    /// Refused while words.json can't be read (locked or damaged): the Words page then says so,
+    /// and the user's list is never replaced.
     pub fn update_words(&mut self, f: impl FnOnce(&mut crate::store::Words), cx: &mut Context<Self>) {
-        let mut w = crate::store::Words::load(&data_dir());
-        f(&mut w);
-        w.save(&data_dir());
+        match crate::store::Words::update(&data_dir(), f) {
+            Ok(_) => self.words_error = None,
+            Err(e) => {
+                os::log(&format!("FAIL saving words: {e}"));
+                self.words_error = Some(e);
+            }
+        }
         cx.notify();
     }
 
