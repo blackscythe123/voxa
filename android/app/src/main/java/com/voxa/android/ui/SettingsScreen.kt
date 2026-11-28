@@ -109,6 +109,11 @@ fun SettingsScreen(activity: MainActivity) {
             OptionRow(R.drawable.ic_vibrate, "Vibrate on tap", onClick = { save(settings.copy(haptics = !settings.haptics)) }) {
                 VSwitch(settings.haptics) { save(settings.copy(haptics = it)) }
             }
+            // Android's own page for Voxa's notifications (sign-in, dictations).
+            val notifyOn = remember(tick) { com.voxa.android.notify.Notifier.allowed(activity) }
+            OptionRow(R.drawable.ic_bell, "Notifications", onClick = { activity.openNotificationSettings() }) {
+                OptionValue(if (notifyOn) "On" else "Off")
+            }
             val theme = ThemePref.current.value
             val ctx = androidx.compose.ui.platform.LocalContext.current
             OptionRow(R.drawable.ic_theme, "Appearance", last = true, onClick = { ThemePref.set(ctx, ThemePref.next(theme)) }) {

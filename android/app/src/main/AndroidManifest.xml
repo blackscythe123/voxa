@@ -4,6 +4,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Notifications (docs/notifications.md): signed out, dictations ready or not sent. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Keeps the 12 h session check and the background send scheduled after a restart. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
@@ -49,6 +53,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Background work: the 12 h session check and sending dictations recorded offline. -->
+        <service
+            android:name=".notify.VoxaJobs"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- The Copy and Retry buttons on Voxa's own notifications. -->
+        <receiver
+            android:name=".notify.NotifyReceiver"
+            android:exported="false" />
 
         <!-- The Voxa voice keyboard. Same process as the app, so they share the core. -->
 

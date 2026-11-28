@@ -20,6 +20,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.voxa.android.MainActivity
 import com.voxa.android.R
 import com.voxa.android.diag.Diag
+import com.voxa.android.notify.Notifier
 import com.voxa.android.voxa
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +89,7 @@ class VoxaKeyboard : InputMethodService() {
         super.onCreate()
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
+        app.keyboardFlow = flow
         recorder = Recorder(this, onLevel = { panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
         app.historyChanged()
         scope.launch {
@@ -112,6 +114,8 @@ class VoxaKeyboard : InputMethodService() {
         main.removeCallbacksAndMessages(null)
         // super.onDestroy() calls onFinishInputView (which checks the flow): destroy the flow after it.
         super.onDestroy()
+        app.keyboardFlow = null
+        Notifier.keyboardShowing = false
         flow.destroy()
     }
 
@@ -158,6 +162,7 @@ class VoxaKeyboard : InputMethodService() {
         super.onStartInputView(info, restarting)
         Diag.log("ime", "shown (onStartInputView ${info.packageName}, restarting $restarting)")
         Diag.memory("keyboard shown")
+        Notifier.keyboardShowing = true
         val s = app.core.settings()
         haptics = s.haptics
         holdToTalk = s.holdToTalk
@@ -177,6 +182,7 @@ class VoxaKeyboard : InputMethodService() {
     override fun onWindowHidden() {
         Diag.log("ime", "onWindowHidden")
         Diag.memory("keyboard hidden")
+        Notifier.keyboardShowing = false
         stopIfRecording("window hidden")
         super.onWindowHidden()
     }
@@ -303,7 +309,19 @@ class VoxaKeyboard : InputMethodService() {
                 }
                 if (event.error is TranscribeFailure.Blocked) app.blocked.value = true
             }
+            // Not the dictation on screen (sent when the network came back): it finishes unseen.
+            val current = (flow.state() as? FlowState.Transcribing)?.job == job
             dispatch(event)
+            if (!current && !destroyed) notifyBackground(job, event)
+        }
+    }
+
+    /** A2 / A3 for a dictation that finished off screen. Never for incognito takes (no entry). */
+    private fun notifyBackground(job: ULong, event: FlowEvent) {
+        val entry = flow.entryForJob(job) ?: return
+        when {
+            event is FlowEvent.Transcribed && event.text.isNotBlank() -> Notifier.ready(this, listOf(entry), app.core.history("").firstOrNull { it.id == entry }?.app.orEmpty())
+            event is FlowEvent.TranscribeFailed && (event.error is TranscribeFailure.Timeout || event.error is TranscribeFailure.Server) -> Notifier.notSent(this, 1)
         }
     }
 
