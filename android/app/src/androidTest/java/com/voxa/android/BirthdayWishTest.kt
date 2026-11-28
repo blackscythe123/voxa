@@ -81,4 +81,18 @@ class BirthdayWishTest {
         Birthday.clear(ctx)
         assertFalse(BirthdayWish.scheduled(ctx))
     }
+
+    /** The wish pops up as a banner with sound: a high-importance channel, and the old silent
+     *  "birthday" channel is gone (OnePlus showed no banner for default importance). */
+    @Test
+    fun the_birthday_wish_pops_up_as_a_banner_with_sound() {
+        val ctx = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        com.voxa.android.notify.Notifier.createChannels(ctx)
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        val ch = nm.getNotificationChannel(com.voxa.android.notify.Notifier.BIRTHDAY.id)
+        org.junit.Assert.assertNotNull(ch)
+        org.junit.Assert.assertEquals(android.app.NotificationManager.IMPORTANCE_HIGH, ch!!.importance)
+        org.junit.Assert.assertNotNull("the channel plays a sound", ch.sound)
+        org.junit.Assert.assertNull("the old silent channel is deleted", nm.getNotificationChannel("birthday"))
+    }
 }

@@ -50,7 +50,12 @@ object Notifier {
 
     val SIGN_IN = Channel("sign-in", "Sign-in", "When you need to sign in to ChatGPT again", NotificationManager.IMPORTANCE_DEFAULT)
     val DICTATIONS = Channel("dictations", "Dictations", "Dictations sent in the background, or that couldn't be sent", NotificationManager.IMPORTANCE_LOW)
-    val BIRTHDAY = Channel("birthday", "Birthday", "A wish at midnight on your birthday, if you added it in Settings", NotificationManager.IMPORTANCE_DEFAULT)
+    // High importance: the wish must pop up as a banner with sound (owner, 2026-11-29). OnePlus and other
+    // skins show no banner for default importance, so the first test wish landed silently. A channel's
+    // importance can't be raised after creation, so this is a new channel id; the old one is deleted.
+    val BIRTHDAY = Channel("birthday-wish", "Birthday", "A wish at midnight on your birthday, if you added it in Settings", NotificationManager.IMPORTANCE_HIGH)
+    /** Channels from earlier builds, deleted at start so they don't linger in the phone's settings. */
+    internal val OLD_CHANNELS = listOf("birthday")
     val UPDATES = Channel("updates", "Updates", "When a new version of Voxa is ready to install", NotificationManager.IMPORTANCE_LOW)
     private val CHANNELS = listOf(SIGN_IN, DICTATIONS, BIRTHDAY, UPDATES)
 
@@ -115,6 +120,7 @@ object Notifier {
     fun createChannels(ctx: Context) {
         appCtx = ctx.applicationContext
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        for (old in OLD_CHANNELS) nm.deleteNotificationChannel(old)
         for (c in CHANNELS) nm.createNotificationChannel(NotificationChannel(c.id, c.name, c.importance).apply { description = c.description })
     }
 
@@ -292,7 +298,8 @@ object Notifier {
         )
         // The lock screen shows the wish without the name.
         val public = NotificationCompat.Builder(ctx, BIRTHDAY.id).setSmallIcon(R.drawable.ic_notify).setContentTitle(noticeBirthday(null).title).build()
-        val n = builder(ctx, BIRTHDAY, t.title, t.body, false).setContentIntent(open).setPublicVersion(public).build()
+        val n = builder(ctx, BIRTHDAY, t.title, t.body, false).setContentIntent(open).setPublicVersion(public)
+            .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_EVENT).build()
         val ok = NotificationManagerCompat.from(ctx).safeNotify(ctx, ID_BIRTHDAY, n)
         Diag.log("notify", "BIRTHDAY: ${if (ok) "POST" else "not posted"}")
         return ok
