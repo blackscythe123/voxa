@@ -16,14 +16,17 @@
 //! No ML framework: plain Rust, serde for the JSON.
 
 pub mod bandit;
+pub mod engine;
 pub mod evolve;
 pub mod features;
 pub mod messages;
 pub mod net;
 pub mod rng;
 pub mod rules;
+pub mod sim;
 pub mod state;
 
+pub use engine::{Engine, Nudge, Skip, Usage, bundled};
 pub use messages::Style;
 pub use rules::Block;
 pub use state::{NudgeState, Outcome};
