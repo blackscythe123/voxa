@@ -2,7 +2,8 @@ name: Desktop
 
 # Builds Voxa for Windows (installer) and macOS (universal .dmg) from the same Rust code.
 #  - Every push and pull request: test, build both, attach the files to the run.
-#  - Push a tag like v0.4.0: also publish a GitHub release with both files.
+#  - Push a tag like v1.0.0: also publish a GitHub release with both files, then sign and
+#    publish the update feed (desktop.json on the fixed "update-feed" prerelease).
 
 on:
   push:
@@ -20,6 +21,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # A tagged release refuses to build while the update keys are placeholders (core/voxa-update/build.rs).
+  VOXA_RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
 
 jobs:
   # The product guardrails (docs/guardrails.md), so a tagged release never ships with one broken.
@@ -50,7 +53,9 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress | Out-Null
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q desktop\windows\voxa.iss
+          # The version has one source: the workspace Cargo.toml.
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q /DAppVersion=$v desktop\windows\voxa.iss
           Get-ChildItem target\dist
       - uses: actions/upload-artifact@v4
         with:
@@ -61,6 +66,8 @@ jobs:
   macos:
     runs-on: macos-latest
     timeout-minutes: 75
+    # Tags only: the stable signing certificate lives in the protected "release" environment.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -69,8 +76,34 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --workspace --release
-      - name: Build and package (universal .app and .dmg)
+      - name: Stable signing certificate (keeps the Accessibility grant across updates)
+        env:
+          MAC_SIGN_P12: ${{ secrets.MAC_SIGN_P12 }}
+          MAC_SIGN_P12_PASSWORD: ${{ secrets.MAC_SIGN_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MAC_SIGN_P12:-}" ] || [ -z "${MAC_SIGN_P12_PASSWORD:-}" ]; then
+            echo "::warning::MAC_SIGN_P12 is not set: Voxa.app is ad hoc signed, so every update asks Mac users for Accessibility again (docs/update-keys.md)."
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/voxa-sign.keychain-db"
+          KCPW="$(openssl rand -hex 24)"
+          printf '%s' "$MAC_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/voxa-sign.p12"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          security import "$RUNNER_TEMP/voxa-sign.p12" -k "$KC" -P "$MAC_SIGN_P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/voxa-sign.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          echo "VOXA_MAC_SIGN_IDENTITY=Voxa Code Signing" >> "$GITHUB_ENV"
+          echo "VOXA_MAC_KEYCHAIN=$KC" >> "$GITHUB_ENV"
+      - name: Build and package (universal .app and .dmg, signed, designated requirement checked)
         run: bash desktop/macos/package.sh
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [ -n "${VOXA_MAC_KEYCHAIN:-}" ]; then security delete-keychain "$VOXA_MAC_KEYCHAIN" || true; fi
       - uses: actions/upload-artifact@v4
         with:
           name: voxa-macos
@@ -82,6 +115,14 @@ jobs:
     needs: [guardrails, windows, macos]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches the workspace version
+        run: |
+          v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the Cargo.toml version $v"
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -91,7 +132,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Version-free copies, so .../releases/latest/download/Voxa-Setup.exe always gets the newest.
+          # The update feed never points at these.
           cp dist/Voxa-Setup-*.exe dist/Voxa-Setup.exe
           cp dist/Voxa-*-mac.dmg dist/Voxa-mac.dmg
           ls -la dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Voxa $GITHUB_REF_NAME" --generate-notes
+
+  # Signs desktop.json with K1 and replaces it on the fixed "update-feed" prerelease. The only job
+  # that can read VOXA_UPDATE_KEY (environment "release", owner approval). Uploaded last, so the
+  # feed never points at assets that are not published yet.
+  feed:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sign the desktop feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VOXA_UPDATE_KEY: ${{ secrets.VOXA_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"; R="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          gh release download "$GITHUB_REF_NAME" -p "Voxa-Setup-$V.exe" -p "Voxa-$V-mac.dmg" -D dist
+          w=dist/Voxa-Setup-$V.exe; m=dist/Voxa-$V-mac.dmg
+          jq -n --arg v "$V" --arg r "$R" --argjson s "$(date +%s)" \
+            --arg ws "$(sha256sum $w|cut -d' ' -f1)" --argjson wz "$(stat -c%s $w)" \
+            --arg ms "$(sha256sum $m|cut -d' ' -f1)" --argjson mz "$(stat -c%s $m)" \
+            '{schema:1,channel:"desktop",serial:$s,version:$v,notes_url:("https://github.com/'"$GITHUB_REPOSITORY"'/releases/tag/v"+$v),paused:false,
+              assets:{"windows-x64":{url:($r+"/Voxa-Setup-"+$v+".exe"),sha256:$ws,size:$wz},"macos-universal":{url:($r+"/Voxa-"+$v+"-mac.dmg"),sha256:$ms,size:$mz}}}' \
+            | tr -d '\n' > payload.json
+          printf '%s' "$VOXA_UPDATE_KEY" > k.pem; chmod 600 k.pem
+          openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig; rm -f k.pem
+          jq -n --arg p "$(base64 -w0 payload.json)" --arg s "$(base64 -w0 payload.sig)" '{key_id:1,payload:$p,sig:$s}' > desktop.json
+      - name: Verify the feed with the shipped verifier
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- verify desktop.json --channel desktop
+      - name: Publish the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload update-feed desktop.json --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Fetch the published feed and installer through the client policy
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- fetch-check --channel desktop

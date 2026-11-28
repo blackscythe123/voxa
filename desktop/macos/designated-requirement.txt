@@ -1,0 +1,6 @@
+# The designated requirement of Voxa.app when signed with the stable "Voxa Code Signing" certificate.
+# desktop/macos/check-signature.sh fails a build whose requirement differs from the line below.
+#
+# Empty until the owner creates the certificate (docs/update-keys.md). After the first build signed
+# with it, copy the "designated => ..." line that check-signature.sh prints into this file, on its
+# own line, and commit it. Never regenerate the certificate: a new one resets every Mac user's grant.
