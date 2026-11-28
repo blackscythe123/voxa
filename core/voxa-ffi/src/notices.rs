@@ -2,6 +2,7 @@
 //! background send of dictations left waiting for the network (docs/notifications.md).
 
 use voxa_core::TranscribeError;
+use voxa_core::greeting::{Date, MonthDay};
 use voxa_core::notices::{self, Decision, Kind};
 use voxa_store::{History, Status};
 
@@ -81,6 +82,33 @@ pub fn notice_record(posted: Vec<u64>, now_ms: u64) -> Vec<u64> {
 #[uniffi::export]
 pub fn notice_quiet_hour(hour: u32) -> bool {
     notices::quiet_hour(hour)
+}
+
+/// The birthday wish ("Happy birthday, Sam"). `name`: the account's name, first word used.
+#[uniffi::export]
+pub fn notice_birthday(name: Option<String>) -> NoticeText {
+    notices::birthday(name.as_deref()).into()
+}
+
+fn month_day(month: u8, day: u8) -> Option<MonthDay> {
+    Some(MonthDay { month, day }).filter(|b| b.valid())
+}
+
+/// The local date ("2027-03-14") whose midnight the next birthday wish is for, or None when
+/// `today` or the birthday isn't valid. `wished_year`: the year last wished, 0 for never.
+#[uniffi::export]
+pub fn birthday_next_wish(today: String, month: u8, day: u8, wished_year: i32) -> Option<String> {
+    Some(notices::next_birthday_wish(Date::parse(&today)?, month_day(month, day)?, wished_year).to_string())
+}
+
+/// Whether the wish is due now (`minutes` after local midnight on `today`), with Android's grace:
+/// any time on the day itself, since Doze may hold the alarm back.
+#[uniffi::export]
+pub fn birthday_wish_due(today: String, minutes: u16, month: u8, day: u8, wished_year: i32) -> bool {
+    match (Date::parse(&today), month_day(month, day)) {
+        (Some(t), Some(b)) => notices::birthday_wish_due(t, minutes, b, wished_year, notices::BIRTHDAY_GRACE_ANDROID_MIN),
+        _ => false,
+    }
 }
 
 /// How a background send of one waiting dictation ended.
