@@ -333,3 +333,11 @@ fn a_stopped_mic_or_full_disk_blocks_with_its_own_words() {
     f.handle(Event::Hotkey { target: whatsapp() });
     assert_eq!(strip_text(&f).unwrap().title, "Can't save the recording");
 }
+
+#[test]
+fn a_full_disk_offers_to_free_up_space() {
+    let mut f = Flow::new(Readiness { mic: Mic::CantSave, ..ready() });
+    f.handle(Event::Hotkey { target: whatsapp() });
+    assert_eq!(strip_text(&f).unwrap().action.as_deref(), Some("Free up space"));
+    assert!(f.handle(Event::Action).contains(&Effect::OpenStorage));
+}

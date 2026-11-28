@@ -352,6 +352,14 @@ pub fn take_woke() -> bool {
 }
 
 
+/// Free space on the disk holding `path`, in bytes.
+pub fn disk_free_bytes(path: &std::path::Path) -> Option<u64> {
+    let w = wide(&path.to_string_lossy());
+    let mut free = 0u64;
+    let ok = unsafe { windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(w.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
+    (ok != 0).then_some(free)
+}
+
 /// The strip's outer rectangle in physical pixels (x, y, width, height), frame included.
 pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
     let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
@@ -379,7 +387,13 @@ pub fn place_strip() {
         let frame = ((h - inner_h) / 2).max(0);
         let x = m.left + (m.right - m.left - w) / 2;
         let y = m.bottom - (64.0 * scale).round() as i32 - inner_h - frame;
-        SetWindowPos(hw, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        // Only when it's really out of place (a screen change): a needless move makes GPUI log
+        // "RefCell already borrowed" while it's busy with the shortcut press.
+        let Some((cx_, cy_, _, _)) = strip_rect() else { return };
+        if (cx_ - x).abs() > 8 || (cy_ - y).abs() > 8 {
+            log(&format!("strip moved to the main screen's bottom centre ({cx_},{cy_} -> {x},{y})"));
+            SetWindowPos(hw, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        }
     }
 }
 
@@ -402,7 +416,9 @@ pub fn strip_visible(show: bool) {
     if show && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) } == 0 {
         place_strip();
     }
-    unsafe { ShowWindow(h, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+    // Async: GPUI may be mid-way through handling the shortcut press; a synchronous show makes it
+    // log "RefCell already borrowed" and skip the size and position messages.
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(h, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
     log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
 }
 

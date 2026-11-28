@@ -209,6 +209,10 @@ pub fn take_woke() -> bool {
     false
 }
 pub fn place_strip() {}
+/// Free disk space; not measured on macOS yet (the low-space note never shows there).
+pub fn disk_free_bytes(_path: &std::path::Path) -> Option<u64> {
+    None
+}
 pub fn move_strip(_x: i32, _y: i32, _w: i32, _h: i32) {}
 pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
     None

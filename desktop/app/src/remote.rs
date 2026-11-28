@@ -157,11 +157,17 @@ impl Backend {
     }
 
     pub fn update_settings(&mut self, f: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
-        let mut s = Settings::load(&data_dir());
+        // If the file can't be read right now, change what's shown rather than the defaults.
+        let mut s = Settings::try_load(&data_dir()).ok().flatten().unwrap_or_else(|| self.settings.clone());
         f(&mut s);
         s.save(&data_dir());
         self.settings = s;
         link::send(&Command::ReloadSettings);
+        cx.notify();
+    }
+
+    pub fn delete_old_audio(&mut self, days: u32, cx: &mut Context<Self>) {
+        link::send(&Command::DeleteOldAudio(days));
         cx.notify();
     }
 

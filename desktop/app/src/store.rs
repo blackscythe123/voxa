@@ -174,6 +174,24 @@ impl History {
         self.save();
     }
 
+    /// Delete recordings older than `days` but keep their dictations (text, app, time). Never
+    /// touches a dictation that hasn't been written out yet: its recording is the only copy.
+    /// Returns the bytes freed. 0 days does nothing.
+    pub fn prune_audio(&mut self, days: u32, now_ms: u64) -> u64 {
+        if days == 0 {
+            return 0;
+        }
+        let cutoff = now_ms.saturating_sub(days as u64 * 86_400_000);
+        let mut freed = 0;
+        for e in self.entries.iter_mut().filter(|e| e.id < cutoff && matches!(e.status, Status::Pasted | Status::Ready)) {
+            if let Some(a) = e.audio.take() {
+                freed += std::fs::metadata(&a).map(|m| m.len()).unwrap_or(0);
+                let _ = std::fs::remove_file(a);
+            }
+        }
+        freed
+    }
+
     /// Bytes of audio kept on disk.
     pub fn audio_bytes(&self) -> u64 {
         self.entries.iter().filter_map(|e| e.audio.as_ref()).filter_map(|a| std::fs::metadata(a).ok()).map(|m| m.len()).sum()
@@ -209,11 +227,13 @@ pub struct Settings {
     /// Leave the dictation on the clipboard after pasting (as the old app did); off puts back what
     /// was copied before.
     pub keep_on_clipboard: bool,
+    /// Days to keep recordings (the text stays); 0 keeps them as long as the dictation.
+    pub keep_audio_days: u32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0 }
     }
 }
 
@@ -238,6 +258,7 @@ impl Settings {
         }
     }
     pub const KEEP_CHOICES: [u32; 4] = [7, 30, 90, 0];
+    pub const AUDIO_CHOICES: [u32; 3] = [30, 90, 0];
     pub fn keep_label(days: u32) -> String {
         if days == 0 { "Forever".into() } else { format!("{days} days") }
     }
@@ -610,6 +631,26 @@ mod tests {
         assert_eq!(s.busiest_day.as_ref().unwrap().1, 4);
         assert!(stats(&e, d(8, 1), d(11, 22), d(11, 22)).buckets.len() <= 27, "weekly for a few months");
         assert_eq!(stats(&e, d(1, 1), d(11, 22), d(11, 22)).buckets.len(), 11, "monthly for a year");
+    }
+
+    #[test]
+    fn prune_audio_keeps_text_and_unsent_recordings() {
+        let day = 86_400_000u64;
+        let now = 100 * day;
+        let dir = std::env::temp_dir().join(format!("voxa-audio-prune-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mk = |id: u64, status: Status| {
+            let a = dir.join(format!("{id}.wav"));
+            std::fs::write(&a, vec![0u8; 1000]).unwrap();
+            Entry { id, app: "A".into(), text: format!("t{id}"), secs: 1.0, status, audio: Some(a), started_in: None, via: None }
+        };
+        let mut h = History { unreadable: false, path: dir.join("h.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("x".into())), mk(99 * day, Status::Pasted)] };
+        assert_eq!(h.prune_audio(30, now), 1000);
+        assert_eq!(h.entries.len(), 3, "every dictation's text stays");
+        assert!(h.entries[0].audio.is_none(), "old pasted recording deleted");
+        assert!(h.entries[1].audio.is_some(), "unsent recording kept");
+        assert!(h.entries[2].audio.is_some(), "recent recording kept");
+        assert_eq!(h.prune_audio(0, now), 0);
     }
 
     #[test]

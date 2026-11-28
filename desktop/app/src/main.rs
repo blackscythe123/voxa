@@ -209,6 +209,9 @@ impl Voxa {
             if history.prune(settings.keep_days, now_ms()) > 0 {
                 history.save();
             }
+            if history.prune_audio(settings.keep_audio_days, now_ms()) > 0 {
+                history.save();
+            }
         }
         let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.via.clone().unwrap_or_else(|| e.app.clone())).collect();
         os::refresh_site_icons_once();
@@ -740,6 +743,10 @@ impl Voxa {
             Effect::OpenMicSettings => {
                 os::open_mic_privacy();
             }
+            Effect::OpenStorage => {
+                self.handle(Event::Dismiss, cx);
+                self.open_home(Some(Page::Settings), cx);
+            }
             Effect::SaveJob { job } => {
                 if let Some(j) = self.flow.job(job) {
                     os::log(&format!("  job {:?} for {} -> {:?}", j.id, j.target.app, j.state));
@@ -819,6 +826,9 @@ impl Voxa {
         let Ok(exe) = std::env::current_exe() else { return };
         let mut c = std::process::Command::new(exe);
         c.arg("--window");
+        if page == Some(Page::Settings) {
+            c.arg("--page=settings");
+        }
         if page.is_none() && !self.settings.onboarded {
             c.arg("--tour");
         }
@@ -878,6 +888,9 @@ impl Voxa {
                 if self.history.prune(self.settings.keep_days, now_ms()) > 0 {
                     self.history.save();
                 }
+                if self.history.prune_audio(self.settings.keep_audio_days, now_ms()) > 0 {
+                    self.history.save();
+                }
             }
             Resend(id) => match self.job_entries.iter().find(|(_, e)| **e == id).map(|(j, _)| *j) {
                 Some(job) => self.handle(Event::Retry { job }, cx),
@@ -892,6 +905,12 @@ impl Voxa {
                 }
             }
             DeleteAll => self.delete_history(cx),
+            DeleteOldAudio(days) => {
+                let freed = self.history.prune_audio(days.max(1), now_ms());
+                self.history.save();
+                os::log(&format!("deleted recordings older than {days} days ({:.1} MB)", freed as f64 / 1e6));
+                cx.notify();
+            }
         }
         self.publish();
     }
@@ -1413,7 +1432,9 @@ fn run_window(tour: bool) {
         let start_tour = tour || !backend.read(cx).settings.onboarded;
         let mut first = Page::Home;
         // Developer switch: VOXA_PAGE=words | history | insights | settings | detail (newest dictation).
-        if let Ok(p) = std::env::var("VOXA_PAGE") {
+        // The tray asks for a page with --page=<name> (e.g. "Free up space" opens Settings).
+        let asked = std::env::args().find_map(|a| a.strip_prefix("--page=").map(str::to_string));
+        if let Some(p) = asked.or_else(|| std::env::var("VOXA_PAGE").ok()) {
             first = match p.as_str() {
                 "words" => Page::Words,
                 "history" => Page::History,

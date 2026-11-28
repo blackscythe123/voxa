@@ -741,6 +741,24 @@ impl Home {
             }
             _ => {}
         }
+        // Warn before a recording fails: under 500 MB free on the disk Voxa saves to.
+        // Test only (with a separate VOXA_DATA folder): VOXA_TEST_DISK_FREE=<bytes> pretends the disk is that full.
+        let test_free = std::env::var("VOXA_TEST_DISK_FREE").ok().and_then(|v| v.parse::<u64>().ok()).filter(|_| std::env::var_os("VOXA_DATA").is_some());
+        if let Some(free) = test_free.or_else(|| crate::os::disk_free_bytes(&crate::data_dir())).filter(|f| *f < 500_000_000) {
+            if !self.dismissed.contains(&"disk") {
+                let ours = self.voxa.read(cx).history.audio_bytes() as f64 / 1e6;
+                out.push(
+                    info_bar(
+                        Bar::Warning,
+                        "Your disk is almost full.",
+                        &format!("{:.0} MB left. Voxa needs space to save recordings; its own recordings use {ours:.0} MB.", free as f64 / 1e6),
+                        Some(wbtn("ib-disk", "Free up space", true).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::Settings, cx))).into_any_element()),
+                        Some(self.close_btn("disk", cx)),
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
         if r.network == Network::Down && !self.dismissed.contains(&"offline") {
             out.push(info_bar(Bar::Warning, "You're offline.", "You can still dictate. Voxa keeps what you say and sends it when you're back.", None, Some(self.close_btn("offline", cx))).into_any_element());
         }
@@ -1974,6 +1992,30 @@ impl Home {
                             })
                         })),
                 )
+                .into_any_element(),
+        );
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon(I_KEEP, 18.).w(px(20.)))
+                .child(row_text("Keep recordings", "Older recordings are deleted to save space; their text stays in History.".into()))
+                .child(wbtn("keep-audio", if s.keep_audio_days == 0 { "As long as the text".to_string() } else { format!("{} days", s.keep_audio_days) }, false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.voxa.update(cx, |v, cx| {
+                        let c = Settings::AUDIO_CHOICES;
+                        let next = c[(c.iter().position(|d| *d == v.settings.keep_audio_days).unwrap_or(c.len() - 1) + 1) % c.len()];
+                        v.update_settings(|s| s.keep_audio_days = next, cx);
+                    })
+                })))
+                .into_any_element(),
+        );
+        out.push(
+            card()
+                .mb(px(3.))
+                .child(icon(I_DELETE, 18.).w(px(20.)))
+                .child(row_text("Free up space", format!("Recordings use {mb:.1} MB. Delete the ones older than 30 days and keep their text.")))
+                .child(wbtn("free-space", "Delete old recordings", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.voxa.update(cx, |v, cx| v.delete_old_audio(30, cx));
+                })))
                 .into_any_element(),
         );
         let delete = if self.confirm_delete {

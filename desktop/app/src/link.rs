@@ -78,6 +78,8 @@ pub enum Command {
     /// The user corrected a dictation's text.
     EditEntry(u64, String),
     DeleteAll,
+    /// Delete recordings older than this many days, keeping their text.
+    DeleteOldAudio(u32),
 }
 
 fn dir() -> PathBuf {
