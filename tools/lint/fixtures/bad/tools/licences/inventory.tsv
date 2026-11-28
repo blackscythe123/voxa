@@ -1,0 +1,17 @@
+# Fixture for licences-allowed and licences-stale (a stale fingerprint).
+# fingerprint 2222222222222222222222222222222222222222222222222222222222222222
+Rust crate	good-dual	1.0.0	MIT OR Apache-2.0	windows
+Rust crate	good-old-slash	1.0.0	MIT/Apache-2.0	windows
+Rust crate	good-exception	1.0.0	Apache-2.0 WITH LLVM-exception OR MIT	windows
+Rust crate	good-and	1.0.0	(MIT OR Apache-2.0) AND Unicode-3.0	windows
+Android library	good-jna	5.0.0	Apache-2.0 OR LGPL-2.1-or-later	android
+Rust crate	good-gpl-choice	1.0.0	MIT OR GPL-3.0-only	windows
+Font	good-font	1.0	OFL-1.1	android
+Rust crate	bad-gpl	1.0.0	GPL-3.0-only	windows
+Rust crate	bad-agpl	1.0.0	AGPL-3.0-or-later	windows
+Android library	bad-lgpl-only	1.0.0	LGPL-2.1-only	android
+Rust crate	bad-sspl	1.0.0	SSPL-1.0	macos
+Android library	bad-unknown	1.0.0	Unknown	android
+Rust crate	bad-and	1.0.0	MIT AND GPL-2.0-only	windows
+Rust crate	bad-empty	1.0.0		windows
+Rust crate	bad-unbalanced	1.0.0	(MIT OR Apache-2.0	windows

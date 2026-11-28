@@ -1,0 +1,2 @@
+Third-party notices for Voxa (fixture: generated from older dependencies)
+Dependency fingerprint: 0000000000000000000000000000000000000000000000000000000000000000

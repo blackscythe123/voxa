@@ -17,4 +17,10 @@ ALLOW = [
     # ── 8. robustness ───────────────────────────────────────────────────────────────────────────
     Allow("robust-atomic-write", "desktop/app/src/common.rs", "write_png: fixed temp",
           "website icon cache, not user data: a raced icon only falls back to the letter badge until the next fetch."),
+
+    # ── 11. licences ────────────────────────────────────────────────────────────────────────────
+    Allow("licences-allowed", "tools/licences/inventory.tsv", "webpki-roots CDLA-Permissive-2.0",
+          "webpki-roots is Mozilla's root certificate list as data, under the Community Data License Agreement "
+          "Permissive 2.0: use and redistribution with the licence text included, no copyleft, compatible with "
+          "shipping Voxa under Apache-2.0. Its text is in THIRD_PARTY_NOTICES.txt and on both licence pages."),
 ]

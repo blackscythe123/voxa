@@ -72,3 +72,14 @@
 1 update-isolation desktop/app/src/update.rs
 1 android-release-key android/app/build.gradle.kts
 3 android-onboarding-permissions android/app/src/main/java/com/voxa/android/ui/SetupScreen.kt
+
+# 11. licences (fixture: stale fingerprints, no app copies, an inventory with GPL-family, SSPL and unknown licences)
+1 licences-stale THIRD_PARTY_NOTICES.txt
+1 licences-stale tools/licences/inventory.tsv
+1 licences-stale tools/licences/android-deps.txt                    # resolved from older Gradle inputs
+1 licences-stale desktop/app/assets/licences-windows.json.gz
+1 licences-stale desktop/app/assets/licences-macos.json.gz
+1 licences-stale android/app/src/main/assets/licences.json.gz
+8 licences-allowed tools/licences/inventory.tsv                     # GPL, AGPL, LGPL-only, SSPL, Unknown, X AND GPL, empty, unbalanced; the good-* rows pass
+1 licences-asset android/app/src/main/res/font/comic.ttf
+1 licences-asset android/app/src/main/res/raw/ding.ogg

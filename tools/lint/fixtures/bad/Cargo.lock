@@ -1,0 +1,7 @@
+# Fixture for tools/lint (licences-stale): not built.
+version = 4
+
+[[package]]
+name = "serde"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
