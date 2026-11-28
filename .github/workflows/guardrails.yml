@@ -1,0 +1,39 @@
+name: Guardrails
+
+# The owner's product decisions as checks (docs/guardrails.md): contrast, copy, privacy, focus,
+# Android size and dependencies, test isolation, release hygiene, robustness. Cheap: Python only,
+# on Linux, on every push and pull request. Plus the shared Rust core's tests on Linux (the desktop
+# app's own tests run in desktop.yml on Windows and macOS, the only places it builds).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guardrails-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Self-test (each rule still catches its fixture violations)
+        run: python3 tools/lint/run.py --self-test
+      - name: Guardrails
+        run: python3 tools/lint/run.py
+
+  core-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test the shared core (every crate except the Windows/macOS desktop app and sign-in window)
+        run: cargo test --workspace --exclude voxa-desktop --exclude voxa-signin
