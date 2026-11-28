@@ -111,6 +111,12 @@ class VoxaApp : Application() {
         lastCheckMs = now
         scope.launch {
             val r = withContext(Dispatchers.IO) { core.checkSession() }
+            // ChatGPT re-issues the sign-in (90 days from now) as it's used: save it, or the saved
+            // sign-in expires 90 days after the original sign-in however much Voxa is used.
+            core.takeRefreshedCookies()?.let { header ->
+                vault.load()?.let { old -> withContext(Dispatchers.IO) { vault.save(SessionVault.Saved(header, old.userAgent)) } }
+                Diag.log("signin", "sign-in refreshed by ChatGPT: saved")
+            }
             Log.i(TAG, "session check: ${r.session}, network ${r.network}, blocked ${r.blocked}")
             Diag.log("readiness", "session ${r.session}, network ${r.network}, blocked ${r.blocked}")
             session.value = r.session

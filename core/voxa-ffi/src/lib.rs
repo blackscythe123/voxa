@@ -148,6 +148,17 @@ impl VoxaCore {
         *self.session.lock().unwrap_or_else(|e| e.into_inner()) = s;
     }
 
+    /// The sign-in cookies after ChatGPT re-issued them (it does on use, 90 days from then), once:
+    /// the app saves them in its encrypted vault. The live session already uses them.
+    pub fn take_refreshed_cookies(&self) -> Option<String> {
+        let h = self.gpt().take_refreshed()?;
+        if let Some(s) = self.session.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            s.cookie_header = h.clone();
+        }
+        diag::log(|| "sign-in refreshed by ChatGPT".into());
+        Some(h)
+    }
+
     pub fn has_session(&self) -> bool {
         self.session().is_some()
     }

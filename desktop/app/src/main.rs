@@ -490,6 +490,7 @@ impl Voxa {
                         Some(s) => match gpt.account(&s) {
                             Ok(a) => {
                                 save_account(&a);
+                                let s = keep_refreshed_cookies(&gpt, s);
                                 (Some(s), Session::Valid, Network::Up)
                             }
                             Err(TranscribeError::SignedOut | TranscribeError::SessionExpired) => (Some(s), Session::Expired, Network::Up),
@@ -657,6 +658,7 @@ impl Voxa {
                                 std::thread::sleep(Duration::from_millis(wait));
                                 result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
                             }
+                            keep_refreshed_cookies(&gpt, session);
                             result.map(|t| prepare::finish_text(t, &data_dir(), &app))
                         })
                         .await;
@@ -1002,7 +1004,9 @@ impl Voxa {
                 .spawn(async move {
                     let bytes = prepare::audio_for_upload(&audio).ok_or(TranscribeError::Server(0))?;
                     let (name, mime) = if audio.extension().is_some_and(|e| e == "webm") { ("recording.webm", "audio/webm") } else { ("recording.wav", "audio/wav") };
-                    gpt.transcribe(&session, bytes, name, mime).map(|t| prepare::finish_text(t, &data_dir(), &app))
+                    let r = gpt.transcribe(&session, bytes, name, mime);
+                    keep_refreshed_cookies(&gpt, session);
+                    r.map(|t| prepare::finish_text(t, &data_dir(), &app))
                 })
                 .await;
             let _ = this.update(cx, |v, cx| {
@@ -1588,6 +1592,18 @@ impl log::Log for GpuiLog {
 }
 
 static GPUI_LOG: GpuiLog = GpuiLog;
+
+/// ChatGPT re-issues the sign-in (90 days from now) as it's used: save it, or the saved sign-in
+/// expires 90 days after the original sign-in however much Voxa is used. Logs no values.
+fn keep_refreshed_cookies(gpt: &voxa_chatgpt::ChatGpt, s: GptSession) -> GptSession {
+    let Some(header) = gpt.take_refreshed() else { return s };
+    let s = GptSession { cookie_header: header, ..s };
+    match s.save_to_voxa_dir(&data_dir()) {
+        Ok(()) => os::log("sign-in refreshed by ChatGPT: saved"),
+        Err(e) => os::log(&format!("FAIL saving the refreshed sign-in: {e}")),
+    }
+    s
+}
 
 fn main() {
     if log::set_logger(&GPUI_LOG).is_ok() {
