@@ -881,8 +881,14 @@ impl Voxa {
 
     fn run(&mut self, effect: Effect, cx: &mut Context<Self>) {
         match effect {
-            Effect::ShowStrip => os::strip_visible(true),
-            Effect::HideStrip { after_ms: 0 } => os::strip_visible(false),
+            Effect::ShowStrip => {
+                strip_frames_reset();
+                os::strip_visible(true)
+            }
+            Effect::HideStrip { after_ms: 0 } => {
+                strip_frames_log();
+                os::strip_visible(false)
+            }
             Effect::HideStrip { after_ms } => {
                 let shown = self.flow.state().clone();
                 cx.spawn(async move |this, cx| {
@@ -1887,6 +1893,7 @@ pub(crate) fn ink_line_faded(levels: Vec<f32>, tick: usize, fade: bool) -> AnyEl
     canvas(
         |_, _, _| {},
         move |b, _, window, _| {
+            STRIP_PAINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let w = f32::from(b.size.width);
             let base = b.origin.y + px(f32::from(b.size.height) * 0.62);
             let n = QUILL_CYCLE as f32;
@@ -1960,8 +1967,25 @@ pub(crate) fn ink_line_faded(levels: Vec<f32>, tick: usize, fade: bool) -> AnyEl
     .into_any_element()
 }
 
+/// Diagnostics for a strip that shows but stays empty: frames built (render) and ink frames
+/// painted while it was up, logged when it hides. Counts only, never content.
+static STRIP_RENDERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static STRIP_PAINTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn strip_frames_reset() {
+    STRIP_RENDERS.store(0, std::sync::atomic::Ordering::Relaxed);
+    STRIP_PAINTS.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn strip_frames_log() {
+    let r = STRIP_RENDERS.load(std::sync::atomic::Ordering::Relaxed);
+    let p = STRIP_PAINTS.load(std::sync::atomic::Ordering::Relaxed);
+    os::log(&format!("strip frames while shown: {r} built, {p} ink painted; {}", os::strip_state()));
+}
+
 impl Render for Voxa {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        STRIP_RENDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if self.strip_blank {
             return div().into_any_element();
         }

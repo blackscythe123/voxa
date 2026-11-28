@@ -626,6 +626,17 @@ pub fn strip_shown() -> bool {
     !h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) } != 0
 }
 
+/// The strip window as Windows sees it, for the log: visible, rectangle, layered alpha.
+pub fn strip_state() -> String {
+    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    if h.is_null() {
+        return "no strip window".into();
+    }
+    let vis = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) } != 0;
+    let (x, y, w, hh) = rect_of(h).unwrap_or_default();
+    format!("window {h:?} visible={vis} at {x},{y} {w}x{hh}")
+}
+
 pub fn strip_visible(show: bool) {
     // Posted (see post_strip): never a synchronous show, hide or move from inside GPUI.
     if post_strip(crate::strip_rules::StripAsk::visibility(show)) {

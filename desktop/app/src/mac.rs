@@ -218,6 +218,10 @@ pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
     None
 }
 
+pub fn strip_state() -> String {
+    String::new()
+}
+
 pub fn strip_visible(show: bool) {
     let view = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
     let w = ns_window(view);
