@@ -1,2 +1,3 @@
 # GitHub language stats: count Voxa's own code, not the HTML design mockups in docs/.
 docs/** linguist-documentation
+.githooks/* text eol=lf
