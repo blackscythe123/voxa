@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import uniffi.voxa_ffi.AppCount
 import uniffi.voxa_ffi.DeliveryResult
 import uniffi.voxa_ffi.EntryStatus
 import uniffi.voxa_ffi.FfiTarget
@@ -25,6 +26,7 @@ import uniffi.voxa_ffi.Words
 import uniffi.voxa_ffi.cleanText
 import uniffi.voxa_ffi.coreVersion
 import uniffi.voxa_ffi.fieldKind
+import uniffi.voxa_ffi.recordingLevels
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -69,10 +71,43 @@ class CoreFfiTest {
         assertEquals(target, paste.target)
         flow.handle(FlowEvent.Delivered(start.job, DeliveryResult.Inserted))
         assertEquals("Pasted in Notes", flow.status()?.title)
+        // The keyboard's success state: what was pasted, from the core.
+        val done = flow.delivered()!!
+        assertEquals("Notes", done.app)
+        assertEquals(4u, done.words)
         val h = VoxaCore(dir).history("")
         assertEquals(EntryStatus.Pasted, h.single().status)
         assertEquals("Hello from the emulator.", h.single().text)
         flow.destroy()
+    }
+
+    @Test
+    fun appScreensReadStatsCountsAndWaveformsFromTheCore() {
+        val dir = tmp("v6")
+        val flow = VoxaFlow(dir, ReadinessInfo(SessionState.VALID, NetworkState.UP, MicState.GRANTED))
+        val target = FfiTarget("WhatsApp", 7uL)
+        val start = flow.handle(FlowEvent.MicPressed(target, false)).filterIsInstance<FlowEffect.StartCapture>().single()
+        // One second of a loud tone, as the recorder would have written it.
+        java.io.File(start.pcmPath).writeBytes(ByteArray(32_000) { if ((it / 16) % 2 == 0) 0x40 else 0xC0.toByte() })
+        flow.handle(FlowEvent.Stop)
+        flow.setRecordingSecs(start.job, 1.5f)
+        flow.handle(FlowEvent.Transcribed(start.job, "one two three four five six seven eight nine ten"))
+        flow.handle(FlowEvent.Delivered(start.job, DeliveryResult.Inserted))
+        assertEquals(14u, flow.delivered()!!.savedSecs)
+        flow.destroy()
+
+        val core = VoxaCore(dir)
+        assertEquals(listOf(AppCount("WhatsApp", 1u)), core.appCounts())
+        val offset = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
+        val week = core.weekStats(offset)
+        assertEquals(10uL, week.words)
+        assertEquals(400u, week.wpm)
+        assertEquals(14u, week.savedSecs)
+        val entry = core.history("").single()
+        val levels = recordingLevels(entry.audioPath!!, 8u)
+        assertEquals(8, levels.size)
+        assertTrue(levels.all { it > 0.5f })
+        assertEquals("Edited.", core.setEntryText(entry.id, "Edited.")!!.text)
     }
 
     @Test
