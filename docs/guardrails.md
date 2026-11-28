@@ -195,6 +195,17 @@ the installer and the release tag makes it reinstall the same version forever, o
 version before publishing, and `android/app/build.gradle.kts` has the matching `versionName` and
 `versionCode`.
 
+**Decision.** An install or update shows the new icon at once (2026-11-28: the owner's pinned
+taskbar shortcut kept the old icon after 1.0.0).
+
+**Why.** Explorer and the taskbar cache icons by path; replacing `Voxa.exe` does not tell them.
+
+**Check** (`release-icon-refresh`, `release.py`). `desktop/windows/voxa.iss` keeps
+`ChangesAssociations=yes` in `[Setup]` (Setup ends with `SHChangeNotify(SHCNE_ASSOCCHANGED)`) and
+calls `RefreshIcons` at `ssPostInstall`, which sends `SHChangeNotify(SHCNE_UPDATEITEM)` for
+`Voxa.exe` and its Start menu, desktop and pinned taskbar shortcuts. Both run in silent updates
+with no window and no focus.
+
 ## 8. Robustness
 
 **Decision.** Rules from the bug hunt, so the same bugs do not come back.
@@ -214,6 +225,16 @@ version before publishing, and `android/app/build.gradle.kts` has the matching `
   `voxa_chatgpt::write_unique_then_rename`), never with a bare `fs::write` / `File::create` on the
   final path; and every write-temp-then-rename function uses a unique temp name (process id plus a
   counter or time), so two writers never clobber one temp file.
+- `robust-strip-sync`: no synchronous `SetWindowPos`, `ShowWindow`, `ShowWindowAsync`,
+  `MoveWindow` or `SetWindowPlacement` under `desktop/app/src` outside `ALLOWED_WINDOW_CALLS`
+  (each with its reason). The strip is moved, shown and hidden through `os::strip_visible`,
+  `place_strip` and `move_strip`, which post `WM_STRIP` to the strip's own queue; the window
+  procedure carries it out from the message loop. Called inside a GPUI update, a synchronous call
+  re-enters GPUI's window procedure: "RefCell already borrowed" at every 1.0.0 start.
+- `robust-toast-thread`: WinRT toast calls in `notify_win.rs` (`ToastNotificationManager`,
+  `post`) go through `off_ui`, a worker thread in the multithreaded apartment. On the UI thread
+  the out-of-process call runs COM's modal loop, which dispatched the strip's messages into a
+  borrowed GPUI (the second 1.0.0 start error, when the session check cleared the sign-in toast).
 
 ## 9. Licence
 

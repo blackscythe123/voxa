@@ -54,6 +54,10 @@ tools/lint.
 | `strip_blank` stuck if `open_window` failed, leaving the strip invisible until restart | 11-24 | d1c85d2 | dSR::a_failed_rebuild_keeps_the_old_strip_and_never_leaves_it_blank | automated |
 | Two strip rebuilds at once leaked a window | 11-28 | 86bc6d8 | dRu::only_one_strip_rebuild_runs_at_a_time | automated |
 | "RefCell already borrowed" on the first strip show; size and position skipped | 11-28 | 08597bf | dSR::the_strip_is_moved_only_when_more_than_8_px_out_of_place, dSR::the_strip_is_never_shown_with_an_activating_flag (ShowWindowAsync with SW_SHOWNOACTIVATE) | partly manual (GPUI re-entrancy) |
+| "RefCell already borrowed" at every 1.0.0 start: the first strip's move ran synchronously inside `main()`'s GPUI callback | 11-28 | 7181b4c | dSR::the_strip_is_placed_before_it_shows_and_never_activates, dSR::strip_moves_and_shows_are_posted_never_synchronous, lint:robust-strip-sync | partly manual (dev-copy log checked) |
+| "RefCell already borrowed" after the session check: removing the sign-in toast on the UI thread ran COM's modal loop into GPUI | 11-28 | bb26018 | dN::toast_calls_run_off_the_ui_thread, lint:robust-toast-thread | partly manual (dev-copy log checked) |
+| Toasts kept the old icon after an icon change: notify-icon.png was written only when missing | 11-28 | e98be5c | dN::an_old_toast_icon_is_replaced_and_a_current_one_is_left_alone | automated |
+| The pinned taskbar shortcut kept the old icon after installing 1.0.0 (Windows icon cache) | 11-28 | 4cee091 | lint:release-icon-refresh (ChangesAssociations=yes, SHChangeNotify at ssPostInstall) | partly manual (install on a real PC) |
 | Stale strip position after a DPI or monitor change | 11-28 | 08597bf | dSR::the_strip_is_moved_only_when_more_than_8_px_out_of_place | automated |
 | Finishing in Voxa's own window offered "Paste in Voxa" | 11-22 | 5aaf11d | cF::going_back_to_where_you_started_pastes_there_with_no_question; dM uses `is_own_window` (see Open items for the OS leg) | partly manual |
 | macOS: the notification's Copy button took focus | 11-28 | aa0e718 | lint:focus-notify | automated |
