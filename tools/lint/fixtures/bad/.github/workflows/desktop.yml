@@ -1,0 +1,5 @@
+# Fixture for tools/lint (release-version-sync): no version define for ISCC and no tag check (2 Bad).
+jobs:
+  windows:
+    steps:
+      - run: ISCC.exe /Q desktop\windows\voxa.iss

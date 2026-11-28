@@ -7,6 +7,7 @@
     python tools/lint/run.py --apk PATH      also check this APK's size (else a built one is found, or skipped)
     python tools/lint/run.py --require-apk   fail when there is no APK to measure
     python tools/lint/run.py --keys          show each violation's allow-list key
+    python tools/lint/run.py --release       a tagged release: placeholder update keys fail too
 
 docs/guardrails.md explains every rule. Exceptions live in tools/lint/allowlist.py, with reasons.
 Standard library only (Python 3.10+).
@@ -23,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from voxa_lint import android, contrast, copy_rules, focus, isolation, privacy, release, robust  # noqa: E402
+from voxa_lint import android, contrast, copy_rules, focus, isolation, privacy, release, robust, update  # noqa: E402
 from voxa_lint.core import Ctx, Violation  # noqa: E402
 
 GROUPS = {
@@ -35,6 +36,7 @@ GROUPS = {
     "isolation": isolation.check,
     "release": release.check,
     "robust": robust.check,
+    "update": update.check,
 }
 
 
@@ -51,7 +53,7 @@ def main_lint(args) -> int:
     from allowlist import ALLOW
 
     root = HERE.parent.parent
-    ctx = Ctx(root, apk=Path(args.apk) if args.apk else None, require_apk=args.require_apk)
+    ctx = Ctx(root, apk=Path(args.apk) if args.apk else None, require_apk=args.require_apk, release=args.release)
     found = run(ctx, args.only)
     used = set()
     failing = []
@@ -99,7 +101,8 @@ def main_self_test() -> int:
         with open(apk, "wb") as f:
             f.seek(android.BUDGET_BYTES)
             f.write(b"\0")
-        found = run(Ctx(fixtures, apk=apk))
+        # release=True: the fixture's placeholder update key must be caught as a release would.
+        found = run(Ctx(fixtures, apk=apk, release=True))
     got = Counter((v.rule, v.path if v.rule != "android-size" else "APK") for v in found)
     for key in sorted(set(expected) | set(got)):
         if expected[key] != got[key]:
@@ -111,7 +114,9 @@ def main_self_test() -> int:
     rules = {r for r, _ in expected}
     every = {"contrast", "copy-emoji", "copy-dash", "copy-case", "copy-occasion", "privacy-log", "privacy-notify", "focus-steal",
              "focus-notify", "android-size", "android-deps", "android-workmanager", "android-exact-alarm", "isolation-env", "isolation-test-hook",
-             "release-latest", "robust-case-slice", "robust-unwrap", "robust-atomic-write"}
+             "release-latest", "release-version-sync", "robust-case-slice", "robust-unwrap", "robust-atomic-write",
+             "update-hosts", "update-key-present", "update-secret", "update-gate", "update-isolation", "android-signing",
+             "android-onboarding-permissions"}
     for r in sorted(every - rules):
         ok = False
         print(f"FAIL rule {r} has no fixture proving it catches a violation")
@@ -146,6 +151,7 @@ def main() -> int:
     p.add_argument("--apk")
     p.add_argument("--require-apk", action="store_true")
     p.add_argument("--keys", action="store_true")
+    p.add_argument("--release", action="store_true")
     args = p.parse_args()
     if args.self_test:
         return main_self_test()

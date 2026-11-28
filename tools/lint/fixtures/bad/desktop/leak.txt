@@ -1,0 +1,5 @@
+Fixture for tools/lint (update-secret). Fake, never a real key.
+-----BEGIN PRIVATE KEY-----
+NOT A REAL KEY
+-----END PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIFAKEFAKEFAKE

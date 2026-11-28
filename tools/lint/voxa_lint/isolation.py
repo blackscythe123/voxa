@@ -7,6 +7,12 @@ real user's data, and test hooks only work in a test copy.
                        only reached through app_data_root(), so it is covered too.
   isolation-test-hook  every read of a VOXA_TEST_* variable sits in a function that checks VOXA_DATA
                        (directly, or through test_hooks()).
+  update-isolation     in desktop/app/src/update.rs, every function that builds the update client
+                       (voxa_update::fetch::Client::new) checks for a test copy: VOXA_DATA or
+                       test_hooks() in its own body, or in a function of the same file it calls. So
+                       a test copy picks its test feed, and the test seams only open through
+                       test_hooks(). (Spawning the installer is guarded by update-gate: the install
+                       gate refuses any test copy.)
 """
 
 from __future__ import annotations
@@ -34,6 +40,10 @@ ALLOWED = {
 
 
 def check(ctx: Ctx) -> list[Violation]:
+    return check_env(ctx) + check_update(ctx)
+
+
+def check_env(ctx: Ctx) -> list[Violation]:
     out = []
     for rel in S.files(ctx.root, *GLOBS):
         src = S.load(ctx.root, rel)
@@ -60,4 +70,29 @@ def check(ctx: Ctx) -> list[Violation]:
                     msg = (f"{m.group(1)} read in {f.name if f else '?'}() without a VOXA_DATA check in the same function. Rule: VOXA_TEST_* "
                            "hooks only work with a separate VOXA_DATA folder (docs/guardrails.md#6-isolation)")
                 out.append(Violation(rule, rel, line, msg, key=f"{f.name if f else '?'}: {what}"))
+    return out
+
+
+UPDATE_FILE = "desktop/app/src/update.rs"
+
+
+def check_update(ctx: Ctx) -> list[Violation]:
+    if not ctx.exists(UPDATE_FILE):
+        return []
+    src = S.load(ctx.root, UPDATE_FILE)
+    tests = S.test_ranges(src)
+    fns = S.functions(src)
+    guarded = {f.name for f in fns if GUARD.search(src.code[f.start:f.end])}
+    out = []
+    for m in re.finditer(r"\bClient::new\s*\(", src.code):
+        if S.in_ranges(m.start(), tests):
+            continue
+        f = S.enclosing_fn(fns, m.start())
+        body = src.code[f.start:f.end] if f else ""
+        called = set(re.findall(r"\b(\w+)\s*\(", body))
+        if GUARD.search(body) or called & guarded:
+            continue
+        out.append(Violation("update-isolation", UPDATE_FILE, src.line_of(m.start()), f"{f.name if f else '?'}() builds the update client "
+                             "without a test copy check. Rule: a test copy (VOXA_DATA set) uses its test feed through test_hooks(), "
+                             "never the real updater state (docs/guardrails.md#6-isolation)", key=f"{f.name if f else '?'}: Client::new"))
     return out

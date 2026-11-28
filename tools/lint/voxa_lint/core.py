@@ -32,10 +32,11 @@ class Allow:
 class Ctx:
     """What a check gets: the tree to read (the repo, or a fixture tree) and options."""
 
-    def __init__(self, root: Path, apk: Path | None = None, require_apk: bool = False):
+    def __init__(self, root: Path, apk: Path | None = None, require_apk: bool = False, release: bool = False):
         self.root = root
         self.apk = apk
         self.require_apk = require_apk
+        self.release = release       # --release: a tagged release (placeholder update keys fail)
         self.notes: list[str] = []   # informational lines (APK size, skipped checks)
 
     def exists(self, rel: str) -> bool:

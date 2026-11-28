@@ -15,3 +15,18 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.0")         // Bad: android-deps and android-workmanager
     debugImplementation(libs.androidx.ui.tooling)
 }
+
+android {
+    defaultConfig {
+        versionCode = 6                                           // Bad: release-version-sync (1.0.0 is 10000)
+        versionName = "1.0.0"
+    }
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")     // Bad: android-signing
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("debug")     // Good: debug builds
+        }
+    }
+}

@@ -43,8 +43,23 @@
 
 # 7. release
 1 release-latest docs/release-android.md
+1 release-latest docs/update-feed.md
+1 release-version-sync desktop/windows/voxa.iss
+2 release-version-sync .github/workflows/desktop.yml                # no /DAppVersion, no tag check
+1 release-version-sync android/app/build.gradle.kts                # versionCode off the scheme
 
 # 8. robustness
 1 robust-case-slice desktop/app/src/ui.rs
 2 robust-unwrap core/voxa-demo/src/lib.rs
 2 robust-atomic-write desktop/app/src/ui.rs                         # direct settings.json write, fixed temp name
+
+# 9. update
+3 update-hosts core/voxa-update/src/fetch.rs                        # plain http, other host, danger_accept_invalid_certs
+2 update-key-present core/voxa-update/src/keys.rs                   # placeholder (self-test runs as --release), short key
+2 update-secret desktop/leak.txt                                    # PEM block, PKCS#8 prefix
+1 update-secret android/app/release.jks
+3 update-gate desktop/app/src/update.rs                             # no verify_file, sneaky spawn, wrong function
+1 update-gate android/app/src/main/java/com/voxa/android/notify/Updater.kt
+1 update-isolation desktop/app/src/update.rs
+1 android-signing android/app/build.gradle.kts
+3 android-onboarding-permissions android/app/src/main/java/com/voxa/android/ui/SetupScreen.kt

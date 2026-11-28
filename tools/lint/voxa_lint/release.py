@@ -2,7 +2,14 @@
 (the desktop's .../releases/latest/download/Voxa-Setup.exe links must keep pointing at the desktop).
 
   release-latest  every `gh release create` / `gh release edit` for Android (an APK, or a tag or title
-                  that says android) in the docs, scripts or workflows passes --latest=false.
+                  that says android) in the docs, scripts or workflows passes --latest=false. The
+                  `update-feed` release (both signed feeds) passes --latest=false or --prerelease.
+  release-version-sync
+                  one version everywhere: the workspace version (Cargo.toml) is the voxa.iss default
+                  AppVersion and the Android versionName, Android's versionCode follows
+                  major*10000 + minor*100 + patch, and desktop.yml passes /DAppVersion to ISCC and
+                  checks the tag against the Cargo version before publishing. A mismatch would make
+                  the updater reinstall forever or downgrade.
 """
 
 from __future__ import annotations
@@ -32,11 +39,74 @@ def _command(text: str, start: int) -> tuple[str, int]:
 
 
 def check(ctx: Ctx) -> list[Violation]:
+    return check_latest(ctx) + check_version_sync(ctx)
+
+
+def _read(ctx: Ctx, rel: str) -> str | None:
+    return (ctx.root / rel).read_text(encoding="utf-8", errors="replace") if ctx.exists(rel) else None
+
+
+def _line(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def check_version_sync(ctx: Ctx) -> list[Violation]:
+    cargo = _read(ctx, "Cargo.toml")
+    if cargo is None:
+        return []
+    ws = re.search(r"\[workspace\.package\][^\[]*?^version\s*=\s*\"([^\"]+)\"", cargo, re.M | re.S)
+    if not ws:
+        return []
+    v = ws.group(1)
+    out = []
+
+    def bad(rel: str, line: int, msg: str, key: str):
+        out.append(Violation("release-version-sync", rel, line, f"{msg}. Rule: one version everywhere, the workspace version {v} in "
+                             "Cargo.toml is the source (docs/guardrails.md#7-release)", key=key))
+
+    iss = _read(ctx, "desktop/windows/voxa.iss")
+    if iss is not None:
+        d = re.search(r'^\s*#define\s+AppVersion\s+"([^"]+)"', iss, re.M)
+        if not d:
+            bad("desktop/windows/voxa.iss", 1, "voxa.iss has no default #define AppVersion", "iss: missing")
+        elif d.group(1) != v:
+            bad("desktop/windows/voxa.iss", _line(iss, d.start()), f"voxa.iss defaults to AppVersion {d.group(1)}", "iss: differs")
+        for h in re.finditer(r'^\s*AppVersion\s*=\s*(\d+\.\d+\.\d+)', iss, re.M):
+            bad("desktop/windows/voxa.iss", _line(iss, h.start()), f"voxa.iss hard-codes AppVersion={h.group(1)}", "iss: hard-coded")
+    yml = _read(ctx, ".github/workflows/desktop.yml")
+    if yml is not None:
+        if "/DAppVersion" not in yml:
+            bad(".github/workflows/desktop.yml", 1, "desktop.yml builds the installer without /DAppVersion", "yml: no DAppVersion")
+        if not re.search(r"GITHUB_REF_NAME[^\n]*(!=|==|-ne|-eq)[^\n]*\bv\$|\bv\$[^\n]*(!=|==)[^\n]*GITHUB_REF_NAME", yml):
+            bad(".github/workflows/desktop.yml", 1, "desktop.yml publishes without checking the tag against the Cargo version", "yml: no tag check")
+    gradle = _read(ctx, "android/app/build.gradle.kts")
+    if gradle is not None:
+        name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+        code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
+        if name and name.group(1) != v:
+            bad("android/app/build.gradle.kts", _line(gradle, name.start()), f"Android versionName is {name.group(1)}", "gradle: name")
+        if name and code:
+            parts = name.group(1).split(".")
+            if len(parts) == 3 and all(p.isdigit() for p in parts):
+                want = int(parts[0]) * 10000 + int(parts[1]) * 100 + int(parts[2])
+                if int(code.group(1)) != want:
+                    bad("android/app/build.gradle.kts", _line(gradle, code.start()), f"Android versionCode is {code.group(1)}, the scheme "
+                        f"major*10000 + minor*100 + patch gives {want} for {name.group(1)}", "gradle: code")
+    return out
+
+
+def check_latest(ctx: Ctx) -> list[Violation]:
     out = []
     for rel in S.files(ctx.root, *GLOBS, exclude=EXCLUDE):
         text = (ctx.root / rel).read_text(encoding="utf-8", errors="replace")
         for m in CMD.finditer(text):
             cmd, _ = _command(text, m.start())
+            if "update-feed" in cmd and not re.search(r"--latest(=|\s+)false\b|--prerelease\b", cmd):
+                line = text.count("\n", 0, m.start()) + 1
+                out.append(Violation("release-latest", rel, line, "the update-feed release without --latest=false or --prerelease. Rule: "
+                                     "the feed release never becomes the latest release (docs/guardrails.md#7-release)",
+                                     key=cmd.strip()[:120]))
+                continue
             if ANDROID.search(cmd) and not re.search(r"--latest(=|\s+)false\b", cmd):
                 line = text.count("\n", 0, m.start()) + 1
                 out.append(Violation("release-latest", rel, line, "Android release without --latest=false. Rule: Android GitHub releases "

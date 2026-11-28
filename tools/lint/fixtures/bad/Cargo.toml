@@ -1,0 +1,3 @@
+# Fixture for tools/lint (release-version-sync): not built.
+[workspace.package]
+version = "1.0.0"
