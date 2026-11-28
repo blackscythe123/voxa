@@ -7961,7 +7961,7 @@ dependencies = [
 
 [[package]]
 name = "voxa-ffi"
-version = "0.4.4"
+version = "0.4.7"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -7982,7 +7982,7 @@ dependencies = [
 
 [[package]]
 name = "voxa-store"
-version = "0.4.4"
+version = "0.4.7"
 dependencies = [
  "hound",
  "serde",
