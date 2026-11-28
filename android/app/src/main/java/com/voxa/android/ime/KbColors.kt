@@ -54,6 +54,8 @@ class KbColors(
         private const val WHITE = 0xFFFFFFFF.toInt()
         private const val SEPIA = 0xFF8F4C2C.toInt()
         private const val SEPIA_DARK = 0xFFD9946D.toInt()
+        /** Green that reads as text on the light surfaces (5.2:1 on #F3F3F1). */
+        const val GOOD_TEXT_LIGHT = 0xFF17743F.toInt()
 
         /** The look saved in Settings; the Voxa look (and the saved choice cleared) on any failure. */
         fun of(context: Context): KbColors {
@@ -85,12 +87,15 @@ class KbColors(
                 surface = surface, photo = false, washAlpha = 1f,
                 key = if (!look.keyShapes) 0 else if (dark) 0xFF2E2E2C.toInt() else WHITE,
                 keyElevation = !dark && look.keyShapes,
-                text = text, muted = withAlpha(text, 0.56f), stageMuted = withAlpha(text, 0.56f), keyText = withAlpha(text, 0.72f),
+                // Secondary text: 56 % reads at 5.6:1 on the dark surface, but only 4.0:1 on the light
+                // one, so light uses 62 % (4.95:1 on #F3F3F1, WCAG AA).
+                text = text, muted = withAlpha(text, if (dark) 0.56f else 0.62f), stageMuted = withAlpha(text, if (dark) 0.56f else 0.62f), keyText = withAlpha(text, 0.72f),
                 accent = accent, onAccent = onAccent,
                 micRing = ring(accent, surface, text, dark), micGlow = withAlpha(accent, if (dark) 0.25f else 0.35f),
                 bars = withAlpha(accent, 0.3f), spinner = accent,
                 good = if (dark) 0xFF45C27C.toInt() else 0xFF1F9D55.toInt(),
-                goodTitle = if (dark) 0xFF45C27C.toInt() else 0xFF1F9D55.toInt(),
+                // The 16sp title needs 4.5:1: #1F9D55 is only 3.1:1 on #F3F3F1, #17743F is 5.2:1.
+                goodTitle = if (dark) 0xFF45C27C.toInt() else GOOD_TEXT_LIGHT,
                 recording = if (dark) 0xFFF2555A.toInt() else 0xFFE5484D.toInt(),
                 press = if (dark) 0x33FFFFFF else 0x1F000000, dark = dark, look = look,
             )
@@ -126,7 +131,7 @@ class KbColors(
                 accent = accent, onAccent = micIcon(accent),
                 micRing = ring(accent, surface, fg, dark), micGlow = withAlpha(accent, if (dark) 0.25f else 0.35f),
                 bars = withAlpha(accent, 0.3f), spinner = accent,
-                good = good, goodTitle = if (Contrast.ratio(good, surface) >= 4.5) good else fg,
+                good = good, goodTitle = listOf(good, GOOD_TEXT_LIGHT).firstOrNull { Contrast.ratio(it, surface) >= 4.5 } ?: fg,
                 recording = if (dark) 0xFFF2555A.toInt() else 0xFFE5484D.toInt(),
                 press = if (dark) 0x33FFFFFF else 0x1F000000, dark = dark, look = look,
             )

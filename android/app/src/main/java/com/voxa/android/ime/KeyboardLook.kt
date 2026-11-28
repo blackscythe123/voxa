@@ -57,10 +57,11 @@ object KeyboardLook {
     class MicSwatch(val name: String, val color: Int)
 
     /** Mic colours after the default: the icon on it is white or near-black, whichever reads. */
+    /** Each gives its icon (and the action pill's text) at least 4.5:1 ([KbColors.micIcon]). */
     val micColors = listOf(
         MicSwatch("Ocean", 0xFF2F6FDB.toInt()),
-        MicSwatch("Teal", 0xFF138A7E.toInt()),
-        MicSwatch("Rose", 0xFFD04870.toInt()),
+        MicSwatch("Teal", 0xFF0F7A6F.toInt()),
+        MicSwatch("Rose", 0xFFB83A60.toInt()),
         MicSwatch("Violet", 0xFF7457E0.toInt()),
         MicSwatch("Amber", 0xFFD08A1E.toInt()),
     )
@@ -80,8 +81,15 @@ object KeyboardLook {
             soften = p.getBoolean("soften", false),
             position = p.getFloat("position", 0.5f),
             keyShapes = p.getBoolean("key_shapes", true),
-            micColor = p.getInt("mic_color", 0),
+            micColor = newerMic(p.getInt("mic_color", 0)),
         )
+    }
+
+    /** Teal and Rose were darkened to reach 4.5:1 (#138A7E and #D04870 gave only 4.4:1 and 4.3:1). */
+    private fun newerMic(c: Int): Int = when (c) {
+        0xFF138A7E.toInt() -> 0xFF0F7A6F.toInt()
+        0xFFD04870.toInt() -> 0xFFB83A60.toInt()
+        else -> c
     }
 
     fun save(c: Context, look: Look) {
