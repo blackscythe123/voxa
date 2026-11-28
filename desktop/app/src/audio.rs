@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat, Stream};
+use cpal::{Sample, SampleFormat, Stream};
 
 pub const RATE: u32 = 16_000;
 
@@ -24,10 +24,33 @@ pub fn level() -> f32 {
 #[derive(Debug)]
 pub enum MicError {
     NoDevice,
-    /// The device refused to open (most often: Windows microphone privacy is off).
+    /// Access was refused: Windows microphone privacy is off (or macOS permission not given).
     Blocked(#[allow(dead_code)] String),
+    /// Another app holds the microphone for itself (exclusive mode: DAWs, some call apps).
+    InUse(#[allow(dead_code)] String),
+    /// It wouldn't open for another reason (driver, unsupported format).
+    Failed(#[allow(dead_code)] String),
     /// The recording file couldn't be created (disk full, data folder locked or unavailable).
     Disk(#[allow(dead_code)] String),
+}
+
+impl MicError {
+    /// Sort an audio backend's error by what the user can do about it. Only a refusal of access
+    /// sends the user to the privacy settings.
+    pub fn from_backend(text: String) -> Self {
+        let t = text.to_ascii_lowercase();
+        // AUDCLNT_E_DEVICE_IN_USE, AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED aside: in use by another app.
+        if t.contains("8889000a") || t.contains("in use") || t.contains("exclusive") {
+            MicError::InUse(text)
+        // E_ACCESSDENIED (privacy off), or the macOS permission.
+        } else if t.contains("80070005") || t.contains("access is denied") || t.contains("access denied") || t.contains("not permitted") || t.contains("permission") {
+            MicError::Blocked(text)
+        } else if t.contains("not available") || t.contains("no longer available") || t.contains("88890004") {
+            MicError::NoDevice
+        } else {
+            MicError::Failed(text)
+        }
+    }
 }
 
 type Writer = hound::WavWriter<std::io::BufWriter<std::fs::File>>;
@@ -127,7 +150,7 @@ pub fn default_device_name() -> Option<String> {
 }
 
 fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError> {
-    let config = device.default_input_config().map_err(|e| MicError::Blocked(e.to_string()))?;
+    let config = device.default_input_config().map_err(|e| MicError::from_backend(e.to_string()))?;
     let in_rate = config.sample_rate().0;
     let channels = config.channels() as usize;
     let step = in_rate as f64 / RATE as f64;
@@ -204,11 +227,36 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
             make_err(),
             None,
         ),
-        other => return Err(MicError::Blocked(format!("unsupported sample format {other:?}"))),
+        // Interfaces that only offer 32-bit, 24-in-32, unsigned or 64-bit float samples.
+        SampleFormat::I32 => device.build_input_stream(
+            &config.into(),
+            move |data: &[i32], _| on_samples(&mut data.chunks(channels).map(|f| f.iter().map(|&x| x.to_sample::<f32>()).sum::<f32>() / channels as f32)),
+            make_err(),
+            None,
+        ),
+        SampleFormat::U16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[u16], _| on_samples(&mut data.chunks(channels).map(|f| f.iter().map(|&x| x.to_sample::<f32>()).sum::<f32>() / channels as f32)),
+            make_err(),
+            None,
+        ),
+        SampleFormat::U8 => device.build_input_stream(
+            &config.into(),
+            move |data: &[u8], _| on_samples(&mut data.chunks(channels).map(|f| f.iter().map(|&x| x.to_sample::<f32>()).sum::<f32>() / channels as f32)),
+            make_err(),
+            None,
+        ),
+        SampleFormat::F64 => device.build_input_stream(
+            &config.into(),
+            move |data: &[f64], _| on_samples(&mut data.chunks(channels).map(|f| f.iter().map(|&x| x as f32).sum::<f32>() / channels as f32)),
+            make_err(),
+            None,
+        ),
+        other => return Err(MicError::Failed(format!("unsupported sample format {other:?}"))),
     }
-    .map_err(|e| MicError::Blocked(e.to_string()))?;
+    .map_err(|e| MicError::from_backend(e.to_string()))?;
     // Built but not capturing: nothing is recorded until start().
-    stream.pause().map_err(|e| MicError::Blocked(e.to_string()))?;
+    stream.pause().map_err(|e| MicError::from_backend(e.to_string()))?;
     Ok(stream)
 }
 
@@ -264,7 +312,7 @@ impl Mic {
         if let Err(e) = self.stream.play() {
             // Stale stream (device reset): rebuild once and retry.
             self.stream = build(&device, self.shared.clone())?;
-            self.stream.play().map_err(|_| MicError::Blocked(e.to_string()))?;
+            self.stream.play().map_err(|_| MicError::from_backend(e.to_string()))?;
         }
         Ok(())
     }
@@ -313,7 +361,7 @@ impl Mic {
         self.live_since = Some(std::time::Instant::now());
         if let Err(e) = self.stream.play() {
             self.stream = build(&device, self.shared.clone())?;
-            self.stream.play().map_err(|_| MicError::Blocked(e.to_string()))?;
+            self.stream.play().map_err(|_| MicError::from_backend(e.to_string()))?;
         }
         Ok(())
     }
@@ -329,7 +377,7 @@ impl Mic {
         self.stream = build(&device, self.shared.clone())?;
         self.device_name = name;
         self.shared.dead.store(false, Ordering::Relaxed);
-        self.stream.play().map_err(|e| MicError::Blocked(e.to_string()))
+        self.stream.play().map_err(|e| MicError::from_backend(e.to_string()))
     }
 
     /// Seconds of audio in the take's file so far (talking time plus the silence at each resume).
@@ -383,6 +431,22 @@ impl Mic {
 
 #[cfg(test)]
 mod tests {
+    use super::MicError;
+
+    /// Realworld 18: only a refusal of access is "microphone access is off". A mic held by
+    /// another app, or one that won't open for another reason, says something else.
+    #[test]
+    fn only_refused_access_is_reported_as_privacy() {
+        let in_use = "A backend-specific error has occurred: Device in use (0x8889000A)";
+        assert!(matches!(MicError::from_backend(in_use.into()), MicError::InUse(_)));
+        let denied = "A backend-specific error has occurred: Access is denied. (0x80070005)";
+        assert!(matches!(MicError::from_backend(denied.into()), MicError::Blocked(_)));
+        let gone = "The requested device is no longer available. For example, it has been unplugged.";
+        assert!(matches!(MicError::from_backend(gone.into()), MicError::NoDevice));
+        let other = "A backend-specific error has occurred: The audio engine failed (0x88890008)";
+        assert!(matches!(MicError::from_backend(other.into()), MicError::Failed(_)));
+    }
+
     /// Manual: cargo test -p voxa-desktop list_microphones -- --ignored --nocapture
     #[test]
     #[ignore]

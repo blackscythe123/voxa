@@ -13,7 +13,7 @@ pub use crate::tab::{coding_agent, domain_of};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_NCRENDERING_POLICY, DwmSetWindowAttribute};
 use windows_sys::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard,
     SetClipboardData,
 };
 use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
@@ -129,44 +129,106 @@ unsafe extern "system" fn no_activate_proc(
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
-fn read_clipboard_text() -> Option<String> {
+/// Everything on the clipboard, format by format, so it can be put back as it was: text,
+/// images, copied files, rich text. Formats that aren't plain memory (bitmaps, metafiles,
+/// palettes, owner-drawn) are left out: Windows makes them again from the memory ones.
+struct Saved {
+    formats: Vec<(u32, Vec<u8>)>,
+}
+
+/// Never hold more than this much of the user's clipboard in memory; bigger is left alone.
+const SAVE_LIMIT: usize = 64 << 20;
+
+fn is_memory_format(f: u32) -> bool {
+    // CF_BITMAP 2, CF_METAFILEPICT 3, CF_PALETTE 9, CF_ENHMETAFILE 14, CF_OWNERDISPLAY 0x80,
+    // CF_DSPBITMAP 0x82, CF_DSPMETAFILEPICT 0x83, CF_DSPENHMETAFILE 0x8E, GDI objects 0x300-0x3FF.
+    !matches!(f, 2 | 3 | 9 | 14 | 0x80 | 0x82 | 0x83 | 0x8E | 0x300..=0x3FF)
+}
+
+/// Must run with the clipboard open. None when it can't all be saved (too big).
+fn save_clipboard() -> Option<Saved> {
+    use windows_sys::Win32::System::DataExchange::EnumClipboardFormats;
+    use windows_sys::Win32::System::Memory::GlobalSize;
+    let mut formats = Vec::new();
+    let mut total = 0usize;
+    let mut f = 0u32;
     unsafe {
-        if IsClipboardFormatAvailable(CF_UNICODETEXT as u32) == 0 {
-            return None;
+        loop {
+            f = EnumClipboardFormats(f);
+            if f == 0 {
+                break;
+            }
+            if !is_memory_format(f) {
+                continue;
+            }
+            let h = GetClipboardData(f);
+            if h.is_null() {
+                continue;
+            }
+            let size = GlobalSize(h as _);
+            if size == 0 {
+                continue;
+            }
+            total += size;
+            if total > SAVE_LIMIT {
+                return None;
+            }
+            let p = GlobalLock(h as _) as *const u8;
+            if p.is_null() {
+                continue;
+            }
+            formats.push((f, std::slice::from_raw_parts(p, size).to_vec()));
+            GlobalUnlock(h as _);
         }
-        let h = GetClipboardData(CF_UNICODETEXT as u32);
+    }
+    Some(Saved { formats })
+}
+
+/// Must run with the clipboard open and emptied by this process.
+fn put_format(format: u32, bytes: &[u8]) -> bool {
+    unsafe {
+        let h = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1));
         if h.is_null() {
-            return None;
+            return false;
         }
-        let p = GlobalLock(h) as *const u16;
+        let p = GlobalLock(h) as *mut u8;
         if p.is_null() {
-            return None;
+            return false;
         }
-        let mut len = 0usize;
-        while *p.add(len) != 0 {
-            len += 1;
-        }
-        let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
         GlobalUnlock(h);
-        Some(s)
+        !SetClipboardData(format, h as *mut c_void).is_null()
     }
 }
 
-fn write_clipboard_text(text: &str) -> bool {
+fn registered(name: &str) -> u32 {
+    unsafe { windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW(wide(name).as_ptr()) }
+}
+
+/// Keep what Voxa puts on the clipboard only to paste it out of Windows clipboard history
+/// (Win+V), Cloud Clipboard sync and clipboard managers.
+fn mark_private(and_monitors: bool) {
+    let no = 0u32.to_le_bytes();
+    put_format(registered("CanIncludeInClipboardHistory"), &no);
+    put_format(registered("CanUploadToCloudClipboard"), &no);
+    if and_monitors {
+        put_format(registered("ExcludeClipboardContentFromMonitorProcessing"), &no);
+    }
+}
+
+fn write_clipboard_text(text: &str, private: bool) -> bool {
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let bytes: Vec<u8> = wide.iter().flat_map(|c| c.to_le_bytes()).collect();
     unsafe {
         if EmptyClipboard() == 0 {
             return false;
         }
-        let h = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2);
-        if h.is_null() {
-            return false;
-        }
-        let p = GlobalLock(h) as *mut u16;
-        std::ptr::copy_nonoverlapping(wide.as_ptr(), p, wide.len());
-        GlobalUnlock(h);
-        !SetClipboardData(CF_UNICODETEXT as u32, h as *mut c_void).is_null()
     }
+    let ok = put_format(CF_UNICODETEXT as u32, &bytes);
+    if ok && private {
+        mark_private(true);
+    }
+    ok
 }
 
 fn with_clipboard<R>(f: impl FnOnce() -> R) -> Option<R> {
@@ -181,6 +243,15 @@ fn with_clipboard<R>(f: impl FnOnce() -> R) -> Option<R> {
     None
 }
 
+fn clipboard_sequence() -> u32 {
+    unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+}
+
+/// How long the app in front gets to read the clipboard before what was there is put back.
+/// Not on the UI thread, so it can be generous: slow readers (Remote Desktop, VMs, busy
+/// Electron apps) would otherwise paste the old clipboard.
+const RESTORE_AFTER: std::time::Duration = std::time::Duration::from_millis(1500);
+
 fn key(vk: u16, up: bool) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
@@ -190,28 +261,120 @@ fn key(vk: u16, up: bool) -> INPUT {
     }
 }
 
-/// Paste `text` into the window in front. With `keep`, the text stays on the clipboard (so Ctrl+V
-/// pastes it again anywhere); without, the user's previous clipboard text is put back.
-/// The caller has already checked the right window is in front (voxa-core decides what to do if not).
-pub fn paste_here(text: &str, keep: bool) -> bool {
-    let before = with_clipboard(read_clipboard_text).flatten();
-    if with_clipboard(|| write_clipboard_text(text)) != Some(true) {
-        log("FAIL could not write clipboard");
-        return false;
+/// The integrity level of a process token (0x2000 medium, 0x3000 high: "Run as administrator").
+unsafe fn token_integrity(token: windows_sys::Win32::Foundation::HANDLE) -> Option<u32> {
+    use windows_sys::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TokenIntegrityLevel};
+    let mut buf = [0u8; 128];
+    let mut len = 0u32;
+    if unsafe { GetTokenInformation(token, TokenIntegrityLevel, buf.as_mut_ptr() as _, buf.len() as u32, &mut len) } == 0 {
+        return None;
     }
+    let label = buf.as_ptr() as *const TOKEN_MANDATORY_LABEL;
+    let sid = unsafe { (*label).Label.Sid };
+    let count = unsafe { *GetSidSubAuthorityCount(sid) };
+    if count == 0 {
+        return None;
+    }
+    Some(unsafe { *GetSidSubAuthority(sid, count as u32 - 1) })
+}
+
+fn own_integrity() -> u32 {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Security::TOKEN_QUERY;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    unsafe {
+        let mut t = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut t) == 0 {
+            return 0x2000;
+        }
+        let l = token_integrity(t).unwrap_or(0x2000);
+        CloseHandle(t);
+        l
+    }
+}
+
+/// The integrity of the process that owns a window, as far as Voxa may know it.
+fn window_integrity(hwnd: HWND) -> crate::rules::Integrity {
+    use crate::rules::Integrity;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Security::TOKEN_QUERY;
+    use windows_sys::Win32::System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return Integrity::Unknown;
+        }
+        let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if p.is_null() {
+            return Integrity::Unknown;
+        }
+        let mut t = std::ptr::null_mut();
+        let r = if OpenProcessToken(p, TOKEN_QUERY, &mut t) == 0 {
+            // An elevated process's token can't be read from a normal one.
+            Integrity::Hidden
+        } else {
+            let l = token_integrity(t);
+            CloseHandle(t);
+            l.map(Integrity::Level).unwrap_or(Integrity::Unknown)
+        };
+        CloseHandle(p);
+        r
+    }
+}
+
+/// Paste `text` into the window in front. With `keep`, the text stays on the clipboard (so
+/// Ctrl+V pastes it again anywhere); without, whatever was on the clipboard (text, image,
+/// files) is put back afterwards, unless something new was copied meanwhile, and the text
+/// never reaches clipboard history or Cloud Clipboard.
+/// An admin window drops keys from a normal process without a word (UIPI): then the text is
+/// left on the clipboard for the user's own Ctrl+V and Voxa says so.
+/// The caller has already checked the right window is in front.
+pub fn paste_here(text: &str, keep: bool) -> crate::rules::PasteResult {
+    use crate::rules::PasteResult;
+    let fg = foreground();
+    if crate::rules::paste_refused(own_integrity(), window_integrity(fg)) {
+        let copied = with_clipboard(|| write_clipboard_text(text, false)) == Some(true);
+        log(&format!("{} runs as administrator: not pasting, copied={copied}", describe(fg)));
+        return if copied { PasteResult::Refused } else { PasteResult::Failed };
+    }
+    let before = if keep { None } else { with_clipboard(save_clipboard).flatten() };
+    if with_clipboard(|| write_clipboard_text(text, !keep)) != Some(true) {
+        log("FAIL could not write clipboard");
+        return PasteResult::Failed;
+    }
+    let ours = clipboard_sequence();
     let inputs = [key(VK_CONTROL, false), key(b'V' as u16, false), key(b'V' as u16, true), key(VK_CONTROL, true)];
     let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
-    log(&format!("sent Ctrl+V ({sent} events) to {}", describe(foreground())));
-    if keep {
-        return sent == 4;
+    log(&format!("sent Ctrl+V ({sent} events) to {}", describe(fg)));
+    if !keep {
+        // Couldn't be saved (busy, or too big): leave the dictation there rather than wipe it.
+        match before {
+            Some(saved) => {
+                std::thread::spawn(move || {
+                    std::thread::sleep(RESTORE_AFTER);
+                    let restored = with_clipboard(|| {
+                        // Something new was copied meanwhile: that stays.
+                        if clipboard_sequence() != ours {
+                            return false;
+                        }
+                        if unsafe { EmptyClipboard() } == 0 {
+                            return false;
+                        }
+                        let all = saved.formats.iter().all(|(f, b)| put_format(*f, b));
+                        if !saved.formats.is_empty() {
+                            mark_private(false);
+                        }
+                        all
+                    });
+                    log(&format!("clipboard restored={restored:?}"));
+                });
+            }
+            None => log("clipboard couldn't be saved: the dictation stays on it"),
+        }
     }
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    let restored = with_clipboard(|| match &before {
-        Some(s) => write_clipboard_text(s),
-        None => unsafe { EmptyClipboard() != 0 },
-    });
-    log(&format!("clipboard restored={restored:?}"));
-    sent == 4
+    if sent == 4 { PasteResult::Pasted } else { PasteResult::Failed }
 }
 
 /// Friendly app name for a window: known apps by exe, otherwise the window title.
@@ -477,8 +640,30 @@ pub fn single_instance() -> bool {
     }
 }
 
+/// The event the window process sets after it drops a command file, so the tray process reads
+/// the commands folder only when there is something in it (not 25 times a second).
+fn command_event() -> windows_sys::Win32::Foundation::HANDLE {
+    use windows_sys::Win32::System::Threading::CreateEventW;
+    static EVENT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *EVENT.get_or_init(|| unsafe { CreateEventW(std::ptr::null(), 0, 0, wide(&format!(r"Local\VoxaNextCommand{}", instance_suffix())).as_ptr()) as usize }) as _
+}
+
+/// Window process: a command was written.
+pub fn commands_signal() {
+    let e = command_event();
+    if !e.is_null() {
+        unsafe { windows_sys::Win32::System::Threading::SetEvent(e) };
+    }
+}
+
+/// Tray process: whether a command was written since the last look (no waiting).
+pub fn commands_signalled() -> bool {
+    let e = command_event();
+    !e.is_null() && unsafe { windows_sys::Win32::System::Threading::WaitForSingleObject(e, 0) } == 0
+}
+
 /// The window process's own single instance. False if the window is already open (it is then
-/// asked to come to the front).
+/// asked to come to the front). Suffixed like the tray's, so a test copy never meets the real one.
 pub fn single_window_instance() -> bool {
     use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, INFINITE, SetEvent, WaitForSingleObject};

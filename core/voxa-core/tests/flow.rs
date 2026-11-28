@@ -149,7 +149,7 @@ fn offline_strip_offers_retry_now_and_history_can_send_it() {
 }
 
 #[test]
-fn history_retry_never_interrupts_a_recording() {
+fn history_retry_never_interrupts_a_recording_and_sends_in_the_background() {
     let mut f = Flow::new(ready());
     let old = started(&mut f);
     f.handle(Event::Stop);
@@ -157,8 +157,13 @@ fn history_retry_never_interrupts_a_recording() {
     f.handle(Event::Dismiss);
     let now = started(&mut f);
     let fx = f.handle(Event::Retry { job: old });
-    assert!(fx.iter().all(|e| !matches!(e, Effect::Transcribe { .. })));
+    assert!(has(&fx, &Effect::Transcribe { job: old }), "Send now does something while recording");
+    assert!(!fx.iter().any(|e| matches!(e, Effect::ShowStrip | Effect::StopCapture { .. } | Effect::DiscardCapture { .. })));
     assert_eq!(f.state(), &State::Recording { job: now, offline: false, paused: false });
+    // Its text waits in History; it is never pasted over the take being recorded.
+    let fx = f.handle(Event::Transcribed { job: old, result: Ok("later".into()) });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Paste { .. })));
+    assert_eq!(f.job(old).unwrap().state, JobState::Ready("later".into()));
 }
 
 #[test]
@@ -255,14 +260,20 @@ fn dismiss_keeps_the_job_for_history() {
 }
 
 #[test]
-fn hotkey_while_recording_stops_and_while_writing_is_ignored() {
+fn hotkey_while_writing_starts_a_new_take_and_the_first_finishes_in_the_background() {
     let mut f = Flow::new(ready());
     let job = started(&mut f);
     f.handle(Event::Hotkey { target: whatsapp() });
     assert_eq!(f.state(), &State::Transcribing { job });
     let fx = f.handle(Event::Hotkey { target: slack() });
-    assert!(fx.is_empty(), "no second dictation while one is being written out");
-    assert_eq!(f.jobs().count(), 1);
+    let State::Recording { job: next, .. } = *f.state() else { panic!("a long upload must not block a new take: {:?}", f.state()) };
+    assert!(has(&fx, &Effect::StartCapture { job: next }));
+    assert_eq!(f.jobs().count(), 2);
+    // The first one's text arrives while the second is recorded: kept, never pasted.
+    let fx = f.handle(Event::Transcribed { job, result: Ok("first".into()) });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Paste { .. })));
+    assert_eq!(f.job(job).unwrap().state, JobState::Ready("first".into()));
+    assert_eq!(f.state(), &State::Recording { job: next, offline: false, paused: false });
 }
 
 #[test]
@@ -300,16 +311,18 @@ fn cancelling_a_fresh_take_while_writing_drops_it() {
 }
 
 #[test]
-fn a_late_result_after_cancelling_a_retry_changes_nothing() {
+fn a_late_failure_after_cancelling_a_retry_changes_nothing() {
+    // A late success keeps its text instead (hunt_desktop.rs, h2).
     let mut f = Flow::new(ready());
     let job = started(&mut f);
     f.handle(Event::Stop);
     f.handle(Event::Transcribed { job, result: Err(TranscribeError::Timeout) });
     f.handle(Event::Retry { job });
     f.handle(Event::Cancel);
-    let fx = f.handle(Event::Transcribed { job, result: Ok("late".into()) });
+    let fx = f.handle(Event::Transcribed { job, result: Err(TranscribeError::Offline) });
     assert!(fx.is_empty());
     assert_eq!(f.job(job).unwrap().state, JobState::Failed(TranscribeError::Timeout));
+    assert_eq!(f.readiness().network, Network::Up, "a cancelled retry's late answer says nothing about the network");
 }
 
 #[test]
@@ -441,7 +454,7 @@ fn cancel_while_paused_discards_whole_take() {
 }
 
 #[test]
-fn retry_is_refused_while_paused() {
+fn retry_while_paused_sends_in_the_background_and_keeps_the_pause() {
     let mut f = Flow::new(ready());
     let old = started(&mut f);
     f.handle(Event::Stop);
@@ -450,7 +463,8 @@ fn retry_is_refused_while_paused() {
     let now = started(&mut f);
     f.handle(Event::Pause);
     let fx = f.handle(Event::Retry { job: old });
-    assert!(fx.is_empty());
+    assert_eq!(captures(&fx), 0, "the paused take is left alone");
+    assert!(has(&fx, &Effect::Transcribe { job: old }));
     assert_eq!(f.state(), &State::Recording { job: now, offline: false, paused: true });
 }
 

@@ -114,7 +114,23 @@ pub fn send(cmd: &Command) {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     if let Ok(b) = serde_json::to_vec(cmd) {
         let _ = write_atomic(&dir().join("cmd").join(format!("{n}.json")), &b);
+        crate::os::commands_signal();
     }
+}
+
+/// Ticks (of 40 ms) between reads of the commands folder when no signal came: a missed signal
+/// costs at most this. Windows signals every command; macOS has no signal yet.
+const FALLBACK_TICKS: u32 = if cfg!(windows) { 25 } else { 6 };
+
+/// Realworld 19: the commands folder is read when the window process signalled a command, not
+/// 25 times a second (a network-redirected profile made that block the hotkey).
+pub fn due(signalled: bool, tick: u32) -> bool {
+    signalled || tick % FALLBACK_TICKS == 0
+}
+
+/// Tray process: whether to read the commands folder on this tick.
+pub fn commands_due(tick: u32) -> bool {
+    due(crate::os::commands_signalled(), tick)
 }
 
 /// Tray process: commands waiting, oldest first. Each is removed once read.
@@ -151,6 +167,13 @@ mod tests {
             let (session, online, mic) = Live::from_readiness(r);
             assert_eq!(Live { session, online, mic, ..Default::default() }.readiness(), r);
         }
+    }
+
+    #[test]
+    fn the_commands_folder_is_not_read_every_tick() {
+        let reads = (1..=250u32).filter(|t| due(false, *t)).count();
+        assert!(reads <= 42, "{reads} folder reads in 10 s with nothing to do");
+        assert!(due(true, 1), "a signalled command is read at once");
     }
 
     #[test]

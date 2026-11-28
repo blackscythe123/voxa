@@ -396,6 +396,41 @@ fn icon(c: char, size: f32) -> gpui::Div {
     div().font_family("Segoe Fluent Icons").text_size(px(size)).child(c.to_string())
 }
 
+/// The exclamation mark of a warning, drawn as a vector (a bar and a dot) in `color`. Never a
+/// font glyph: "!" is not in Segoe Fluent Icons and showed as an empty box.
+fn alert_mark(size: f32, color: u32) -> gpui::Div {
+    let color: gpui::Hsla = rgb(color).into();
+    div().size(px(size)).flex_none().child(
+        gpui::canvas(
+            |_, _, _| {},
+            move |b, _, window, _| {
+                let (x, top, h) = (b.center().x, b.origin.y, b.size.height);
+                let w = h * 0.16;
+                let mut bar = gpui::PathBuilder::fill();
+                bar.move_to(gpui::point(x - w / 2., top + h * 0.08));
+                bar.line_to(gpui::point(x + w / 2., top + h * 0.08));
+                bar.line_to(gpui::point(x + w / 2., top + h * 0.62));
+                bar.line_to(gpui::point(x - w / 2., top + h * 0.62));
+                bar.close();
+                if let Ok(p) = bar.build() {
+                    window.paint_path(p, color);
+                }
+                let mut dot = gpui::PathBuilder::fill();
+                let (cy, r) = (top + h * 0.82, h * 0.1);
+                for i in 0..=16 {
+                    let a = i as f32 / 16. * std::f32::consts::TAU;
+                    let q = gpui::point(x + r * a.cos(), cy + r * a.sin());
+                    if i == 0 { dot.move_to(q) } else { dot.line_to(q) }
+                }
+                if let Ok(p) = dot.build() {
+                    window.paint_path(p, color);
+                }
+            },
+        )
+        .size_full(),
+    )
+}
+
 fn card() -> gpui::Div {
     div().flex().items_center().gap(px(16.)).px(px(16.)).py(px(12.)).min_h(px(64.)).bg(rgb(p().card)).border_1().border_color(rgba(p().card_border_a)).rounded(px(4.))
 }
@@ -513,7 +548,7 @@ fn app_badge(app: &str, size: f32) -> gpui::Div {
         .flex_none()
         .rounded(px(6.))
         .bg(rgb(brand.unwrap_or(COLORS[(h % 10) as usize])))
-        .text_color(rgb(0xFFFFFF))
+        .text_color(rgb(crate::theme::on_color(brand.unwrap_or(COLORS[(h % 10) as usize]))))
         .text_size(px(size * 0.5))
         .font_weight(FontWeight::SEMIBOLD)
         .flex()
@@ -555,7 +590,7 @@ fn info_bar(kind: Bar, title: &str, body: &str, action: Option<AnyElement>, clos
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(icon(if matches!(kind, Bar::Error) { I_CLOSE } else { '!' }, 8.)),
+                .child(if matches!(kind, Bar::Error) { icon(I_CLOSE, 8.) } else { alert_mark(10., p().bar_mark) }),
         )
         .child(
             div()
@@ -612,7 +647,7 @@ impl Home {
                 .history
                 .entries
                 .iter()
-                .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && !v.is_live(e.id) && e.audio.as_ref().is_some_and(|a| a.exists()))
+                .filter(|e| e.unsent() && !v.is_live(e.id) && e.audio.as_ref().is_some_and(|a| a.exists()))
                 .map(|e| e.id)
                 .collect();
             let waiting_live = v.history.entries.iter().filter(|e| matches!(e.status, Status::Waiting(_)) && v.is_live(e.id)).count();
@@ -757,7 +792,7 @@ impl Home {
                 .history
                 .entries
                 .iter()
-                .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && !v.is_live(e.id) && e.audio.as_ref().is_some_and(|a| a.exists()))
+                .filter(|e| e.unsent() && !v.is_live(e.id) && e.audio.as_ref().is_some_and(|a| a.exists()))
                 .map(|e| e.id)
                 .collect();
             let waiting_live = v.history.entries.iter().filter(|e| matches!(e.status, Status::Waiting(_)) && v.is_live(e.id)).count();
@@ -924,7 +959,8 @@ impl Home {
             let playing = self.playing == Some(id);
             actions = actions.child(self.icon_btn(format!("play-{id}"), if playing { I_STOP } else { I_PLAY }, if playing { "Stop" } else { "Play the recording" }, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_play(id, cx))));
             let unsent = matches!(e.status, Status::Waiting(_) | Status::Failed(_));
-            if !live || unsent {
+            let in_flight = live && matches!(&e.status, Status::Waiting(w) if w == store::RECORDING || w == store::WRITING);
+            if (!live || unsent) && !in_flight {
                 let (glyph, tip) = if unsent { (I_SEND, "Send it now") } else { (I_RETRY, "Write it out again") };
                 actions = actions.child(self.icon_btn(format!("retry-{id}"), glyph, tip, false, cx.listener(move |this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.resend(id, cx)))));
             }
@@ -1177,8 +1213,9 @@ impl Home {
 
         // What else can be done with it.
         let unsent = matches!(e.status, Status::Waiting(_) | Status::Failed(_));
+        let in_flight = live && matches!(&e.status, Status::Waiting(w) if w == store::RECORDING || w == store::WRITING);
         let mut actions = div().mt(px(18.)).flex().gap(px(8.));
-        if has_audio && (!live || unsent) {
+        if has_audio && (!live || unsent) && !in_flight {
             actions = actions.child(
                 wbtn("dretry", if unsent { "Send now" } else { "Write it out again" }, false)
                     .child(icon(if unsent { I_SEND } else { I_RETRY }, 12.))
@@ -1800,11 +1837,15 @@ impl Home {
         let mic = v.mic_name.clone();
         let autostart = v.start_with_windows;
         let count = v.history.entries.len();
+        let settings_error = v.settings_error.clone();
         let mb = v.history.audio_bytes() as f64 / 1e6;
         let row_text = |h: &str, sub: String| {
             div().flex_1().min_w(px(0.)).child(div().text_size(px(14.)).line_height(px(20.)).child(h.to_string())).child(div().mt(px(1.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(p().muted)).child(sub))
         };
         let mut out: Vec<AnyElement> = vec![div().text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Settings").into_any_element()];
+        if let Some(e) = settings_error {
+            out.push(info_bar(Bar::Error, "Settings not saved", &e, None, None).into_any_element());
+        }
 
         out.push(section("Account").mt(px(16.)).into_any_element());
         let (acct, btn) = match session {
@@ -1826,7 +1867,7 @@ impl Home {
                 let avatar = if avatar_file.exists() {
                     div().size(px(48.)).flex_none().rounded_full().overflow_hidden().child(gpui::img(avatar_file).size(px(48.)).rounded_full())
                 } else {
-                    div().size(px(48.)).flex_none().rounded_full().bg(rgb(0x10A37F)).text_color(rgb(0xFFFFFF)).text_size(px(20.)).flex().items_center().justify_center().child(initial)
+                    div().size(px(48.)).flex_none().rounded_full().bg(rgb(crate::theme::AVATAR_FILL)).text_color(rgb(0xFFFFFF)).text_size(px(20.)).flex().items_center().justify_center().child(initial)
                 };
                 out.push(
                     card()
