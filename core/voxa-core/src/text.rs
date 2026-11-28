@@ -64,29 +64,47 @@ fn is_word_char(c: char) -> bool {
 }
 
 /// Byte ranges of `phrase` in `text`, case-insensitive, on word boundaries.
+///
+/// Matching runs on a lowercased copy, and every match is mapped back to `text` through a table
+/// of where each lowercased byte came from. Lowercasing changes byte lengths in some scripts
+/// ("ẞ" shrinks, "İ" grows), so offsets of the copy are never used on `text` directly, and a
+/// match that starts or ends inside one character's lowercase form is skipped.
 fn find_phrase(text: &str, phrase: &str) -> Vec<(usize, usize)> {
     let phrase = phrase.trim();
     if phrase.is_empty() {
         return Vec::new();
     }
-    let lower = text.to_lowercase();
     let needle = phrase.to_lowercase();
-    // Lowercasing can change byte lengths for some scripts; then match exactly instead.
-    let (hay, needle) = if lower.len() == text.len() { (lower, needle) } else { (text.to_string(), phrase.to_string()) };
-    let mut out = Vec::new();
+    // For each byte of `hay`: the byte offset in `text` of the character it came from, and
+    // whether it is the first byte of that character's lowercase form.
+    let mut hay = String::with_capacity(text.len());
+    let mut origin: Vec<(usize, bool)> = Vec::with_capacity(text.len());
+    for (o, c) in text.char_indices() {
+        let mut first = true;
+        for l in c.to_lowercase() {
+            for _ in 0..l.len_utf8() {
+                origin.push((o, first));
+                first = false;
+            }
+            hay.push(l);
+        }
+    }
+    let to_text = |i: usize| if i == hay.len() { Some(text.len()) } else { origin.get(i).filter(|(_, f)| *f).map(|(o, _)| *o) };
+    let mut out: Vec<(usize, usize)> = Vec::new();
     let mut from = 0;
     while let Some(i) = hay[from..].find(&needle) {
-        let s = from + i;
-        let e = s + needle.len();
-        let before_ok = text[..s].chars().next_back().is_none_or(|c| !is_word_char(c));
-        let after_ok = text[e..].chars().next().is_none_or(|c| !is_word_char(c));
-        if before_ok && after_ok {
-            out.push((s, e));
+        let hs = from + i;
+        let he = hs + needle.len();
+        let mut next = hs + hay[hs..].chars().next().map_or(1, char::len_utf8);
+        if let (Some(s), Some(e)) = (to_text(hs), to_text(he)) {
+            let before_ok = text[..s].chars().next_back().is_none_or(|c| !is_word_char(c));
+            let after_ok = text[e..].chars().next().is_none_or(|c| !is_word_char(c));
+            if before_ok && after_ok && s < e {
+                out.push((s, e));
+                next = he;
+            }
         }
-        from = e.max(s + 1);
-        while !hay.is_char_boundary(from) {
-            from += 1;
-        }
+        from = next;
     }
     out
 }
