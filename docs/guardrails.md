@@ -403,6 +403,22 @@ Tests: `voxa-update` `keys::tests::guard::a_release_build_with_placeholder_keys_
 `UpdateSafetyTest`. The ISCC and Gradle refusals were run by hand on 2026-11-28 (both fail with
 placeholder keys; both build with the dev flag).
 
+## 13. Icons
+
+**Decision.** Every icon Voxa draws is a real picture from its icon font, Segoe Fluent Icons
+(2026-11-28: the Settings row "Your birthday" showed a Chinese character).
+
+**Why.** E88C is in the font, so a range check passed it, but Microsoft's glyph there is
+LanguageCht, the Traditional Chinese input indicator. A code point has to be looked up by name.
+
+**Check** (`icon-glyph`, `icon-font`, `icons.py`; and the test
+`every_icon_is_a_reviewed_segoe_fluent_picture` in `home.rs`). Every private use code point in
+`desktop/app/src` outside tests is an `I_` constant in `home.rs` followed by `// <Microsoft's glyph
+name>`; the pair is in `REVIEWED_ICONS` (names from Microsoft's Segoe Fluent Icons list); none is
+one of the font's letter glyphs (the input language and input method indicators). `icon('...')`
+with a literal is not allowed. Where the font is installed (Windows, the pre-commit hook) every code
+point must be in its cmap; elsewhere the lint notes that this part was skipped.
+
 ## Open items found when the guardrails were added
 
 These are on the allow-list with their reasons and should be fixed, then deleted from it:
