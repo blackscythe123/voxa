@@ -196,11 +196,21 @@ impl History {
             Err(_) => (Vec::new(), Loaded::Unreadable),
             Ok(b) => match serde_json::from_slice::<Vec<Entry>>(&b) {
                 Ok(v) => (v, Loaded::Clean),
-                Err(_) => match keep_broken_copy(&path) {
-                    Some(_) => (salvage_entries(&b), Loaded::Damaged),
-                    // No copy could be made: never write over the only one.
-                    None => (salvage_entries(&b), Loaded::Unreadable),
-                },
+                Err(_) => {
+                    // The version before the last save (see `save`), when it still reads: a
+                    // write that went wrong (storage full) loses only the last change.
+                    let before = std::fs::read(path.with_extension("bak")).ok().and_then(|b| serde_json::from_slice::<Vec<Entry>>(&b).ok());
+                    let salvaged = salvage_entries(&b);
+                    let entries = match before {
+                        Some(v) if v.len() >= salvaged.len() => v,
+                        _ => salvaged,
+                    };
+                    match keep_broken_copy(&path) {
+                        Some(_) => (entries, Loaded::Damaged),
+                        // No copy could be made: never write over the only one.
+                        None => (entries, Loaded::Unreadable),
+                    }
+                }
             },
         };
         Self { path, entries, loaded }
@@ -212,6 +222,17 @@ impl History {
             return Err(std::io::Error::other("history.json could not be read; not saved over"));
         }
         let bytes = serde_json::to_vec_pretty(&self.entries).map_err(std::io::Error::other)?;
+        // Keep the version being replaced as history.bak (a hard link: no copy). Seen on an
+        // Android emulator with a full disk: the replacing file was renamed in with no data even
+        // after a successful fsync. The previous version is then still there to read.
+        if self.loaded == Loaded::Clean && self.path.exists() {
+            let bak = self.path.with_extension("bak");
+            let fresh = self.path.with_extension("bak.new");
+            let _ = std::fs::remove_file(&fresh);
+            if std::fs::hard_link(&self.path, &fresh).is_ok() {
+                let _ = std::fs::rename(&fresh, &bak);
+            }
+        }
         write_atomic(&self.path, &bytes)
     }
 

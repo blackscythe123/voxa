@@ -128,3 +128,16 @@ fn a_damaged_history_is_copied_aside_once() {
     let copies = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("history.broken-")).count();
     assert_eq!(copies, 1);
 }
+
+/// A save that leaves history.json empty (seen on an Android emulator with a full disk) loses at
+/// most the last change: the version before it is kept as history.bak and read back.
+#[test]
+fn an_empty_history_file_after_a_full_disk_falls_back_to_the_version_before() {
+    let dir = tmp("bak");
+    History::edit(&dir, |h| (h.upsert(entry(1, "one")) | h.upsert(entry(2, "two")), ()));
+    History::edit(&dir, |h| (h.upsert(entry(3, "three")), ()));
+    std::fs::write(dir.join("history.json"), b"").unwrap(); // the bad save
+    let h = History::load(&dir);
+    assert_eq!(h.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [1, 2], "the version before the last save");
+    assert_eq!(h.loaded, voxa_store::Loaded::Damaged, "nothing is pruned or swept from it");
+}
