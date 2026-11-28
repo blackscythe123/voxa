@@ -200,8 +200,8 @@ private fun Notice(p: Problem, more: Int, onFix: () -> Unit) {
     val c = vx
     val n = noticeOf(p)
     val tint = when (n.tone) {
-        Tone.Warn -> c.warn
-        Tone.Bad -> c.danger
+        Tone.Warn -> c.warnText
+        Tone.Bad -> c.dangerText
         Tone.Calm -> c.text56
     }
     val sub = if (more > 0) "${n.sub}. $more more to fix" else n.sub
