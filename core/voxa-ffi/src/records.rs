@@ -34,6 +34,8 @@ pub struct HistoryEntry {
     pub status: EntryStatus,
     /// Whether the recording is still on the phone (so it can be sent again).
     pub has_audio: bool,
+    /// The recording (16 kHz mono PCM16, raw), when it is still on the phone. For playback.
+    pub audio_path: Option<String>,
     pub started_in: Option<String>,
 }
 
@@ -46,8 +48,25 @@ impl From<vs::Entry> for HistoryEntry {
             secs: e.secs,
             status: e.status.into(),
             has_audio: e.audio.as_ref().is_some_and(|a| a.exists()),
+            audio_path: e.audio.as_ref().filter(|a| a.exists()).map(|a| a.to_string_lossy().to_string()),
             started_in: e.started_in,
         }
+    }
+}
+
+/// Home's "words this week": Monday first, local time (the desktop's Insights rules).
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct WeekStats {
+    pub words: u64,
+    /// Words per day, Monday first (7 values).
+    pub per_day: Vec<u32>,
+    /// Index of today in `per_day`.
+    pub today: u8,
+}
+
+impl From<vs::Week> for WeekStats {
+    fn from(w: vs::Week) -> Self {
+        Self { words: w.words as u64, per_day: w.per_day.iter().map(|&n| n as u32).collect(), today: w.today as u8 }
     }
 }
 

@@ -304,6 +304,21 @@ impl VoxaCore {
         History::edit(&self.dir, |h| (false, h.audio_bytes()))
     }
 
+    /// Words this week, per day. `utc_offset_minutes`: the phone's current offset from UTC.
+    pub fn week_stats(&self, utc_offset_minutes: i32) -> WeekStats {
+        History::edit(&self.dir, |h| (false, voxa_store::week(&h.entries, now_ms(), utc_offset_minutes as i64 * 60_000).into()))
+    }
+
+    /// The user edited a written dictation's text in History. Returns the entry as saved, or None
+    /// when there is no such written entry.
+    pub fn set_entry_text(&self, entry_id: u64, text: String) -> Option<HistoryEntry> {
+        History::edit(&self.dir, |h| {
+            let changed = h.set_text(entry_id, &text);
+            let e = h.get(entry_id).filter(|e| !e.status.is_unsent()).cloned().map(HistoryEntry::from);
+            (changed, e)
+        })
+    }
+
     pub fn delete_entry(&self, entry_id: u64) {
         History::edit(&self.dir, |h| {
             if let Some(a) = h.get(entry_id).and_then(|e| e.audio.clone()) {

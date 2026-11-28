@@ -123,6 +123,18 @@ impl History {
         }
     }
 
+    /// Replace a written entry's text (the user edited it). Unsent entries have no text to edit.
+    /// Returns whether anything changed.
+    pub fn set_text(&mut self, id: u64, text: &str) -> bool {
+        match self.entries.iter_mut().find(|e| e.id == id) {
+            Some(e) if !e.status.is_unsent() && e.text != text => {
+                e.text = text.to_string();
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn remove(&mut self, id: u64) -> bool {
         let before = self.entries.len();
         self.entries.retain(|e| e.id != id);
@@ -276,6 +288,36 @@ impl Words {
     }
 }
 
+/// This week's words, as the desktop's Insights counts them (written dictations only).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Week {
+    pub words: usize,
+    /// Words per day, Monday first.
+    pub per_day: [usize; 7],
+    /// Index of today in `per_day`.
+    pub today: usize,
+}
+
+/// The local calendar day (days since 1970-01-01) of `ms`, for a UTC offset in milliseconds.
+fn local_day(ms: u64, offset_ms: i64) -> i64 {
+    (ms as i64 + offset_ms).div_euclid(86_400_000)
+}
+
+/// Words dictated this week (Monday to Sunday, local time), per day. `offset_ms` is the phone's
+/// current UTC offset; no date library needed. 1970-01-01 was a Thursday.
+pub fn week(entries: &[Entry], now_ms: u64, offset_ms: i64) -> Week {
+    let today = local_day(now_ms, offset_ms);
+    let monday = today - (today + 3).rem_euclid(7);
+    let mut per_day = [0usize; 7];
+    for e in entries.iter().filter(|e| matches!(e.status, Status::Pasted | Status::Ready) && !e.text.trim().is_empty()) {
+        let d = local_day(e.id, offset_ms) - monday;
+        if (0..7).contains(&d) {
+            per_day[d as usize] += e.words();
+        }
+    }
+    Week { words: per_day.iter().sum(), per_day, today: (today - monday) as usize }
+}
+
 /// After transcription: filler removal (if on), then the user's word list for `app`.
 pub fn finish_text(text: String, dir: &Path, app: &str) -> String {
     let text = if Settings::load(dir).remove_fillers { voxa_core::text::remove_fillers(&text) } else { text };
@@ -329,6 +371,37 @@ mod tests {
         assert_eq!(h.entries.len(), 3);
         assert!(!wav.exists());
         assert_eq!(h.prune(0, u64::MAX), 0, "forever keeps all");
+    }
+
+    #[test]
+    fn week_counts_written_words_monday_first_in_local_time() {
+        let day = 86_400_000u64;
+        // 1970-01-12 (day 11) was a Monday; "now" is Wednesday 1970-01-14 at noon UTC.
+        let monday = 11 * day;
+        let now = monday + 2 * day + day / 2;
+        let entries = vec![
+            entry(monday - 1000, "last sunday not counted", Status::Pasted),
+            entry(monday + 1000, "one two three", Status::Pasted),
+            entry(monday + 2 * day + 5, "four five", Status::Ready),
+            entry(monday + 2 * day + 6, "never sent", Status::Waiting("Sign in to send".into())),
+            entry(monday + 2 * day + 7, "   ", Status::Pasted),
+        ];
+        let w = week(&entries, now, 0);
+        assert_eq!(w.today, 2);
+        assert_eq!(w.per_day, [3, 0, 2, 0, 0, 0, 0]);
+        assert_eq!(w.words, 5);
+        // Two hours east of UTC, the Sunday entry 1 s before midnight UTC is already Monday.
+        let w = week(&entries, now, 2 * 3_600_000);
+        assert_eq!(w.per_day[0], 3 + 4);
+    }
+
+    #[test]
+    fn set_text_edits_written_entries_only() {
+        let mut h = History { path: PathBuf::new(), entries: vec![entry(1, "a", Status::Pasted), entry(2, "", Status::Waiting("x".into()))] };
+        assert!(h.set_text(1, "b"));
+        assert!(!h.set_text(1, "b"), "no change");
+        assert!(!h.set_text(2, "c"), "unsent entries are not edited");
+        assert_eq!(h.get(1).unwrap().text, "b");
     }
 
     #[test]
