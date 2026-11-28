@@ -1,7 +1,11 @@
 # Signs the Android update feed (android.json) for an Android release the owner built and
-# uploaded by hand (android/release.ps1 prints the steps). Run it from the Actions tab with the
-# release tag, for example android-v1.0.0. It is the only place the Android feed is signed:
-# VOXA_UPDATE_KEY lives in the protected "release" environment (docs/update-keys.md).
+# uploaded by hand (android/release.ps1 prints the steps). It is the only place the Android feed
+# is signed: VOXA_UPDATE_KEY lives in the protected "release" environment (docs/update-keys.md).
+#
+# Run it FROM THE TAG REF (the release environment only admits v* and android-v* refs):
+#   gh workflow run android-feed.yml --ref android-v1.0.0 -f tag=android-v1.0.0
+# A run from main is refused by the first step. The feed version only moves forward; `force`
+# publishes an older one on purpose (a deliberate rollback release).
 #
 # The feed lists one entry per ABI APK found in the release (android-arm64-v8a is required;
 # android-armeabi-v7a and android-x86_64 when present) and the universal APK as the fallback
@@ -12,8 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Android release tag (android-vX.Y.Z)"
+        description: "Android release tag (android-vX.Y.Z); run the workflow from this same tag ref"
         required: true
+      force:
+        description: "Publish even if the feed already offers a newer version (a deliberate rollback)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -28,10 +36,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tag
+      - name: Check the tag and the ref
         run: |
           set -euo pipefail
           [[ "$TAG" =~ ^android-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "tag must look like android-v1.0.0, got $TAG"; exit 1; }
+          # The release environment only admits tag refs: run from the tag being published.
+          [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "run this workflow from the tag ref: gh workflow run android-feed.yml --ref $TAG -f tag=$TAG (got $GITHUB_REF)"; exit 1; }
 
       - name: Download the APKs from the release
         run: |
@@ -46,7 +56,7 @@ jobs:
           set -euo pipefail
           V="${TAG#android-v}"
           R="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
-          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | grep -v rc | sort -V | tail -n 1)"
           IFS=. read -r MA MI PA <<< "$V"
           CODE=$((MA * 10000 + MI * 100 + PA))
           arm="dist/Voxa-Android-$V-arm64-v8a.apk"
@@ -54,10 +64,20 @@ jobs:
           # The versionCode inside the APK must match the tag's scheme (major*10000 + minor*100 + patch).
           got="$("$BT/aapt2" dump badging "$arm" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n 1)"
           [ "$got" = "$CODE" ] || { echo "versionCode in the APK is $got, the tag says $CODE"; exit 1; }
-          # The signing certificate's SHA-256 (the newest signer when the APK carries a v3 lineage).
+          # Voxa is signed with one permanent release key (no rotation): every APK must carry
+          # exactly the pinned release certificate, and never a test-build key.
           # apksigner prints "Signer #1 certificate SHA-256 digest:" or, newer, "V3.0 Signer: certificate SHA-256 digest:".
-          SIGNER="$("$BT/apksigner" verify --print-certs "$arm" | grep -m 1 'certificate SHA-256 digest: ' | sed 's/.*SHA-256 digest: //')"
-          [ -n "$SIGNER" ] || { echo "could not read the signing certificate"; exit 1; }
+          PINNED="$(sed 's/#.*//' android/signing/release-cert.sha256 | tr -d ' \r' | tr 'A-F' 'a-f' | grep -E '^[0-9a-f]{64}$' | head -n 1 || true)"
+          [ -n "$PINNED" ] || { echo "android/signing/release-cert.sha256 is empty: commit the release certificate first (docs/update-keys.md)"; exit 1; }
+          for f in dist/Voxa-Android-"$V"-*.apk; do
+            certs="$("$BT/apksigner" verify --print-certs "$f" | grep 'certificate SHA-256 digest: ' | sed 's/.*SHA-256 digest: //' | tr 'A-F' 'a-f' | sort -u)"
+            [ -n "$certs" ] || { echo "could not read the signing certificate of $f"; exit 1; }
+            while read -r c; do
+              if grep -qix "$c" android/signing/forbidden-signers.txt; then echo "$f is signed by a test-build key ($c)"; exit 1; fi
+              [ "$c" = "$PINNED" ] || { echo "$f is signed by $c, not the pinned release certificate $PINNED"; exit 1; }
+            done <<< "$certs"
+          done
+          SIGNER="$PINNED"
           assets='{}'
           for pair in "arm64-v8a:android-arm64-v8a" "armeabi-v7a:android-armeabi-v7a" "x86_64:android-x86_64" "universal:android-universal"; do
             abi="${pair%%:*}"; key="${pair#*:}"
@@ -72,6 +92,13 @@ jobs:
             | tr -d '\n' > payload.json
           cat payload.json; echo
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: The feed only moves forward
+        # Refuses a lower versionCode than the published feed (an old tag's run must never
+        # unpublish a newer release) and a serial that doesn't go up, unless `force` is set.
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- guard-forward --channel android --payload payload.json ${{ inputs.force && '--force' || '' }}
+
       - name: Sign the feed
         env:
           VOXA_UPDATE_KEY: ${{ secrets.VOXA_UPDATE_KEY }}
@@ -79,12 +106,11 @@ jobs:
           set -euo pipefail
           [ -n "$VOXA_UPDATE_KEY" ] || { echo "VOXA_UPDATE_KEY is not set in the release environment"; exit 1; }
           umask 077
+          # The key file never outlives this step, even when openssl fails.
+          trap 'rm -f k.pem' EXIT
           printf '%s' "$VOXA_UPDATE_KEY" > k.pem
           openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig
-          rm -f k.pem
           jq -n --arg p "$(base64 -w0 payload.json)" --arg s "$(base64 -w0 payload.sig)" '{key_id:1,payload:$p,sig:$s}' > android.json
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - name: Verify with the shipped verifier
         run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- verify android.json --channel android

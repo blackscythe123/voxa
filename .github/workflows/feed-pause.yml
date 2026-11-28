@@ -1,0 +1,64 @@
+# The kill switch (docs/release-runbook.md, "Emergency stop"). Re-signs the published desktop or
+# Android feed with `paused` set (or cleared) and a new serial. While a feed is paused, no client
+# is offered the update, and a client that already downloaded it drops the staged file at its
+# next check or at the last look right before installing (desktop and Android both re-read the
+# feed with a conditional request just before an install).
+#
+# Run it from a release tag ref (the release environment only admits v* and android-v* refs),
+# for example the newest desktop tag:
+#   gh workflow run feed-pause.yml --ref v1.0.1 -f channel=desktop -f paused=true
+# Unpause the same way with -f paused=false, or publish a fixed release (its feed is unpaused).
+name: feed-pause
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Which feed: desktop or android"
+        required: true
+        type: choice
+        options: [desktop, android]
+      paused:
+        description: "true stops the update everywhere; false lets it go out again"
+        required: true
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: write
+
+jobs:
+  pause:
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL: ${{ inputs.channel }}
+      PAUSED: ${{ inputs.paused }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: The published payload with paused set and a new serial
+        run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- set-paused --channel "$CHANNEL" --paused "$PAUSED" --serial "$(date +%s)" --out payload.json
+
+      - name: Sign it
+        env:
+          VOXA_UPDATE_KEY: ${{ secrets.VOXA_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$VOXA_UPDATE_KEY" ] || { echo "VOXA_UPDATE_KEY is not set in the release environment"; exit 1; }
+          umask 077
+          trap 'rm -f k.pem' EXIT
+          printf '%s' "$VOXA_UPDATE_KEY" > k.pem
+          openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig
+          jq -n --arg p "$(base64 -w0 payload.json)" --arg s "$(base64 -w0 payload.sig)" '{key_id:1,payload:$p,sig:$s}' > "$CHANNEL.json"
+
+      - name: Same version, higher serial (guard), verified with the shipped verifier
+        run: |
+          set -euo pipefail
+          cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- guard-forward --channel "$CHANNEL" --payload payload.json
+          cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- verify "$CHANNEL.json" --channel "$CHANNEL"
+
+      - name: Publish
+        run: gh release upload update-feed "$CHANNEL.json" --clobber
