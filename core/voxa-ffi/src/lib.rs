@@ -489,7 +489,12 @@ impl VoxaCore {
             if let Some(a) = h.get(entry_id).and_then(|e| e.audio.clone()) {
                 let _ = std::fs::remove_file(a);
             }
-            (h.remove(entry_id), ())
+            let removed = h.remove(entry_id);
+            if removed && h.save().is_ok() {
+                // The copy of the version before would still hold the deleted words.
+                h.drop_copies(false);
+            }
+            (false, ())
         });
     }
 

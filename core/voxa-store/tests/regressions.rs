@@ -141,3 +141,32 @@ fn an_empty_history_file_after_a_full_disk_falls_back_to_the_version_before() {
     assert_eq!(h.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [1, 2], "the version before the last save");
     assert_eq!(h.loaded, voxa_store::Loaded::Damaged, "nothing is pruned or swept from it");
 }
+
+/// A save cut off between its two renames leaves no history.json: the version before is read.
+#[test]
+fn a_save_cut_off_midway_falls_back_to_the_version_before() {
+    let dir = tmp("bak-missing");
+    History::edit(&dir, |h| (h.upsert(entry(1, "one")), ()));
+    History::edit(&dir, |h| (h.upsert(entry(2, "two")), ()));
+    std::fs::remove_file(dir.join("history.json")).unwrap();
+    let h = History::load(&dir);
+    assert_eq!(h.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [1]);
+    assert_eq!(h.loaded, voxa_store::Loaded::Damaged);
+}
+
+/// Deleting all History leaves no copy holding the deleted words.
+#[test]
+fn delete_all_leaves_no_copy_of_the_deleted_words() {
+    let dir = tmp("bak-private");
+    History::edit(&dir, |h| (h.upsert(entry(1, "secret")), ()));
+    History::edit(&dir, |h| (h.upsert(entry(2, "more")), ()));
+    std::fs::write(dir.join("history.broken-1.json"), b"[{\"text\": \"secret\"").unwrap();
+    History::edit(&dir, |h| {
+        h.delete_all();
+        (false, ())
+    });
+    for f in std::fs::read_dir(&dir).unwrap().flatten() {
+        let b = std::fs::read(f.path()).unwrap_or_default();
+        assert!(!String::from_utf8_lossy(&b).contains("secret"), "{:?} still holds deleted words", f.file_name());
+    }
+}

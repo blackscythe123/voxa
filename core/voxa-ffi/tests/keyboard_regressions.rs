@@ -308,3 +308,19 @@ fn a_recovered_take_keeps_its_length() {
     assert_eq!(e.status, EntryStatus::Waiting("Not sent".into()));
     assert!((e.secs - 2.0).abs() < 0.01, "secs {}", e.secs);
 }
+
+/// A deleted dictation leaves no copy of its words behind (History keeps the version before each
+/// save for safety; a delete drops it).
+#[test]
+fn a_deleted_dictation_leaves_no_copy_of_its_words() {
+    let dir = tmp("delete-no-copy");
+    let flow = VoxaFlow::new(dir.clone(), ready());
+    let core = VoxaCore::new(dir.clone());
+    let entry = pasted_take(&flow, "Messages", "very private words");
+    pasted_take(&flow, "Messages", "later");
+    core.delete_entry(entry);
+    for f in std::fs::read_dir(&dir).unwrap().flatten().filter(|f| f.path().is_file()) {
+        let b = std::fs::read(f.path()).unwrap_or_default();
+        assert!(!String::from_utf8_lossy(&b).contains("very private words"), "{:?} still holds deleted words", f.file_name());
+    }
+}

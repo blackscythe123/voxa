@@ -95,6 +95,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// [`write_atomic`], moving the file being replaced to `keep` first. If the process dies between
+/// the two renames, `path` is missing and `keep` holds the version before (`History::load`
+/// reads it then).
+fn write_atomic_keeping(path: &Path, bytes: &[u8], keep: Option<&Path>) -> std::io::Result<()> {
+    let Some(keep) = keep else { return write_atomic(path, bytes) };
+    let tmp = path.with_extension("next");
+    write_atomic(&tmp, bytes)?;
+    std::fs::rename(path, keep)?;
+    std::fs::rename(&tmp, path)
+}
+
 /// Keep a copy of a file that can't be read as expected next to it, as `<stem>.broken-<ms>.json`,
 /// so nothing is lost when Voxa starts again from what it could read.
 fn keep_broken_copy(path: &Path) -> Option<PathBuf> {
@@ -192,7 +203,13 @@ impl History {
     pub fn load(dir: &Path) -> Self {
         let path = dir.join("history.json");
         let (entries, loaded) = match std::fs::read(&path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), Loaded::Clean),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // Cut off between the two renames of a save (see `save`): the version before.
+                match std::fs::read(path.with_extension("bak")).ok().and_then(|b| serde_json::from_slice::<Vec<Entry>>(&b).ok()) {
+                    Some(v) => (v, Loaded::Damaged),
+                    None => (Vec::new(), Loaded::Clean),
+                }
+            }
             Err(_) => (Vec::new(), Loaded::Unreadable),
             Ok(b) => match serde_json::from_slice::<Vec<Entry>>(&b) {
                 Ok(v) => (v, Loaded::Clean),
@@ -222,18 +239,12 @@ impl History {
             return Err(std::io::Error::other("history.json could not be read; not saved over"));
         }
         let bytes = serde_json::to_vec_pretty(&self.entries).map_err(std::io::Error::other)?;
-        // Keep the version being replaced as history.bak (a hard link: no copy). Seen on an
-        // Android emulator with a full disk: the replacing file was renamed in with no data even
-        // after a successful fsync. The previous version is then still there to read.
-        if self.loaded == Loaded::Clean && self.path.exists() {
-            let bak = self.path.with_extension("bak");
-            let fresh = self.path.with_extension("bak.new");
-            let _ = std::fs::remove_file(&fresh);
-            if std::fs::hard_link(&self.path, &fresh).is_ok() {
-                let _ = std::fs::rename(&fresh, &bak);
-            }
-        }
-        write_atomic(&self.path, &bytes)
+        // The version being replaced is kept as history.bak (renamed, not copied: Android
+        // doesn't allow hard links in app data). Seen on an Android emulator with a full disk:
+        // the new file was renamed in with no data even after a successful fsync; the version
+        // before is then still there to read. A damaged file is never rotated over a good bak.
+        let keep = (self.loaded == Loaded::Clean && self.path.exists()).then(|| self.path.with_extension("bak"));
+        write_atomic_keeping(&self.path, &bytes, keep.as_deref())
     }
 
     /// Load, change and save under the process-wide lock. `f` returns (changed, result). Changes
@@ -362,6 +373,22 @@ impl History {
         }
         self.entries.clear();
         let _ = self.save();
+        self.drop_copies(true);
+    }
+
+    /// After the user deleted dictations: the copies kept for safety (the version before the
+    /// last save, and with `all` the copies of damaged files) would still hold their words.
+    pub fn drop_copies(&self, all: bool) {
+        let _ = std::fs::remove_file(self.path.with_extension("bak"));
+        if !all {
+            return;
+        }
+        let Some(dir) = self.path.parent() else { return };
+        for f in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if f.file_name().to_string_lossy().starts_with("history.broken-") {
+                let _ = std::fs::remove_file(f.path());
+            }
+        }
     }
 
     /// Bytes of audio kept on disk.
