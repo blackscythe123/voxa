@@ -22,10 +22,12 @@ use voxa_store::{History, Status, take};
 
 mod diag;
 mod flow;
+mod greeting;
 mod records;
 
 pub use diag::{LogSink, set_log_sink};
 pub use flow::*;
+pub use greeting::*;
 pub use records::*;
 
 uniffi::setup_scaffolding!();
