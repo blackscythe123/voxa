@@ -34,6 +34,11 @@ pub const DESKTOP_FEED_URL: &str = "https://github.com/blackscythe123/voxa/relea
 pub const ANDROID_FEED_URL: &str = "https://github.com/blackscythe123/voxa/releases/download/update-feed/android.json";
 /// The hosts a request may reach, including every redirect hop.
 pub const ALLOWED_HOSTS: [&str; 3] = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"];
+/// A redirect hop may also land on any HTTPS host under GitHub's user content domain, so a client
+/// keeps working when GitHub renames its asset host again (it moved from objects to
+/// release-assets once). The first request is always github.com (the feed URL and every asset URL
+/// start with [`REPO_URL`]); integrity comes from the Ed25519 feed signature and the SHA-256.
+pub const CDN_SUFFIX: &str = ".githubusercontent.com";
 
 /// Caps are compiled in and never taken from the feed (about 2x today's artifacts).
 pub const MAX_FEED_BYTES: u64 = 64 * 1024;
@@ -145,6 +150,8 @@ pub struct Origin {
     /// The release notes link starts with this.
     pub notes_prefix: String,
     pub hosts: Vec<String>,
+    /// Production only: redirect hops may also go to any HTTPS host ending in this ([`CDN_SUFFIX`]).
+    pub host_suffix: Option<String>,
     /// Test origins on a local server only; production is HTTPS on every hop.
     pub allow_plain_http: bool,
 }
@@ -160,6 +167,7 @@ impl Origin {
             asset_prefix: RELEASES_DOWNLOAD.to_string(),
             notes_prefix: REPO_URL.to_string(),
             hosts: ALLOWED_HOSTS.iter().map(|h| h.to_string()).collect(),
+            host_suffix: Some(CDN_SUFFIX.to_string()),
             allow_plain_http: false,
         }
     }
@@ -179,6 +187,7 @@ impl Origin {
             asset_prefix: base.to_string(),
             notes_prefix: base.to_string(),
             hosts: vec![host_name(host).to_string()],
+            host_suffix: None,
             allow_plain_http: scheme == "http",
         })
     }
@@ -188,8 +197,19 @@ impl Origin {
     pub fn hop_allowed(&self, url: &str) -> bool {
         let Some((scheme, host, _)) = split_url(url) else { return false };
         let scheme_ok = scheme == "https" || (self.allow_plain_http && scheme == "http");
-        scheme_ok && self.hosts.iter().any(|h| h.eq_ignore_ascii_case(host_name(host)))
+        let name = host_name(host);
+        let listed = self.hosts.iter().any(|h| h.eq_ignore_ascii_case(name));
+        let cdn = scheme == "https" && self.host_suffix.as_deref().is_some_and(|sfx| cdn_host(name, sfx));
+        scheme_ok && (listed || cdn)
     }
+}
+
+/// `name` is a proper subdomain of `suffix` (".githubusercontent.com"): letters, digits, dots and
+/// dashes only, no port, no empty label, never the bare suffix.
+fn cdn_host(name: &str, suffix: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let Some(sub) = lower.strip_suffix(suffix) else { return false };
+    !sub.is_empty() && sub.split('.').all(|l| !l.is_empty() && !l.starts_with('-') && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
 }
 
 /// `scheme://authority/rest` split, or None. Userinfo (`user@host`) is refused outright.
@@ -229,6 +249,24 @@ mod tests {
         assert!(!o.hop_allowed("https://evil.example/github.com"));
         assert!(!o.hop_allowed("https://user@github.com/x"));
         assert!(!o.hop_allowed("ftp://github.com/x"));
+    }
+
+    #[test]
+    fn a_redirect_to_a_renamed_github_asset_host_still_works() {
+        let o = Origin::github(Channel::Desktop);
+        // GitHub renamed its asset host once (objects to release-assets); a new name keeps working.
+        assert!(o.hop_allowed("https://release-assets-v2.githubusercontent.com/x?sig=1"));
+        assert!(o.hop_allowed("https://a.b.githubusercontent.com/x"));
+        // Never plain http, never a look-alike, never the bare domain, an empty label or userinfo.
+        assert!(!o.hop_allowed(&format!("{}://new.githubusercontent.com/x", "http")));
+        assert!(!o.hop_allowed("https://githubusercontent.com/x"));
+        assert!(!o.hop_allowed("https://evilgithubusercontent.com/x"));
+        assert!(!o.hop_allowed("https://new.githubusercontent.com.evil.example/x"));
+        assert!(!o.hop_allowed("https://x..githubusercontent.com/x"));
+        assert!(!o.hop_allowed("https://user@new.githubusercontent.com/x"));
+        // A test origin never widens to GitHub's CDN.
+        let t = Origin::test(&format!("{}://127.0.0.1:9/f/desktop.json", "http")).unwrap();
+        assert!(!t.hop_allowed("https://new.githubusercontent.com/x"));
     }
 
     #[test]

@@ -94,6 +94,11 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Read a JSON file: Ok(None) when it doesn't exist, Err when it exists but can't be read or
 /// parsed (locked by antivirus or OneDrive, offline, corrupt). A corrupt file is copied aside first.
+/// FNV-1a: a stable content name for a kept damaged file (not security).
+fn fnv64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
+}
+
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
@@ -101,8 +106,12 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, S
         Err(e) => return Err(format!("can't read {}: {e}", path.display())),
     };
     serde_json::from_slice(&bytes).map(Some).map_err(|e| {
-        let backup = path.with_extension(format!("broken-{}.json", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)));
-        let _ = std::fs::write(&backup, &bytes);
+        // Named by content, so reading the same damaged file again (every render, every
+        // dictation) keeps one copy instead of a new one each time.
+        let backup = path.with_extension(format!("broken-{:016x}.json", fnv64(&bytes)));
+        if !backup.exists() {
+            let _ = write_atomic(&backup, &bytes);
+        }
         format!("{} is damaged ({e}); a copy was kept as {}", path.display(), backup.display())
     })
 }
@@ -420,13 +429,35 @@ pub struct Words {
 }
 
 impl Words {
+    /// For reading only (applying fixes after a dictation, showing the Words page): the list, or
+    /// an empty one when the file can't be read right now (logged). Never save what this returns
+    /// after a failed read; change the list with [`Words::update`].
     pub fn load(dir: &Path) -> Self {
-        std::fs::read(dir.join("words.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
-    }
-    pub fn save(&self, dir: &Path) {
-        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
-            let _ = write_atomic(&dir.join("words.json"), &bytes);
+        match Self::try_load(dir) {
+            Ok(w) => w.unwrap_or_default(),
+            Err(e) => {
+                crate::os::log(&format!("FAIL reading words: {e}"));
+                Self::default()
+            }
         }
+    }
+    /// The list; None when there is no words.json yet. A damaged file is kept as
+    /// words.broken-<hash>.json (read_json) and reported, never replaced by an empty list.
+    pub fn try_load(dir: &Path) -> Result<Option<Self>, String> {
+        read_json(&dir.join("words.json"))
+    }
+    pub fn save(&self, dir: &Path) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+        write_atomic(&dir.join("words.json"), &bytes).map_err(|e| format!("can't save the word list: {}", e.kind()))
+    }
+    /// Change the list: read the file again, change it, save it (atomic, through replace_file).
+    /// Refuses while words.json exists but can't be read (locked by antivirus or OneDrive, or
+    /// damaged), so one added fix never wipes every fix, snippet and app rule.
+    pub fn update(dir: &Path, f: impl FnOnce(&mut Words)) -> Result<Words, String> {
+        let mut w = Self::try_load(dir)?.unwrap_or_default();
+        f(&mut w);
+        w.save(dir)?;
+        Ok(w)
     }
     /// Fixes, then snippets, then spoken formatting, then the rule for `app` if there is one.
     pub fn apply(&self, text: &str, app: &str) -> String {
@@ -1050,11 +1081,65 @@ mod tests {
             spoken_formatting: true,
             rules: vec![AppRule { app: "Claude Code".into(), no_final_period: true, lowercase: false }],
         };
-        w.save(&dir);
+        w.save(&dir).unwrap();
         let back = Words::load(&dir);
         assert_eq!(back, w);
         assert_eq!(back.apply("Ask clawed code. New line. Mail my email.", "Claude Code"), "Ask Claude Code.\nMail sam@example.com");
         assert_eq!(back.apply("Ask clawed code.", "Slack"), "Ask Claude Code.", "rules only for their app");
+    }
+
+    /// history.json exactly as 0.4.0 to 0.4.7 wrote it (serde's default enum format; the Status
+    /// enum is unchanged since v0.4.0, checked against the tags), loads in 1.0.0 with every entry.
+    #[test]
+    fn a_0_4_x_history_file_loads_with_every_entry() {
+        let dir = std::env::temp_dir().join(format!("voxa-history-04x-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = r#"[
+  { "id": 1730000000000, "app": "Slack", "text": "hello there", "secs": 2.5, "status": "Pasted",
+    "audio": "C:\\Users\\a\\AppData\\Roaming\\voxa-next\\audio\\1730000000000.wav", "started_in": null, "via": null },
+  { "id": 1730000001000, "app": "ChatGPT", "text": "ready to copy", "secs": 1.0, "status": "Ready", "via": "Brave" },
+  { "id": 1730000002000, "app": "Notepad", "status": { "Waiting": "Sends when you're back online" }, "audio": "x.wav" },
+  { "id": 1730000003000, "app": "Word", "text": "", "secs": 0.4, "status": { "Failed": "No speech in the recording" } },
+  { "id": 1730000004000, "app": "Outlook", "text": "moved", "secs": 3.0, "status": "Pasted", "started_in": "Teams" }
+]"#;
+        std::fs::write(dir.join("history.json"), old).unwrap();
+        let h = History::load(&dir);
+        assert!(h.read_cleanly(), "a 0.4.x file is never treated as damaged");
+        assert_eq!(h.entries.len(), 5);
+        assert_eq!(h.entries[0].status, Status::Pasted);
+        assert_eq!(h.entries[1].via.as_deref(), Some("Brave"));
+        assert_eq!(h.entries[2].status, Status::Waiting(WAITING_NETWORK.into()));
+        assert!(h.entries[2].unsent());
+        assert_eq!(h.entries[3].status, Status::Failed(NO_SPEECH.into()));
+        assert_eq!(h.entries[4].started_in.as_deref(), Some("Teams"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_damaged_word_list_is_kept_and_never_overwritten_by_an_edit() {
+        let dir = std::env::temp_dir().join(format!("voxa-words-damaged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let damaged = b"{\"fixes\":[{\"from\":\"clawed\",\"to\":\"Claude\"}], oops";
+        std::fs::write(dir.join("words.json"), damaged).unwrap();
+        // Adding one fix is refused: the user's list is not replaced by an empty one plus that fix.
+        let r = Words::update(&dir, |w| w.fixes.push(Pair { from: "a".into(), to: "b".into() }));
+        assert!(r.unwrap_err().contains("damaged"));
+        assert_eq!(std::fs::read(dir.join("words.json")).unwrap(), damaged.to_vec(), "words.json untouched");
+        let _ = Words::load(&dir);
+        let _ = Words::load(&dir);
+        let kept = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("words.broken-")).count();
+        assert_eq!(kept, 1, "one copy of the damaged file is kept, however often it is read");
+        // No file yet: the first edit creates it.
+        let fresh = dir.join("fresh");
+        let w = Words::update(&fresh, |w| w.spoken_formatting = true).unwrap();
+        assert!(w.spoken_formatting && Words::load(&fresh).spoken_formatting);
+        // The Words page saves only through Words::update.
+        let remote = include_str!("remote.rs");
+        assert!(remote.contains("crate::store::Words::update(&data_dir(), f)"));
+        assert!(!remote.contains("w.save(&data_dir())"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

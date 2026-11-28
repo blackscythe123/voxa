@@ -25,8 +25,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Self-test (each rule still catches its fixture violations)
         run: python3 tools/lint/run.py --self-test
-      - name: Guardrails
-        run: python3 tools/lint/run.py
+      - name: Guardrails (a tag is a release: --release also fails on placeholder keys and an unpinned release certificate)
+        run: python3 tools/lint/run.py ${{ (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/android-v')) && '--release' || '' }}
 
   core-tests:
     runs-on: ubuntu-latest

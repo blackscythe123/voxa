@@ -34,19 +34,15 @@ pub fn foreground() -> HWND {
     unsafe { GetForegroundWindow() }
 }
 
+/// A window for the log: its handle, the program's file name and the window class. Never the
+/// window title: titles carry email subjects, chat and document names and account addresses, and
+/// the log is shared for support (the privacy-log lint holds this).
 pub fn describe(hwnd: HWND) -> String {
-    let mut title = [0u16; 256];
     let mut class = [0u16; 128];
-    unsafe {
-        let n = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32);
-        let c = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
-        format!(
-            "{:?} \"{}\" [{}]",
-            hwnd,
-            String::from_utf16_lossy(&title[..n.max(0) as usize]),
-            String::from_utf16_lossy(&class[..c.max(0) as usize])
-        )
-    }
+    let c = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+    let exe = exe_path(hwnd);
+    let program = std::path::Path::new(&exe).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+    format!("{:?} {} [{}]", hwnd, program, String::from_utf16_lossy(&class[..c.max(0) as usize]))
 }
 
 /// Make the window a non-activating, topmost tool window, and swallow

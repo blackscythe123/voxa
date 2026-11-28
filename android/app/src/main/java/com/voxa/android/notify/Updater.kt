@@ -21,7 +21,9 @@ import uniffi.voxa_ffi.UpdateCheck
 import uniffi.voxa_ffi.UpdateFailure
 import uniffi.voxa_ffi.UpdateOffer
 import uniffi.voxa_ffi.updateCheck
+import uniffi.voxa_ffi.updateConfirm
 import uniffi.voxa_ffi.updateDownload
+import uniffi.voxa_ffi.updateKeysReady
 import uniffi.voxa_ffi.updateVerifyFile
 
 /**
@@ -38,7 +40,13 @@ object Updater {
     const val ACTION_INSTALL_STATUS = "com.voxa.android.UPDATE_INSTALL_STATUS"
 
     /** What the Settings row and the Home card say. */
-    enum class Status { NONE, CHECKING, UP_TO_DATE, DOWNLOADING, READY, OFFLINE, FAILED, REFUSED, NO_SPACE }
+    enum class Status {
+        NONE, CHECKING, UP_TO_DATE, DOWNLOADING, READY, OFFLINE, FAILED, REFUSED, NO_SPACE,
+        /** Below the feed's min_auto_from: download it from the release page (never downloaded here). */
+        MANUAL,
+        /** This build's update keys are placeholders: it can never verify a feed, so it never checks. */
+        OFF,
+    }
 
     /** The live status, so open screens follow a check or a download. */
     val status = MutableStateFlow(Status.NONE)
@@ -129,6 +137,22 @@ object Updater {
         return url to key
     }
 
+    /** A build whose compiled update keys are placeholders (a local test build; release builds
+     *  refuse them) says "Updates are off in this build" instead of "Couldn't check" forever. A
+     *  debug build pointed at a local test feed still checks. */
+    fun updatesOff(ctx: Context): Boolean = !updateKeysReady() && testFeed(ctx) == null
+
+    // ── files the phone refused ──────────────────────────────────────────────
+
+    /** SHA-256 of downloads that weren't a Voxa update for this phone (wrong signer or package).
+     *  Never offered or downloaded again, so a bad release can't cost every phone a download a day. */
+    fun rejected(ctx: Context): Set<String> = prefs(ctx).getStringSet("rejected_sha256", emptySet()).orEmpty()
+
+    fun reject(ctx: Context, sha256: String) {
+        val keep = (rejected(ctx) + sha256.lowercase()).toList().takeLast(20).toSet()
+        prefs(ctx).edit().putStringSet("rejected_sha256", keep).apply()
+    }
+
     // ── check ────────────────────────────────────────────────────────────────
 
     /** The result of [check], for the caller's next step. */
@@ -147,6 +171,10 @@ object Updater {
      */
     suspend fun check(ctx: Context, manual: Boolean): Checked = withContext(Dispatchers.IO) {
         val p = prefs(ctx)
+        if (updatesOff(ctx)) {
+            record(ctx, Status.OFF)
+            return@withContext Checked.Skipped
+        }
         val before = loadStatus(ctx)
         status.value = Status.CHECKING
         val now = System.currentTimeMillis()
@@ -184,17 +212,28 @@ object Updater {
             record(ctx, Status.UP_TO_DATE)
             return@withContext Checked.UpToDate
         }
-        // A signer that is not this app's is never offered as a dead "Tap to install". The feed's
-        // signer is compared first; a newer key (a v3 lineage rotation) is accepted once the
-        // downloaded file's own lineage shows this app's certificate (see [verifiedArchive]).
+        // A file this phone already refused (wrong signer or package) is never downloaded again.
+        if (o.sha256.lowercase() in rejected(ctx)) {
+            Diag.log("update", "check: ${o.version} was refused on this phone before, not offered again")
+            clearOffer(ctx)
+            record(ctx, if (manual) Status.REFUSED else Status.FAILED)
+            return@withContext Checked.Failed(refused = true, offline = false)
+        }
+        // A signer that is not this app's is never offered as a dead "Tap to install": the
+        // downloaded file's own certificate decides (see [verifiedArchive]).
         val feedSignerOk = o.signerSha256.isEmpty() || o.signerSha256.lowercase() in ownSigners(ctx)
-        Diag.log("update", "check: ${o.version} (code ${o.versionCode}, ${o.abi}) offered${if (!feedSignerOk) ", new signer: checked after download" else ""}")
+        Diag.log("update", "check: ${o.version} (code ${o.versionCode}, ${o.abi}) offered${if (!feedSignerOk) ", other signer: checked after download" else ""}${if (!o.auto) ", manual only" else ""}")
         val known = offer(ctx)
         if (known?.versionCode != o.versionCode || known.sha256 != o.sha256) {
             clearOffer(ctx)
             saveOffer(ctx, o)
         }
         val metered = metered(ctx)
+        // Below the feed's min_auto_from: offered as a download from the release page only.
+        if (!o.auto) {
+            record(ctx, Status.MANUAL)
+            return@withContext Checked.Offer(o, metered)
+        }
         if (staged(ctx) != null) {
             record(ctx, Status.READY)
         } else {
@@ -210,6 +249,8 @@ object Updater {
      *  false to try again later (the job's backoff). Posts A5 when it is ready. */
     suspend fun download(ctx: Context): Boolean = withContext(Dispatchers.IO) {
         val o = offer(ctx) ?: return@withContext true
+        // A manual-only offer is never downloaded here; a refused file never again.
+        if (!o.auto || o.sha256.lowercase() in rejected(ctx) || updatesOff(ctx)) return@withContext true
         if (staged(ctx) != null) {
             Notifier.updateReady(ctx, o.version)
             return@withContext true
@@ -239,6 +280,7 @@ object Updater {
         val file = File(path)
         if (!verifiedArchive(ctx, file, o)) {
             file.delete()
+            reject(ctx, o.sha256)
             clearOffer(ctx)
             record(ctx, Status.FAILED)
             Diag.log("update", "download: the file is not a Voxa update for this phone (signer or package), deleted")
@@ -253,7 +295,7 @@ object Updater {
     }
 
     /** The downloaded file is Voxa (same package), the offered versionCode, and signed by this
-     *  app's certificate or a newer one whose lineage includes it (an APK v3 rotation). */
+     *  app's certificate (Voxa 1.0.0 on is signed with the one release key; no rotation). */
     private fun verifiedArchive(ctx: Context, file: File, o: UpdateOffer): Boolean {
         val pm = ctx.packageManager
         val info = runCatching { pm.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES) }.getOrNull() ?: return false
@@ -345,6 +387,17 @@ object Updater {
             prefs(ctx).edit().remove("staged_path").apply()
             record(ctx, Status.FAILED)
             VoxaJobs.scheduleUpdateDownload(ctx, o.size.toLong(), anyNetwork = false)
+            return@withContext false
+        }
+        // The kill switch: one quick look at the feed. Paused, or another file now: don't install.
+        val test = testFeed(ctx)
+        val c = updateConfirm(o, prefs(ctx).getString("check_state", "").orEmpty(), test?.first, test?.second)
+        if (c.state.isNotEmpty()) prefs(ctx).edit().putString("check_state", c.state).apply()
+        if (c.withdrawn) {
+            Diag.log("update", "install: the feed no longer offers ${o.version} (paused or replaced), dropped")
+            file.delete()
+            clearOffer(ctx)
+            record(ctx, Status.UP_TO_DATE)
             return@withContext false
         }
         commitInstall(ctx, file, o)
@@ -442,6 +495,10 @@ object Updater {
 
     /** At app start: the status record, and A5 again if the cap held it back. */
     fun start(ctx: Context) {
+        if (updatesOff(ctx)) {
+            status.value = Status.OFF
+            return
+        }
         status.value = if (readyVersion(ctx) != null) Status.READY else loadStatus(ctx).let { if (it == Status.DOWNLOADING || it == Status.CHECKING) Status.NONE else it }
         if (auto(ctx)) VoxaJobs.scheduleUpdateCheck(ctx)
         readyVersion(ctx)?.let { Notifier.updateReady(ctx, it) }
@@ -457,6 +514,8 @@ object Updater {
         Status.OFFLINE, Status.FAILED, Status.REFUSED, Status.NO_SPACE -> if (ready != null) "$ready ready" else "Couldn't check"
         Status.UP_TO_DATE -> "Up to date"
         Status.NONE -> if (ready != null) "$ready ready" else ""
+        Status.MANUAL -> "New version"
+        Status.OFF -> "Off in this build"
     }
 
     /** The sentence under the row after a manual check (a polite live region). */
@@ -469,8 +528,12 @@ object Updater {
         Status.FAILED -> "Couldn't check for updates right now. Voxa will try again later."
         Status.REFUSED -> "Voxa didn't install ${version ?: "the update"} because it couldn't confirm it came from Voxa. Your current version keeps working."
         Status.NO_SPACE -> "Not enough space to update. Voxa needs about $sizeMb MB free."
+        Status.MANUAL -> if (version != null) "Voxa $version is out. Download it from its release page to update." else "A new Voxa is out. Download it from its release page to update."
+        Status.OFF -> UPDATES_OFF_TEXT
         Status.NONE -> null
     }
+
+    const val UPDATES_OFF_TEXT = "Updates are off in this build. Download Voxa from its release page to get updates."
 
     const val DICTATION_LIVE_TEXT = "Finish your dictation first, then tap Install again."
 }

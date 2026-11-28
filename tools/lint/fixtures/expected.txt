@@ -21,6 +21,7 @@
 # 3. privacy
 3 privacy-log desktop/app/src/ui.rs
 2 privacy-log android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+1 privacy-log desktop/app/src/win.rs                               # describe() reads the window title
 1 privacy-notify core/voxa-core/src/notices.rs
 1 privacy-notify android/app/src/main/java/com/voxa/android/notify/Notifier.kt
 
@@ -83,3 +84,16 @@
 8 licences-allowed tools/licences/inventory.tsv                     # GPL, AGPL, LGPL-only, SSPL, Unknown, X AND GPL, empty, unbalanced; the good-* rows pass
 1 licences-asset android/app/src/main/res/font/comic.ttf
 1 licences-asset android/app/src/main/res/raw/ding.ogg
+
+# 12. release pipeline (docs/release-runbook.md; the 1.0.0 release review)
+1 release-placeholder-guard android/app/build.gradle.kts            # no releaseRefusal / placeholder key check
+1 release-placeholder-guard desktop/windows/voxa.iss                # no #error guard reading keys.rs
+3 release-android-signing android/app/build.gradle.kts              # --lineage, no releaseKeyIsDebug, no verifyReleaseSigner
+1 release-android-signing android/signing/forbidden-signers.txt     # the test-build signer is not forbidden (no file)
+1 release-android-signing android/signing/release-cert.sha256       # --release: no pinned release certificate
+1 release-android-signing .github/workflows/android-feed.yml        # publishes any signer
+4 release-feed-guard .github/workflows/android-feed.yml             # no ref check, no guard-forward, no trap, no empty-secret check
+1 release-feed-guard .github/workflows/feed-pause.yml               # no kill switch workflow
+1 release-readme-links README.md                                    # Voxa-Android-1.0.0.apk is never uploaded; the installer link is fine
+1 release-runbook docs/release-runbook.md
+1 release-runbook README.md

@@ -1367,6 +1367,10 @@ impl Home {
                 .child("Fix what ChatGPT keeps getting wrong, and expand things you say often. Applied on this PC after every dictation, before it is pasted.")
                 .into_any_element(),
         ];
+        // words.json couldn't be read (locked or damaged): the change wasn't saved, the list is kept.
+        if let Some(e) = self.voxa.read(cx).words_error.clone() {
+            out.push(info_bar(Bar::Error, "Words not saved", &e, None, None).mt(px(12.)).into_any_element());
+        }
 
         // Fixes and snippets share a shape: a pair list with an add row.
         let pair_list = |this: &mut Self, title: &str, sub: &str, key: &'static str, items: Vec<store::Pair>, from: Entity<TextInput>, to: Entity<TextInput>, cx: &mut Context<Self>| -> Vec<AnyElement> {

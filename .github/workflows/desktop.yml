@@ -33,7 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 tools/lint/run.py --self-test
-      - run: python3 tools/lint/run.py
+      # A tag is a release: --release also fails on placeholder update keys and an empty release
+      # certificate (docs/guardrails.md).
+      - run: python3 tools/lint/run.py ${{ startsWith(github.ref, 'refs/tags/v') && '--release' || '' }}
 
   windows:
     runs-on: windows-latest
@@ -55,7 +57,11 @@ jobs:
           choco install innosetup -y --no-progress | Out-Null
           # The version has one source: the workspace Cargo.toml.
           $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q /DAppVersion=$v desktop\windows\voxa.iss
+          # voxa.iss refuses placeholder update keys. Untagged runs build a test installer that is
+          # never published (it says "Updates are off in this build"); a tag never passes the flag.
+          $dev = if ($env:GITHUB_REF -like 'refs/tags/v*') { @() } else { @('/DAllowPlaceholderKeys') }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q /DAppVersion=$v @dev desktop\windows\voxa.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           Get-ChildItem target\dist
       - uses: actions/upload-artifact@v4
         with:
@@ -155,6 +161,7 @@ jobs:
           VOXA_UPDATE_KEY: ${{ secrets.VOXA_UPDATE_KEY }}
         run: |
           set -euo pipefail
+          [ -n "$VOXA_UPDATE_KEY" ] || { echo "VOXA_UPDATE_KEY is not set in the release environment"; exit 1; }
           V="${GITHUB_REF_NAME#v}"; R="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
           gh release download "$GITHUB_REF_NAME" -p "Voxa-Setup-$V.exe" -p "Voxa-$V-mac.dmg" -D dist
           w=dist/Voxa-Setup-$V.exe; m=dist/Voxa-$V-mac.dmg
@@ -164,8 +171,13 @@ jobs:
             '{schema:1,channel:"desktop",serial:$s,version:$v,notes_url:("https://github.com/'"$GITHUB_REPOSITORY"'/releases/tag/v"+$v),paused:false,
               assets:{"windows-x64":{url:($r+"/Voxa-Setup-"+$v+".exe"),sha256:$ws,size:$wz},"macos-universal":{url:($r+"/Voxa-"+$v+"-mac.dmg"),sha256:$ms,size:$mz}}}' \
             | tr -d '\n' > payload.json
-          printf '%s' "$VOXA_UPDATE_KEY" > k.pem; chmod 600 k.pem
-          openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig; rm -f k.pem
+          # The feed only moves forward: re-running an older tag's job never unpublishes a newer release.
+          cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- guard-forward --channel desktop --payload payload.json
+          umask 077
+          # The key file never outlives this step, even when openssl fails.
+          trap 'rm -f k.pem' EXIT
+          printf '%s' "$VOXA_UPDATE_KEY" > k.pem
+          openssl pkeyutl -sign -rawin -inkey k.pem -in payload.json -out payload.sig
           jq -n --arg p "$(base64 -w0 payload.json)" --arg s "$(base64 -w0 payload.sig)" '{key_id:1,payload:$p,sig:$s}' > desktop.json
       - name: Verify the feed with the shipped verifier
         run: cargo run -q --release -p voxa-update --features sign --bin voxa-update-tool -- verify desktop.json --channel desktop

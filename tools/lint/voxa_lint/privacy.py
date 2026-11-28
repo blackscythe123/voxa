@@ -148,5 +148,29 @@ def check_notifications(ctx: Ctx) -> list[Violation]:
     return out
 
 
+DESCRIBE_FILES = ("desktop/app/src/win.rs", "desktop/app/src/mac.rs")
+TITLE_READ = re.compile(r"\bGetWindowTextW?\b|\bkCGWindowName\b|\bAXTitle\b|\btitle\b")
+
+
+def check_describe(ctx: Ctx) -> list[Violation]:
+    """`os::describe(window)` goes into voxa-desktop.log on every take: it names the program and
+    the window class, never the window title (email subjects, chat and document names)."""
+    out = []
+    for rel in S.files(ctx.root, *DESCRIBE_FILES):
+        src = S.load(ctx.root, rel)
+        tests = S.test_ranges(src)
+        for f in S.functions(src):
+            if f.name != "describe" or S.in_ranges(f.start, tests):
+                continue
+            body = src.code[f.body:f.end]
+            m = TITLE_READ.search(body)
+            if m:
+                line = src.line_of(f.body + m.start())
+                out.append(Violation("privacy-log", rel, line, f"describe() reads the window title ({m.group(0)}). Rule: window "
+                                     "descriptions in the log name the program and window class only, never the title "
+                                     "(docs/guardrails.md#3-privacy)", key="describe: title"))
+    return out
+
+
 def check(ctx: Ctx) -> list[Violation]:
-    return check_logs(ctx) + check_notifications(ctx)
+    return check_logs(ctx) + check_notifications(ctx) + check_describe(ctx)

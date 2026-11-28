@@ -74,7 +74,8 @@ class UpdateNotificationTest {
         val n = showing()!!.notification
         assertEquals("updates", n.channelId)
         assertEquals("Voxa 1.1.0 is ready to install", n.extras.getString("android.title"))
-        assertEquals(android.app.Notification.VISIBILITY_PUBLIC, n.visibility)
+        // Private: the lock screen shows only the public version ("Voxa update ready").
+        assertEquals(android.app.Notification.VISIBILITY_PRIVATE, n.visibility)
         assertEquals("Voxa update ready", n.publicVersion.extras.getString("android.title"))
         assertEquals("Install", n.actions.single().title.toString())
     }

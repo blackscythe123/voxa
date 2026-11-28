@@ -71,7 +71,7 @@ pub fn header(entries: &[Entry], name: Option<String>, birthday: Option<greeting
     });
     ledger.mark_shown(&g);
     let play = ledger.played.as_ref() != Some(&(g.doodle.key().to_string(), today));
-    let _ = std::fs::write(&path, ledger.to_text());
+    let _ = crate::store::write_atomic(&path, ledger.to_text().as_bytes());
     Header { greeting: g, play }
 }
 
@@ -80,7 +80,7 @@ pub fn played(g: &Greeting) {
     let path = crate::data_dir().join(LEDGER_FILE);
     let mut ledger = Ledger::parse(&std::fs::read_to_string(&path).unwrap_or_default());
     if ledger.should_play(g.doodle, g.date) {
-        let _ = std::fs::write(&path, ledger.to_text());
+        let _ = crate::store::write_atomic(&path, ledger.to_text().as_bytes());
     }
 }
 
@@ -121,4 +121,17 @@ fn os_reduced_motion() -> bool {
 #[cfg(not(any(windows, target_os = "macos")))]
 fn os_reduced_motion() -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    /// The greeting ledger is written atomically (a unique temp file, then replace_file), never a
+    /// bare fs::write that a crash or a second process could leave half written.
+    #[test]
+    fn the_greeting_ledger_is_written_atomically() {
+        let src = include_str!("greet.rs");
+        let code = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(!code.contains(concat!("std::fs::", "write(")));
+        assert_eq!(code.matches("crate::store::write_atomic(&path").count(), 2);
+    }
 }

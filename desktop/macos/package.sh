@@ -38,11 +38,19 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Voxa.icns"
 
 sed "s/VERSION/$VERSION/g" desktop/macos/Info.plist > "$APP/Contents/Info.plist"
 
-# Ad-hoc signature so macOS remembers the microphone and Accessibility grants.
-codesign --force --sign - --options runtime "$APP/Contents/MacOS/libonnxruntime.dylib"
-codesign --force --sign - --options runtime --entitlements desktop/macos/entitlements.plist "$APP/Contents/MacOS/voxa-signin"
-codesign --force --sign - --options runtime --entitlements desktop/macos/entitlements.plist "$APP"
+# Signing. With the stable certificate (desktop.yml imports it and exports VOXA_MAC_SIGN_IDENTITY,
+# with VOXA_MAC_KEYCHAIN) the designated requirement stays the same across updates, so macOS keeps
+# the microphone and Accessibility grants. Without it: ad hoc, and every update asks for
+# Accessibility again. check-signature.sh then holds the requirement to designated-requirement.txt.
+IDENTITY="${VOXA_MAC_SIGN_IDENTITY:--}"
+KEYCHAIN_ARGS=()
+if [ "$IDENTITY" != "-" ] && [ -n "${VOXA_MAC_KEYCHAIN:-}" ]; then KEYCHAIN_ARGS=(--keychain "$VOXA_MAC_KEYCHAIN"); fi
+if [ "$IDENTITY" = "-" ]; then echo "signing ad hoc (no VOXA_MAC_SIGN_IDENTITY)"; else echo "signing with the stable identity: $IDENTITY"; fi
+codesign --force --sign "$IDENTITY" ${KEYCHAIN_ARGS[@]+"${KEYCHAIN_ARGS[@]}"} --options runtime "$APP/Contents/MacOS/libonnxruntime.dylib"
+codesign --force --sign "$IDENTITY" ${KEYCHAIN_ARGS[@]+"${KEYCHAIN_ARGS[@]}"} --options runtime --entitlements desktop/macos/entitlements.plist "$APP/Contents/MacOS/voxa-signin"
+codesign --force --sign "$IDENTITY" ${KEYCHAIN_ARGS[@]+"${KEYCHAIN_ARGS[@]}"} --options runtime --entitlements desktop/macos/entitlements.plist "$APP"
 codesign --verify --deep --strict "$APP"
+bash desktop/macos/check-signature.sh "$APP"
 lipo -archs "$APP/Contents/MacOS/Voxa"
 
 DMG="target/dist/Voxa-$VERSION-mac.dmg"
