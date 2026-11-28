@@ -4,6 +4,8 @@
 //! Copy rules: sentence case, no emojis, no dashes. Never transcript text, cookies or the account
 //! email. A notification may name the app a dictation was for.
 
+use crate::greeting::{Date, MonthDay};
+
 /// The two kinds Voxa posts. Each is one notification, updated in place (Android ID 1 and 2,
 /// desktop tags "signin" and "dictations").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,14 +105,138 @@ pub fn record(posted: &[u64], now_ms: u64) -> Vec<u64> {
     v
 }
 
-/// Sign-in notifications are posted silently between 21:00 and 08:00 local time.
+/// Sign-in notifications are posted silently between 21:00 and 08:00 local time. The birthday
+/// wish is the one exception to "never at night": it arrives at midnight on purpose (owner
+/// decision, 2026-11-28), outside these rules (see [`birthday_wish_due`]).
 pub fn quiet_hour(hour: u32) -> bool {
     !(8..21).contains(&hour)
+}
+
+// ── The birthday wish ────────────────────────────────────────────────────────
+
+/// The birthday wish: one notification at midnight on the user's birthday, if they added one and
+/// left "Wish me on my birthday" on. `name`: the account's name; only its first word is used.
+pub fn birthday(name: Option<&str>) -> Notice {
+    let first = name.and_then(|n| n.split_whitespace().next()).filter(|n| !n.is_empty());
+    let title = match first {
+        Some(n) => format!("Happy birthday, {n}"),
+        None => "Happy birthday".into(),
+    };
+    Notice { title, body: "Have a lovely day.".into(), action: None }
+}
+
+/// Android: the alarm is inexact and Doze can hold it back for a while, so a wish delivered any
+/// time on the day itself still counts (never on another day).
+pub const BIRTHDAY_GRACE_ANDROID_MIN: u16 = 24 * 60;
+/// Desktop: the wish only shows if the PC was awake at midnight. A PC that wakes up later in the
+/// night never gets a late wish.
+pub const BIRTHDAY_GRACE_DESKTOP_MIN: u16 = 2;
+
+/// The local date of the next birthday wish (at 00:00 that day), seen from `today`. Today's
+/// midnight has always passed already, so a birthday today means next year's. `wished_year`: the
+/// year the last wish was shown (0: never); a year already wished is skipped, so a clock set back
+/// never wishes twice. 29 February is wished on 28 February in other years. Local dates only, so
+/// a time zone or daylight saving change can't move the day.
+pub fn next_birthday_wish(today: Date, birthday: MonthDay, wished_year: i32) -> Date {
+    let mut y = today.y;
+    loop {
+        let d = Date::new(y, birthday.month, birthday.day).in_year(y);
+        if d > today && y > wished_year {
+            return d;
+        }
+        y += 1;
+    }
+}
+
+/// Whether to show the wish now: it is the birthday, `minutes` after local midnight is still
+/// within `grace_minutes`, and this year's wish hasn't been shown.
+pub fn birthday_wish_due(today: Date, minutes: u16, birthday: MonthDay, wished_year: i32, grace_minutes: u16) -> bool {
+    birthday.valid() && birthday.is(today) && wished_year < today.y && minutes < grace_minutes
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MARCH_14: MonthDay = MonthDay { month: 3, day: 14 };
+    const FEB_29: MonthDay = MonthDay { month: 2, day: 29 };
+
+    #[test]
+    fn the_birthday_wish_names_the_first_name_only() {
+        let n = birthday(Some("Sam Rivera"));
+        assert_eq!(n.title, "Happy birthday, Sam");
+        assert_eq!(n.body, "Have a lovely day.");
+        assert_eq!(n.action, None);
+        assert_eq!(birthday(None).title, "Happy birthday");
+        assert_eq!(birthday(Some("  ")).title, "Happy birthday");
+        for s in [n.title, n.body, birthday(None).title] {
+            assert!(!s.contains(" - ") && !s.contains('\u{2013}') && !s.contains('\u{2014}') && s.is_ascii(), "{s}");
+        }
+    }
+
+    #[test]
+    fn the_next_birthday_wish_is_the_coming_midnight_of_the_birthday() {
+        assert_eq!(next_birthday_wish(Date::new(2026, 11, 28), MARCH_14, 0), Date::new(2027, 3, 14));
+        assert_eq!(next_birthday_wish(Date::new(2027, 3, 13), MARCH_14, 2026), Date::new(2027, 3, 14));
+        // Birthday tomorrow: tonight at midnight.
+        assert_eq!(next_birthday_wish(Date::new(2026, 11, 28), MonthDay { month: 11, day: 29 }, 0), Date::new(2026, 11, 29));
+        // New Year's Eve, birthday on 1 January.
+        assert_eq!(next_birthday_wish(Date::new(2026, 12, 31), MonthDay { month: 1, day: 1 }, 2026), Date::new(2027, 1, 1));
+    }
+
+    #[test]
+    fn a_birthday_today_after_midnight_waits_for_next_year() {
+        // Added (or rescheduled after a reboot) during the birthday: no late wish, next year's.
+        assert_eq!(next_birthday_wish(Date::new(2027, 3, 14), MARCH_14, 0), Date::new(2028, 3, 14));
+        assert!(!birthday_wish_due(Date::new(2027, 3, 14), 9 * 60, MARCH_14, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+    }
+
+    #[test]
+    fn a_birthday_already_wished_this_year_is_not_wished_again() {
+        // The clock went back a day after the wish: the next one is still next year.
+        assert_eq!(next_birthday_wish(Date::new(2027, 3, 13), MARCH_14, 2027), Date::new(2028, 3, 14));
+        assert!(!birthday_wish_due(Date::new(2027, 3, 14), 0, MARCH_14, 2027, BIRTHDAY_GRACE_ANDROID_MIN));
+        assert!(birthday_wish_due(Date::new(2027, 3, 14), 0, MARCH_14, 2026, BIRTHDAY_GRACE_ANDROID_MIN));
+    }
+
+    #[test]
+    fn a_29_february_birthday_is_wished_on_28_february_in_other_years() {
+        assert_eq!(next_birthday_wish(Date::new(2026, 11, 28), FEB_29, 0), Date::new(2027, 2, 28));
+        assert_eq!(next_birthday_wish(Date::new(2027, 2, 28), FEB_29, 2027), Date::new(2028, 2, 29));
+        assert!(birthday_wish_due(Date::new(2027, 2, 28), 0, FEB_29, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        assert!(!birthday_wish_due(Date::new(2028, 2, 28), 0, FEB_29, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        assert!(birthday_wish_due(Date::new(2028, 2, 29), 0, FEB_29, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+    }
+
+    #[test]
+    fn a_pc_asleep_at_midnight_gets_no_late_birthday_wish() {
+        let day = Date::new(2027, 3, 14);
+        assert!(birthday_wish_due(day, 0, MARCH_14, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        assert!(birthday_wish_due(day, 1, MARCH_14, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        // Woke up at 00:05, or in the morning: nothing.
+        assert!(!birthday_wish_due(day, 5, MARCH_14, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        assert!(!birthday_wish_due(day, 8 * 60, MARCH_14, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        // Never on another day.
+        assert!(!birthday_wish_due(Date::new(2027, 3, 15), 0, MARCH_14, 0, BIRTHDAY_GRACE_ANDROID_MIN));
+    }
+
+    /// Owner decision (2026-11-28): "never at night" has exactly one exception, the birthday wish
+    /// at midnight. Everything else still keeps quiet hours.
+    #[test]
+    fn the_birthday_wish_is_the_only_notice_allowed_at_midnight() {
+        assert!(quiet_hour(0));
+        assert!(birthday_wish_due(Date::new(2027, 3, 14), 0, MARCH_14, 0, BIRTHDAY_GRACE_DESKTOP_MIN));
+        assert!(BIRTHDAY_GRACE_DESKTOP_MIN <= 5, "the desktop wish is at midnight, not later in the night");
+    }
+
+    #[test]
+    fn birthday_dates_are_local_calendar_dates_so_time_zones_cannot_move_them() {
+        // Local dates in and out: the same answer whatever the offset or daylight saving. The
+        // shells turn the date into 00:00 in the current zone only when scheduling.
+        let d = next_birthday_wish(Date::new(2027, 3, 13), MARCH_14, 0);
+        assert_eq!(d.to_string(), "2027-03-14");
+        assert_eq!(Date::parse("2027-03-14"), Some(d));
+    }
 
     const H: u64 = HOUR_MS;
 
