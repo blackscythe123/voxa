@@ -189,7 +189,7 @@ pub const DARK: Palette = Palette {
     track_strong: 0x4A4541,
     grid: 0x3A3633,
     grid_zero: 0x5C5550,
-    bar: 0x6B4D3C,
+    bar: 0x9A6F57,
     good: 0x45C27C,
     good_text: 0x45C27C,
     good_line_a: 0x45C27C80,
