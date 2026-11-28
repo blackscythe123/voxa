@@ -147,6 +147,13 @@ fun SettingsScreen(activity: MainActivity) {
             // Download updates automatically, Check for updates, Version, What's new, Allow Voxa to install updates.
             UpdateRows(activity)
         }
+
+        // About: Voxa's NOTICE and the licences of everything it ships (Apache-2.0 section 4(d)).
+        VCard(padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            OptionRow(R.drawable.ic_licence, "Open source licences", last = true, onClick = { activity.go(Route.Licences) }) {
+                Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(20.dp), tint = c.text40)
+            }
+        }
     }
 
     if (confirmClear) {

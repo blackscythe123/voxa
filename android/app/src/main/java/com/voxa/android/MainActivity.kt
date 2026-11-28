@@ -40,6 +40,7 @@ import com.voxa.android.ui.DetailScreen
 import com.voxa.android.ui.HistoryScreen
 import com.voxa.android.ui.HomeScreen
 import com.voxa.android.ui.KeyboardLookScreen
+import com.voxa.android.ui.LicencesScreen
 import com.voxa.android.ui.LaunchOverlay
 import com.voxa.android.ui.SettingsScreen
 import com.voxa.android.ui.SetupScreen
@@ -58,6 +59,7 @@ sealed interface Route {
     data object SignIn : Route
     data object Setup : Route
     data object KeyboardLook : Route
+    data object Licences : Route
 }
 
 /** The companion app: setup, Home, History, Words and Settings. */
@@ -175,6 +177,7 @@ class MainActivity : ComponentActivity() {
             stack.add(
                 when {
                     r == "keyboard-look" -> Route.KeyboardLook
+                    r == "licences" -> Route.Licences
                     r == "setup" -> Route.Setup.also { getSharedPreferences("ui", MODE_PRIVATE).edit().putInt("setup_step", 0).apply() }
                     r.startsWith("detail:") -> Route.Detail(r.removePrefix("detail:").toULong())
                     else -> Route.Tabbed(Tab.entries.firstOrNull { it.name.equals(r, true) } ?: Tab.Home)
@@ -361,6 +364,7 @@ class MainActivity : ComponentActivity() {
                         Route.SignIn -> SignInScreen(onDone = { signInDone() }, onClose = { back() })
                         Route.Setup -> SetupScreen(this@MainActivity)
                         Route.KeyboardLook -> KeyboardLookScreen(this@MainActivity)
+                        Route.Licences -> LicencesScreen(this@MainActivity)
                     }
                 } }
                 if (route is Route.Tabbed) TabBar(route.tab) { go(Route.Tabbed(it)) }
