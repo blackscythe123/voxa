@@ -3,6 +3,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod greet;
 mod home;
 mod input;
 mod import;
@@ -22,6 +23,7 @@ mod tab;
 #[cfg_attr(windows, path = "win.rs")]
 #[cfg_attr(target_os = "macos", path = "mac.rs")]
 mod os;
+mod pen;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -1102,6 +1104,11 @@ impl Voxa {
         if page.is_none() && !self.settings.onboarded {
             c.arg("--tour");
         }
+        // The written splash: only the first time the user opens the window in this run, on Home.
+        static OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !OPENED.swap(true, std::sync::atomic::Ordering::Relaxed) && page.is_none() && self.settings.onboarded {
+            c.arg("--splash");
+        }
         match c.spawn() {
             Ok(_) => os::log("window process started"),
             Err(e) => os::log(&format!("FAIL window process: {e}")),
@@ -1797,7 +1804,7 @@ impl Voxa {
 /// The display face, embedded once for both processes.
 static FRAUNCES: &[u8] = include_bytes!("../assets/Fraunces.ttf");
 
-fn run_window(tour: bool) {
+fn run_window(tour: bool, splash: bool) {
     if !os::single_window_instance() {
         return; // already open: it was asked to come to the front
     }
@@ -1844,6 +1851,8 @@ fn run_window(tour: bool) {
                     let _ = h.update(cx, |home, _, cx| home.start_tour_at(n, cx));
                 } else if start_tour && std::env::var_os("VOXA_PAGE").is_none() {
                     let _ = h.update(cx, |home, _, cx| home.start_tour(cx));
+                } else if splash && first == Page::Home {
+                    let _ = h.update(cx, |home, _, cx| home.start_splash(cx));
                 }
                 // Another "Open Voxa" while open: come to the front.
                 cx.spawn(async move |cx| loop {
@@ -2008,7 +2017,7 @@ fn main() {
     }
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--window") {
-        return run_window(args.iter().any(|a| a == "--tour"));
+        return run_window(args.iter().any(|a| a == "--tour"), args.iter().any(|a| a == "--splash"));
     }
     if !os::single_instance() {
         // Voxa is already running: it opens its window.
