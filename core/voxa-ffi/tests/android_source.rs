@@ -53,6 +53,13 @@ fn work_arriving_after_the_keyboard_closed_does_nothing() {
     }
 }
 
+/// Late mic levels moved the bars while paused: levels are ignored once paused or closed.
+#[test]
+fn mic_levels_after_a_pause_leave_the_bars_flat() {
+    let line = KEYBOARD.lines().find(|l| l.contains("onLevel = {")).expect("onLevel");
+    assert!(line.contains("!destroyed") && line.contains("!isPaused()"), "{line}");
+}
+
 /// The mic key's tap and hold rules live in KeyRules (tested on the emulator in RegressionsTest);
 /// the keyboard must use them, not its own copy.
 #[test]
