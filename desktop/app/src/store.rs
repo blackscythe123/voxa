@@ -500,6 +500,49 @@ pub fn nice_ticks(max: f32) -> Vec<f32> {
 }
 
 #[cfg(test)]
+mod load_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("voxa-load-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn missing_settings_are_not_an_error() {
+        let d = tmp("missing");
+        assert!(matches!(Settings::try_load(&d), Ok(None)));
+    }
+
+    #[test]
+    fn damaged_settings_are_an_error_and_kept_aside() {
+        let d = tmp("damaged");
+        std::fs::write(d.join("settings.json"), b"{ not json").unwrap();
+        let e = Settings::try_load(&d).unwrap_err();
+        assert!(e.contains("is damaged"), "{e}");
+        let kept = std::fs::read_dir(&d).unwrap().filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().contains("broken"));
+        assert!(kept, "a copy of the damaged file is kept");
+    }
+
+    #[test]
+    fn unreadable_history_is_never_overwritten_and_merges_later() {
+        let d = tmp("history");
+        let path = d.join("history.json");
+        let old = vec![Entry { id: 1, app: "A".into(), text: "old".into(), secs: 1.0, status: Status::Pasted, audio: None, started_in: None, via: None }];
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        // Pretend the file couldn't be read at startup (locked): Voxa starts empty and unreadable.
+        let mut h = History { path: path.clone(), entries: Vec::new(), unreadable: true };
+        h.entries.push(Entry { id: 2, app: "B".into(), text: "new".into(), secs: 1.0, status: Status::Pasted, audio: None, started_in: None, via: None });
+        // Now readable again: saving merges instead of overwriting.
+        h.save();
+        let on_disk: Vec<Entry> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(on_disk.iter().map(|e| e.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

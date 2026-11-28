@@ -1623,11 +1623,31 @@ fn main() {
             os::strip_visible(false);
             // Dev only (with VOXA_FAKE): start a stand-in recording without touching the keyboard,
             // so the strip can be screen-recorded while someone is using the PC.
-            if let (true, Ok(handle)) = (demo, opened) {
+            if let (true, Ok(handle)) = (demo, opened.as_ref()) {
                 cx.background_executor().timer(Duration::from_millis(400)).await;
                 let fg = os::foreground();
                 let target = Target { app: os::app_name(fg), window: fg as u64 };
                 let _ = handle.update(cx, |v, _, cx| v.handle(Event::Hotkey { target }, cx));
+            }
+            // Test only (VOXA_TEST_DICTATE=<seconds>, and only with a separate VOXA_DATA folder):
+            // start a real take without a key press, then CANCEL it, so nothing is ever sent or
+            // pasted. Used to test the recording path (full disk, mic trouble) unattended.
+            let test_secs = std::env::var("VOXA_TEST_DICTATE").ok().and_then(|s| s.parse::<u64>().ok()).filter(|_| std::env::var_os("VOXA_DATA").is_some());
+            if let (Some(secs), Ok(handle)) = (test_secs, opened.as_ref()) {
+                cx.background_executor().timer(Duration::from_millis(1500)).await;
+                let fg = os::foreground();
+                let target = Target { app: os::app_name(fg), window: fg as u64 };
+                os::log("test: starting a take (will be cancelled)");
+                let _ = handle.update(cx, |v, _, cx| {
+                    let r = Readiness { session: Session::Valid, ..v.flow.readiness() };
+                    v.handle(Event::Readiness(r), cx);
+                    v.handle(Event::Hotkey { target }, cx);
+                });
+                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                let _ = handle.update(cx, |v, _, cx| {
+                    os::log(&format!("test: state before cancel {:?}", v.flow.state()));
+                    v.handle(Event::Cancel, cx);
+                });
             }
         })
         .detach();
