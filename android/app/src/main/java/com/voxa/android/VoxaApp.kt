@@ -98,6 +98,9 @@ class VoxaApp : Application() {
         VoxaJobs.schedulePeriodic(this)
         // The birthday wish's alarm (set again at every start, in case it was lost).
         scope.launch(Dispatchers.IO) { com.voxa.android.notify.BirthdayWish.schedule(this@VoxaApp) }
+        // Self update (docs/updates.md): the daily check while "Download updates automatically"
+        // is on, and A4 again if the daily cap held it back.
+        scope.launch(Dispatchers.IO) { com.voxa.android.notify.Updater.start(this@VoxaApp) }
         scope.launch {
             historyVersion.collectLatest {
                 delay(1500)

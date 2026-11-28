@@ -16,6 +16,7 @@ import com.voxa.android.VoxaApp
 import com.voxa.android.diag.Diag
 import uniffi.voxa_ffi.NoticeDecision
 import uniffi.voxa_ffi.NoticeKind
+import uniffi.voxa_ffi.NoticeUpdateDecision
 import uniffi.voxa_ffi.SessionCheck
 import uniffi.voxa_ffi.SessionState
 import uniffi.voxa_ffi.noticeBirthday
@@ -26,6 +27,9 @@ import uniffi.voxa_ffi.noticeQuietHour
 import uniffi.voxa_ffi.noticeReady
 import uniffi.voxa_ffi.noticeRecord
 import uniffi.voxa_ffi.noticeSignedOut
+import uniffi.voxa_ffi.noticeDecideUpdate
+import uniffi.voxa_ffi.noticeUpdatePublicTitle
+import uniffi.voxa_ffi.noticeUpdateReady
 import java.time.LocalTime
 
 /**
@@ -38,6 +42,8 @@ object Notifier {
     const val ID_SIGN_IN = 1
     const val ID_DICTATIONS = 2
     const val ID_BIRTHDAY = 3
+    /** A4: a verified update is ready to install (channel Updates). */
+    const val ID_UPDATE = 4
 
     /** A notification channel. "Reminders" can be added to [CHANNELS] later. */
     data class Channel(val id: String, val name: String, val description: String, val importance: Int)
@@ -45,7 +51,8 @@ object Notifier {
     val SIGN_IN = Channel("sign-in", "Sign-in", "When you need to sign in to ChatGPT again", NotificationManager.IMPORTANCE_DEFAULT)
     val DICTATIONS = Channel("dictations", "Dictations", "Dictations sent in the background, or that couldn't be sent", NotificationManager.IMPORTANCE_LOW)
     val BIRTHDAY = Channel("birthday", "Birthday", "A wish at midnight on your birthday, if you added it in Settings", NotificationManager.IMPORTANCE_DEFAULT)
-    private val CHANNELS = listOf(SIGN_IN, DICTATIONS, BIRTHDAY)
+    val UPDATES = Channel("updates", "Updates", "When a new version of Voxa is ready to install", NotificationManager.IMPORTANCE_LOW)
+    private val CHANNELS = listOf(SIGN_IN, DICTATIONS, BIRTHDAY, UPDATES)
 
     /** The Voxa keyboard is on screen (set by the keyboard). */
     @Volatile var keyboardShowing = false
@@ -72,6 +79,7 @@ object Notifier {
     private var pendingNotSent = 0
     private var pendingBirthday: String? = null
     private var birthdayHeld = false
+    private var pendingUpdate: String? = null
 
     /** Post what was held back while the user was looking. Off the main thread (History is read). */
     private fun flush() {
@@ -90,13 +98,15 @@ object Notifier {
             pendingBirthday = null
             r
         }
-        if (!signIn && ready.isEmpty() && notSent == 0 && !birthday) return
+        val update = synchronized(pending) { pendingUpdate.also { pendingUpdate = null } }
+        if (!signIn && ready.isEmpty() && notSent == 0 && !birthday && update == null) return
         Thread {
             Diag.log("notify", "posting what was held back while Voxa was on screen")
             if (signIn) (ctx as? VoxaApp)?.let { signedOut(it) }
             for ((entries, app) in ready) ready(ctx, entries, app)
             if (notSent > 0) notSent(ctx, notSent)
             if (birthday) birthday(ctx, name)
+            if (update != null) updateReady(ctx, update)
         }.start()
     }
 
@@ -286,6 +296,53 @@ object Notifier {
         val ok = NotificationManagerCompat.from(ctx).safeNotify(ctx, ID_BIRTHDAY, n)
         Diag.log("notify", "BIRTHDAY: ${if (ok) "POST" else "not posted"}")
         return ok
+    }
+
+    // ── A4: an update is ready (Android only) ────────────────────────────────
+
+    /**
+     * A4 "Voxa 1.1.0 is ready to install" (ID 4, channel Updates, low importance so it is always
+     * silent). At most once per version: once posted, swiping it away never brings it back (Home
+     * and Settings still show it). It counts toward the 2 per 24 h cap and is never urgent, so a
+     * capped or on-screen A4 is deferred (held here, and tried again at app start and at every
+     * update check), never dropped. The lock screen shows "Voxa update ready" (not private).
+     */
+    fun updateReady(ctx: Context, version: String): Boolean {
+        val up = Updater.prefs(ctx)
+        val p = prefs(ctx)
+        val now = System.currentTimeMillis()
+        val posted = ids(p.getString("posted", ""))
+        val decision = noticeDecideUpdate(version, up.getString("notified_for", "").orEmpty(), looking, now.toULong(), posted)
+        Diag.log("notify", "UPDATE: $decision")
+        when (decision) {
+            NoticeUpdateDecision.NEVER -> return false
+            NoticeUpdateDecision.WAIT -> {
+                synchronized(pending) { pendingUpdate = version }
+                return false
+            }
+            NoticeUpdateDecision.POST -> Unit
+        }
+        if (!allowed(ctx)) {
+            Diag.log("notify", "UPDATE not posted: notifications are off for Voxa")
+            return false
+        }
+        val t = noticeUpdateReady(version)
+        val open = PendingIntent.getActivity(
+            ctx, ID_UPDATE,
+            Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN, MainActivity.OPEN_UPDATE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val public = NotificationCompat.Builder(ctx, UPDATES.id).setSmallIcon(R.drawable.ic_notify).setContentTitle(noticeUpdatePublicTitle()).build()
+        val n = builder(ctx, UPDATES, t.title, t.body, true)
+            .setContentIntent(open)
+            .addAction(0, t.action ?: "Install", open)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPublicVersion(public)
+            .build()
+        if (!NotificationManagerCompat.from(ctx).safeNotify(ctx, ID_UPDATE, n)) return false
+        p.edit().putString("posted", noticeRecord(posted, now.toULong()).joinToString(",")).apply()
+        up.edit().putString("notified_for", version).apply()
+        return true
     }
 
     // ── posting ──────────────────────────────────────────────────────────────

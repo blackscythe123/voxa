@@ -157,6 +157,14 @@ class MainActivity : ComponentActivity() {
         if (intent.hasExtra("debug_now")) prefs.edit().putString("now", intent.getStringExtra("debug_now").orEmpty()).apply()
         // --es debug_name Alexandria: greet with this first name when no account is known ("" clears).
         if (intent.hasExtra("debug_name")) prefs.edit().putString("name", intent.getStringExtra("debug_name").orEmpty()).apply()
+        // --es debug_update_feed http://10.0.2.2:8765/feed/android.json --es debug_update_key <64 hex>:
+        // check a LOCAL test feed signed with a TEST key ("" clears). Release builds never get here.
+        if (intent.hasExtra("debug_update_feed")) {
+            val v = intent.getStringExtra("debug_update_feed").orEmpty()
+            prefs.edit().apply { if (v.isEmpty()) remove("update_feed") else putString("update_feed", v) }.commit()
+        }
+        if (intent.hasExtra("debug_update_key")) prefs.edit().putString("update_key", intent.getStringExtra("debug_update_key").orEmpty()).commit()
+        if (intent.getBooleanExtra("debug_update_check", false)) com.voxa.android.ui.checkNow(this)
         if (intent.hasExtra("debug_levels")) prefs.edit().putBoolean("levels", intent.getBooleanExtra("debug_levels", false)).apply()
         if (intent.hasExtra("debug_transcript")) {
             val t = intent.getStringExtra("debug_transcript").orEmpty()
@@ -181,6 +189,8 @@ class MainActivity : ComponentActivity() {
         Notifier.activityResumed = true
         tick.intValue++
         voxa.checkSession()
+        // Back from Android's "Install unknown apps" switch after the one tap ask.
+        com.voxa.android.ui.afterInstallGrant(this)
     }
 
     override fun onPause() {
@@ -289,6 +299,12 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
     }
 
+    /** Android's "Install unknown apps" switch for Voxa (onboarding, the tap ask, Settings). */
+    fun openInstallSettings() {
+        runCatching { startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) }
+            .onFailure { Diag.log("update", "no install settings screen: ${it.javaClass.simpleName}") }
+    }
+
     fun showKeyboardPicker() {
         getSystemService(InputMethodManager::class.java).showInputMethodPicker()
     }
@@ -311,6 +327,14 @@ class MainActivity : ComponentActivity() {
                 OPEN_MIC -> {
                     if (stack.lastOrNull() == Route.SignIn) back()
                     requestMic()
+                }
+                // A4's Install: the same path as the Home card's button.
+                OPEN_UPDATE -> {
+                    if (voxa.core.settings().onboarded && stack.lastOrNull() !is Route.Tabbed) {
+                        stack.clear()
+                        stack.add(Route.Tabbed(Tab.Home))
+                    }
+                    com.voxa.android.ui.installTapped(this)
                 }
                 OPEN_STORAGE -> {
                     stack.clear()
@@ -359,6 +383,8 @@ class MainActivity : ComponentActivity() {
         const val OPEN_ENTRY = "entry:"
         /** The birthday wish: Home, where the birthday doodle is today. */
         const val OPEN_HOME = "home"
+        /** A4: install the update that is ready. */
+        const val OPEN_UPDATE = "update"
 
         /** The launch animation plays once per process (a cold start). */
     }

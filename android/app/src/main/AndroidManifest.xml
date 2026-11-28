@@ -9,6 +9,9 @@
     <!-- Keeps the 12 h session check, the background send and the birthday wish's alarm
          scheduled after a restart. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Self update (docs/updates.md): Voxa hands a verified new version to PackageInstaller after
+         the user taps Install; Android asks once to allow it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
@@ -76,6 +79,16 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Self update: PackageInstaller's status for an update Voxa handed it, and the cleanup
+             after Voxa was replaced by its new version. Not exported. -->
+        <receiver
+            android:name=".notify.UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

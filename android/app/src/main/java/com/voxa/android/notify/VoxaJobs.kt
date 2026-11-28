@@ -92,6 +92,18 @@ class VoxaJobs : JobService() {
                 }
                 jobFinished(params, again)
             }
+            UPDATE_CHECK -> scope.launch {
+                runCatching { Updater.check(app, manual = false) }
+                    .onFailure { if (it is CancellationException) throw it; Diag.log("jobs", "update check failed: ${it.javaClass.simpleName}") }
+                jobFinished(params, false)
+            }
+            UPDATE_DOWNLOAD -> scope.launch {
+                val done = runCatching { Updater.download(app) }
+                    .onFailure { if (it is CancellationException) throw it; Diag.log("jobs", "update download failed: ${it.javaClass.simpleName}") }
+                    .getOrDefault(false)
+                // Not done: try again later with the backoff (the download restarts from zero).
+                jobFinished(params, !done)
+            }
             else -> return false
         }
         synchronized(running) { running[params.jobId] = job }
@@ -208,6 +220,11 @@ class VoxaJobs : JobService() {
         const val SESSION = 7101
         const val CONFIRM = 7102
         const val SEND = 7103
+        /** The update check (docs/updates.md): runs every 12 h, uses the network once a day. */
+        const val UPDATE_CHECK = 7104
+        /** Downloading a verified update: Wi-Fi only unless the user asked on mobile data. */
+        const val UPDATE_DOWNLOAD = 7105
+        const val UPDATE_CHECK_EVERY_MS = 12 * 60 * 60_000L
         /** A cap on real tries per entry (offline and unreachable answers); with JobScheduler's
          *  backoff (30 s doubling, at most 5 h) the 24 h age usually comes first. */
         const val MAX_ATTEMPTS = 12
@@ -244,6 +261,8 @@ class VoxaJobs : JobService() {
             SESSION -> "session check"
             CONFIRM -> "sign-in confirmation"
             SEND -> "background send"
+            UPDATE_CHECK -> "update check"
+            UPDATE_DOWNLOAD -> "update download"
             else -> "job $id"
         }
 
@@ -263,6 +282,47 @@ class VoxaJobs : JobService() {
                     .build(),
             )
             Diag.log("jobs", "session check every 12 h: ${if (r == JobScheduler.RESULT_SUCCESS) "scheduled" else "not scheduled"}")
+        }
+
+        /** The update check job: every 12 h on any network, battery not low, kept across restarts,
+         *  only while "Download updates automatically" is on. Cheap: the core returns at once when
+         *  no check is due, so the network is used at most once a day, at this install's slot. */
+        fun scheduleUpdateCheck(ctx: Context) {
+            val js = scheduler(ctx)
+            // Kept across updates; scheduled again only if this version wants a different period.
+            if (!Updater.auto(ctx) || js.getPendingJob(UPDATE_CHECK)?.intervalMillis == UPDATE_CHECK_EVERY_MS) return
+            val r = js.schedule(
+                JobInfo.Builder(UPDATE_CHECK, component(ctx))
+                    .setPeriodic(UPDATE_CHECK_EVERY_MS)
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .setRequiresBatteryNotLow(true)
+                    .setPersisted(true)
+                    .build(),
+            )
+            Diag.log("jobs", "update check job every 12 h: ${if (r == JobScheduler.RESULT_SUCCESS) "scheduled" else "not scheduled"}")
+        }
+
+        /** Download the offered update once there is Wi-Fi (`anyNetwork`: the user asked, on
+         *  mobile data too). Battery not low, exponential backoff, kept across restarts. Background
+         *  checks only call this with "Download updates automatically" on; a manual check may. */
+        fun scheduleUpdateDownload(ctx: Context, bytes: Long, anyNetwork: Boolean) {
+            val r = scheduler(ctx).schedule(updateDownloadJob(ctx, bytes, anyNetwork))
+            Diag.log("jobs", "update download ${if (anyNetwork) "on any network " else "on Wi-Fi only "}${if (r == JobScheduler.RESULT_SUCCESS) "scheduled" else "not scheduled"}")
+        }
+
+        fun updateDownloadJob(ctx: Context, bytes: Long, anyNetwork: Boolean): JobInfo =
+            JobInfo.Builder(UPDATE_DOWNLOAD, component(ctx))
+                .setRequiredNetworkType(if (anyNetwork) JobInfo.NETWORK_TYPE_ANY else JobInfo.NETWORK_TYPE_UNMETERED)
+                .setRequiresBatteryNotLow(true)
+                .setEstimatedNetworkBytes(bytes, 0L)
+                .setBackoffCriteria(60_000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+                .setPersisted(true)
+                .build()
+
+        /** "Download updates automatically" was turned off: no update jobs at all. */
+        fun cancelUpdateJobs(ctx: Context) {
+            scheduler(ctx).cancel(UPDATE_CHECK)
+            scheduler(ctx).cancel(UPDATE_DOWNLOAD)
         }
 
         /** Confirm a definite "signed out" about 2 minutes from now. */
