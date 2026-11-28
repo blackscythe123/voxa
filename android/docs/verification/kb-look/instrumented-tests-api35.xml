@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuite name="com.voxa.android.CoreFfiTest" tests="12" failures="0" errors="0" skipped="0" time="22.228" timestamp="2026-11-28T09:22:13" hostname="localhost">
+  <properties>
+    <property name="device" value="voxa_kblook_api35(AVD) - 15" />
+    <property name="flavor" value="" />
+    <property name="project" value=":app" />
+  </properties>
+  <testcase name="spikeChatGptReachableFromRust" classname="com.voxa.android.CoreFfiTest" time="20.975" />
+  <testcase name="passwordFieldsAreBlocked" classname="com.voxa.android.CoreFfiTest" time="0.0" />
+  <testcase name="nativeLibraryLoads" classname="com.voxa.android.CoreFfiTest" time="0.0" />
+  <testcase name="appScreensReadStatsCountsAndWaveformsFromTheCore" classname="com.voxa.android.CoreFfiTest" time="0.023" />
+  <testcase name="flowRoundTripInsertsAndSavesHistory" classname="com.voxa.android.CoreFfiTest" time="0.028" />
+  <testcase name="textPipelineRunsInRust" classname="com.voxa.android.CoreFfiTest" time="0.003" />
+  <testcase name="everyPresetReads" classname="com.voxa.android.KeyboardLookTest" time="0.004" />
+  <testcase name="aPhotoIsCopiedAndItsStrengthIsCappedForReading" classname="com.voxa.android.KeyboardLookTest" time="0.335" />
+  <testcase name="aBrokenPhotoFallsBackToVoxaWithoutCrashing" classname="com.voxa.android.KeyboardLookTest" time="0.055" />
+  <testcase name="everyChangeBumpsTheVersion" classname="com.voxa.android.KeyboardLookTest" time="0.003" />
+  <testcase name="theVoxaLookIsTheV6Palette" classname="com.voxa.android.KeyboardLookTest" time="0.004" />
+  <testcase name="aMicThatDoesNotStandOutGetsATextRing" classname="com.voxa.android.KeyboardLookTest" time="0.002" />
+</testsuite>
