@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Stroke icon from docs/ui-mocks/v5-app-redesign.html (tinted where used). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
-    android:viewportWidth="24" android:viewportHeight="24"
-    android:tint="?android:attr/colorControlNormal">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M8,6h8c1.1,0 2,0.9 2,2v8c0,1.1 -0.9,2 -2,2H8c-1.1,0 -2,-0.9 -2,-2V8c0,-1.1 0.9,-2 2,-2z"/>
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M9,7h6a2,2 0 0,1 2,2v6a2,2 0 0,1 -2,2h-6a2,2 0 0,1 -2,-2v-6a2,2 0 0,1 2,-2z" android:fillColor="#FFFFFFFF"/>
 </vector>

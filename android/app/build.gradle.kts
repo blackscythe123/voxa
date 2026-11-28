@@ -82,8 +82,8 @@ android {
         applicationId = "com.voxa.android"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 5
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-test-rules.pro")
         // Only the ABIs the Rust core is built for, so no device installs an APK without it.
@@ -162,6 +162,8 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.material3)
+    // The Android 12+ splash screen, back-ported (a few KB): paper background, then the ink line.
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.kotlinx.coroutines.android)
     // UniFFI's Kotlin bindings call the Rust library through JNA.
     implementation("${libs.jna.get()}@aar")

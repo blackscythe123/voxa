@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Edge to edge: Compose draws behind the bars (MainActivity.enableEdgeToEdge). -->
     <style name="Theme.Voxa" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/surface</item>
-        <item name="android:statusBarColor">@color/surface</item>
-        <item name="android:navigationBarColor">@color/surface</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">@color/paper</item>
         <item name="android:colorAccent">@color/ink</item>
+    </style>
+
+    <!-- Android 12+ system splash on the same paper colour, so Voxa's ink line takes over seamlessly. -->
+    <style name="Theme.Voxa.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/paper</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.Voxa</item>
     </style>
 </resources>

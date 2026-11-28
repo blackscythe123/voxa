@@ -1,15 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- docs/ui-mocks/v7.1-native.html, Android: warm paper neutrals, sepia ink. -->
+    <!-- docs/ui-mocks/v5-app-redesign.html palette (light). Dark values in values-night. -->
+    <color name="paper">#F7F3EC</color>
     <color name="ink">#8F4C2C</color>
-    <color name="ink_container">#F6DCCB</color>
-    <color name="surface">#FBF8F4</color>
-    <color name="surface_low">#F6F2EC</color>
-    <color name="surface_container">#F1ECE5</color>
-    <color name="surface_high">#EBE5DD</color>
-    <color name="key">#FDFBF8</color>
-    <color name="on_surface">#1F1B16</color>
-    <color name="on_surface_variant">#4E463D</color>
-    <color name="outline_variant">#D3C9BD</color>
-    <color name="pen">#2D2418</color>
 </resources>

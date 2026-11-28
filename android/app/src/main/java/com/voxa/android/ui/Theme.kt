@@ -1,191 +1,139 @@
 package com.voxa.android.ui
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Button
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voxa.android.R
 
-/** Voxa v7: native Material 3 with warm paper neutrals and sepia ink (desktop home.rs colours). */
-object V {
-    val Ink = Color(0xFF8F4C2C)
-    val InkHover = Color(0xFF7C4125)
-    val InkContainer = Color(0xFFF6DCCB)
-    val Page = Color(0xFFFBF8F4)
-    val Nav = Color(0xFFF1EEEA)
-    val Card = Color.White
-    val CardBorder = Color(0x14000000)
-    val Text = Color(0xFF1A1A1A)
-    val Muted = Color(0xFF5F5F5F)
-    val Ready = Color(0xFF0E5C0E)
-    val Warn = Color(0xFF9D5D00)
-    val WarnBg = Color(0xFFFFF4CE)
-    val Error = Color(0xFFBA1A1A)
-    val ErrorBg = Color(0xFFFDE7E9)
-    val Fraunces = FontFamily(Font(R.font.fraunces, FontWeight.SemiBold))
-}
-
-private val colors = lightColorScheme(
-    primary = V.Ink,
-    onPrimary = Color.White,
-    primaryContainer = V.InkContainer,
-    onPrimaryContainer = Color(0xFF3A1A08),
-    secondaryContainer = Color(0xFFECE3D8),
-    onSecondaryContainer = Color(0xFF2A221A),
-    background = V.Page,
-    onBackground = V.Text,
-    surface = V.Page,
-    onSurface = V.Text,
-    surfaceVariant = Color(0xFFF1ECE5),
-    onSurfaceVariant = Color(0xFF4E463D),
-    surfaceContainer = Color(0xFFF1ECE5),
-    surfaceContainerHigh = Color(0xFFEBE5DD),
-    surfaceContainerHighest = Color(0xFFE5DED5),
-    outline = Color(0xFF80766B),
-    outlineVariant = Color(0xFFD3C9BD),
-    error = V.Error,
-    errorContainer = Color(0xFFFFDAD6),
+/**
+ * The v5 tokens (docs/ui-mocks/v5-app-redesign.html): paper, wash, card, sepia ink, night text.
+ * Dark follows the mockup's dark keyboard: warm near-black paper and the pale ink #E2B48F.
+ */
+@Immutable
+data class VxColors(
+    val paper: Color,
+    val wash: Color,
+    val card: Color,
+    val ink: Color,
+    val onInk: Color,
+    val inkSoft: Color,
+    val night: Color,
+    val graphite: Color,
+    val hair: Color,
+    val leaf: Color,
+    val amber: Color,
+    val readyBg: Color,
+    val readyText: Color,
+    val warnBg: Color,
+    val warnText: Color,
+    val notText: Color,
+    val danger: Color,
+    val dangerBg: Color,
+    val hintText: Color,
+    val switchOff: Color,
+    // The practice pad (dark in both themes).
+    val pad: Color,
+    val padText: Color,
+    val padMuted: Color,
+    val padInk: Color,
+    val dark: Boolean,
 )
 
-@Composable
-fun VoxaTheme(content: @Composable () -> Unit) {
-    val base = Typography()
-    MaterialTheme(
-        colorScheme = colors,
-        typography = base.copy(
-            bodyLarge = base.bodyLarge.copy(fontSize = 15.sp, lineHeight = 21.sp),
-            bodyMedium = base.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
-        ),
-        content = content,
+val LightVx = VxColors(
+    paper = Color(0xFFF7F3EC), wash = Color(0xFFEFE6DA), card = Color(0xFFFFFDF9),
+    ink = Color(0xFF8F4C2C), onInk = Color.White, inkSoft = Color(0xFFE9D5C6),
+    night = Color(0xFF1E1A17), graphite = Color(0xFF6B625A), hair = Color(0xFFE2D8CB),
+    leaf = Color(0xFF3F7A55), amber = Color(0xFFA9701B),
+    readyBg = Color(0xFFE4EFE6), readyText = Color(0xFF24503A),
+    warnBg = Color(0xFFF6E7CC), warnText = Color(0xFF7A4F0E), notText = Color(0xFF5B4636),
+    danger = Color(0xFF9B2C1F), dangerBg = Color(0xFFF6E1DC), hintText = Color(0xFF4A3D33),
+    switchOff = Color(0xFFD6CCBF),
+    pad = Color(0xFF1E1A17), padText = Color(0xFFFBF5EC), padMuted = Color(0xFFC9B9A8), padInk = Color(0xFFE2B48F),
+    dark = false,
+)
+
+val DarkVx = VxColors(
+    paper = Color(0xFF141110), wash = Color(0xFF24201C), card = Color(0xFF1C1815),
+    ink = Color(0xFFE2B48F), onInk = Color(0xFF1C1815), inkSoft = Color(0xFF3B2E25),
+    night = Color(0xFFEFE6DA), graphite = Color(0xFFA99886), hair = Color(0xFF2C2621),
+    leaf = Color(0xFF7DBF94), amber = Color(0xFFDDA75A),
+    readyBg = Color(0xFF1F3326), readyText = Color(0xFFA9D8B7),
+    warnBg = Color(0xFF3A2C14), warnText = Color(0xFFE8C58A), notText = Color(0xFFC9B9A8),
+    danger = Color(0xFFEC9A8B), dangerBg = Color(0xFF3A1F1A), hintText = Color(0xFFC9B9A8),
+    switchOff = Color(0xFF4A4038),
+    pad = Color(0xFF26211D), padText = Color(0xFFFBF5EC), padMuted = Color(0xFFA99886), padInk = Color(0xFFE2B48F),
+    dark = true,
+)
+
+val LocalVx = staticCompositionLocalOf { LightVx }
+
+object Fonts {
+    /** Wordmark, screen titles, the dictation text. Only the 600 weight is bundled. */
+    val Fraunces = FontFamily(Font(R.font.fraunces, FontWeight.SemiBold))
+    val Figtree = FontFamily(
+        Font(R.font.figtree_regular, FontWeight.Normal),
+        Font(R.font.figtree_medium, FontWeight.Medium),
+        Font(R.font.figtree_semibold, FontWeight.SemiBold),
     )
 }
 
-/** The "voxa" wordmark in Fraunces, as on the desktop. */
-@Composable
-fun Wordmark(size: Int = 30) {
-    Text("voxa", style = TextStyle(fontFamily = V.Fraunces, fontWeight = FontWeight.SemiBold, fontSize = size.sp, color = V.Text, letterSpacing = (-0.5).sp))
-}
-
-/** The desktop's card(): white, thin warm border, 4 px radius. */
-@Composable
-fun VCard(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable RowScope.() -> Unit) {
-    val shape = RoundedCornerShape(4.dp)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .clip(shape)
-            .background(V.Card)
-            .border(1.dp, V.CardBorder, shape)
-            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        content = content,
-    )
-}
+/** Shorthand for the current palette. */
+val vx: VxColors @Composable get() = LocalVx.current
 
 @Composable
-fun VColumnCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(4.dp)
-    Column(
-        modifier.fillMaxWidth().clip(shape).background(V.Card).border(1.dp, V.CardBorder, shape).padding(16.dp),
-        content = content,
-    )
-}
-
-@Composable
-fun Section(title: String) {
-    Text(title, Modifier.padding(top = 24.dp, bottom = 8.dp), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = V.Text)
-}
-
-/** The desktop's wbtn(): accent (ink) or plain, 4 px radius. */
-@Composable
-fun VButton(label: String, accent: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(4.dp)
-    val pad = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
-    if (accent) {
-        Button(onClick, enabled = enabled, shape = shape, contentPadding = pad, modifier = Modifier.heightIn(min = 36.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = V.Ink, contentColor = Color.White)) { Text(label, fontSize = 14.sp) }
+fun VoxaTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+    val c = if (dark) DarkVx else LightVx
+    val scheme = if (dark) {
+        darkColorScheme(
+            primary = c.ink, onPrimary = c.onInk, primaryContainer = c.inkSoft, onPrimaryContainer = c.night,
+            secondaryContainer = c.inkSoft, onSecondaryContainer = c.night,
+            background = c.paper, onBackground = c.night, surface = c.paper, onSurface = c.night,
+            surfaceVariant = c.wash, onSurfaceVariant = c.graphite,
+            surfaceContainerLowest = c.card, surfaceContainerLow = c.card, surfaceContainer = c.card,
+            surfaceContainerHigh = c.card, surfaceContainerHighest = c.wash,
+            outline = c.graphite, outlineVariant = c.hair, error = c.danger, errorContainer = c.dangerBg,
+        )
     } else {
-        OutlinedButton(onClick, enabled = enabled, shape = shape, contentPadding = pad, modifier = Modifier.heightIn(min = 36.dp),
-            border = BorderStroke(1.dp, Color(0x1A000000)),
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = V.Text)) { Text(label, fontSize = 14.sp) }
+        lightColorScheme(
+            primary = c.ink, onPrimary = c.onInk, primaryContainer = c.inkSoft, onPrimaryContainer = c.night,
+            secondaryContainer = c.inkSoft, onSecondaryContainer = c.night,
+            background = c.paper, onBackground = c.night, surface = c.paper, onSurface = c.night,
+            surfaceVariant = c.wash, onSurfaceVariant = c.graphite,
+            surfaceContainerLowest = c.card, surfaceContainerLow = c.card, surfaceContainer = c.card,
+            surfaceContainerHigh = c.card, surfaceContainerHighest = c.wash,
+            outline = c.graphite, outlineVariant = c.hair, error = c.danger, errorContainer = c.dangerBg,
+        )
     }
-}
-
-@Composable
-fun VToggle(on: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(if (on) "On" else "Off", fontSize = 14.sp, color = V.Text)
-        Spacer(Modifier.width(12.dp))
-        Switch(on, onChange, colors = SwitchDefaults.colors(checkedTrackColor = V.Ink, checkedThumbColor = Color.White))
-    }
-}
-
-/** A round icon chip on the left of a card. */
-@Composable
-fun CardIcon(res: Int, tint: Color = V.Ink) {
-    Box(Modifier.size(36.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFFF6F2EC)), contentAlignment = Alignment.Center) {
-        Icon(painterResource(res), null, Modifier.size(20.dp), tint = tint)
-    }
-}
-
-/** Fluent-style InfoBar: what needs the user, on top of the page. */
-@Composable
-fun InfoBar(title: String, detail: String? = null, error: Boolean = false, action: String? = null, onAction: () -> Unit = {}) {
-    val shape = RoundedCornerShape(4.dp)
-    Row(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(shape).background(if (error) V.ErrorBg else V.WarnBg).border(1.dp, V.CardBorder, shape)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(painterResource(R.drawable.ic_alert), null, Modifier.size(18.dp), tint = if (error) V.Error else V.Warn)
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = V.Text)
-            if (detail != null) Text(detail, fontSize = 13.sp, color = V.Muted)
+    val base = Typography()
+    val f = Fonts.Figtree
+    val type = Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = f), displayMedium = base.displayMedium.copy(fontFamily = f),
+        displaySmall = base.displaySmall.copy(fontFamily = f), headlineLarge = base.headlineLarge.copy(fontFamily = f),
+        headlineMedium = base.headlineMedium.copy(fontFamily = f), headlineSmall = base.headlineSmall.copy(fontFamily = Fonts.Fraunces, fontWeight = FontWeight.SemiBold),
+        titleLarge = base.titleLarge.copy(fontFamily = f, fontWeight = FontWeight.SemiBold), titleMedium = base.titleMedium.copy(fontFamily = f, fontWeight = FontWeight.SemiBold),
+        titleSmall = base.titleSmall.copy(fontFamily = f, fontWeight = FontWeight.SemiBold),
+        bodyLarge = base.bodyLarge.copy(fontFamily = f, fontSize = 15.sp, lineHeight = 21.sp),
+        bodyMedium = base.bodyMedium.copy(fontFamily = f, fontSize = 14.sp, lineHeight = 20.sp),
+        bodySmall = base.bodySmall.copy(fontFamily = f),
+        labelLarge = base.labelLarge.copy(fontFamily = f, fontWeight = FontWeight.SemiBold),
+        labelMedium = base.labelMedium.copy(fontFamily = f), labelSmall = base.labelSmall.copy(fontFamily = f),
+    )
+    CompositionLocalProvider(LocalVx provides c) {
+        MaterialTheme(colorScheme = scheme, typography = type) {
+            CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = f, color = c.night, fontSize = 15.sp), content = content)
         }
-        if (action != null) VButton(action, onClick = onAction)
     }
-}
-
-@Composable
-fun Muted(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, fontSize = 13.sp, color = V.Muted)
 }
