@@ -1,0 +1,156 @@
+voxa-nudge neuroevolution: population 96, 100 generations, seed 1
+network: 15 inputs (incl. bias), 6 hidden max, 5 outputs, 195 possible connections
+simulator: 5000 training users (all of them every generation), 1500 validation, 5000 held-out test
+
+gen   best    mean    params hidden
+  0  10.755  10.210      25      2
+  1  10.787  10.392      25      5
+  2  10.872  10.468      24      5
+  3  11.285  10.572      24      3
+  4  11.285  10.669      24      3
+  5  11.285  10.763      24      3
+  6  11.289  10.801      23      3
+  7  11.542  10.843      23      3
+  8  11.542  10.720      23      3
+  9  11.542  10.797      23      3
+ 10  11.542  10.823      23      3
+ 11  11.554  10.870      23      3
+ 12  11.560  10.878      22      2
+ 13  11.560  10.888      22      2
+ 14  11.597  10.875      22      2
+ 15  11.597  10.991      22      2
+ 16  11.597  10.932      22      2
+ 17  11.620  10.911      22      2
+ 18  11.620  10.935      22      2
+ 19  11.623  10.909      23      2
+ 20  11.623  10.858      23      2
+ 21  11.623  10.925      23      2
+ 22  11.668  10.920      24      2
+ 23  11.668  10.873      24      2
+ 24  11.668  11.066      24      2
+ 25  11.668  10.956      24      2
+ 26  11.668  10.926      24      2
+ 27  11.668  10.927      24      2
+ 28  11.668  10.812      24      2
+ 29  11.669  10.925      24      3
+ 30  11.669  10.994      24      3
+ 31  11.669  10.911      24      3
+ 32  11.669  10.909      24      3
+ 33  11.669  10.964      24      3
+ 34  11.669  10.924      24      3
+ 35  11.669  10.943      24      3
+ 36  11.669  10.904      24      3
+ 37  11.669  10.952      24      3
+ 38  11.669  10.923      24      3
+ 39  11.669  10.959      24      3
+ 40  11.669  10.990      24      3
+ 41  11.671  10.955      24      3
+ 42  11.671  11.012      24      3
+ 43  11.671  10.946      24      3
+ 44  11.671  10.931      24      3
+ 45  11.671  10.947      24      3
+ 46  11.671  11.005      24      3
+ 47  11.671  10.980      24      3
+ 48  11.671  10.998      24      3
+ 49  11.671  10.929      24      3
+ 50  11.671  10.958      24      3
+ 51  11.671  11.021      24      3
+ 52  11.671  11.052      24      3
+ 53  11.671  11.121      24      3
+ 54  11.671  11.034      24      3
+ 55  11.671  11.029      24      3
+ 56  11.671  11.014      24      3
+ 57  11.671  11.074      24      3
+ 58  11.671  10.994      24      3
+ 59  11.671  11.004      24      3
+ 60  11.671  10.928      24      3
+ 61  11.671  10.982      24      3
+ 62  11.671  10.914      24      3
+ 63  11.671  10.993      24      3
+ 64  11.672  10.958      24      3
+ 65  11.672  11.012      24      3
+ 66  11.672  10.938      24      3
+ 67  11.672  10.983      24      3
+ 68  11.672  11.027      24      3
+ 69  11.672  11.018      24      3
+ 70  11.672  11.055      24      3
+ 71  11.672  11.031      24      3
+ 72  11.672  11.034      24      3
+ 73  11.672  11.003      24      3
+ 74  11.672  10.916      24      3
+ 75  11.672  11.062      24      3
+ 76  11.672  11.074      24      3
+ 77  11.672  11.126      24      3
+ 78  11.672  11.129      24      3
+ 79  11.672  11.041      24      3
+ 80  11.672  11.101      24      3
+ 81  11.672  11.159      24      3
+ 82  11.672  11.195      24      3
+ 83  11.672  11.137      24      3
+ 84  11.672  11.126      24      3
+ 85  11.672  11.203      24      3
+ 86  11.672  11.148      24      3
+ 87  11.672  11.227      24      3
+ 88  11.672  11.178      24      3
+ 89  11.672  11.165      24      3
+ 90  11.672  11.157      24      3
+ 91  11.672  11.242      24      3
+ 92  11.672  11.193      24      3
+ 93  11.672  11.256      24      3
+ 94  11.672  11.306      24      3
+ 95  11.672  11.263      24      3
+ 96  11.672  11.273      24      3
+ 97  11.672  11.241      24      3
+ 98  11.672  11.190      24      3
+ 99  11.672  11.262      24      3
+evolution took 82.3 s
+champion: validation score 11.472, 24 connections, 3 hidden nodes
+pruning: 24 -> 13 connections, validation score 11.472 -> 11.472 (after rounding: 11.472)
+saved model/champion.json (661 bytes) and model/learning_curve.csv
+inference: 84 ns per decision (checksum 383071.2)
+
+held-out test: 5000 simulated users, 28 reminder days each
+
+| Policy | Score per user | Active days per user | Reminders per user | Open rate | Dismissals per user | Opted out | Night sends per user | Lapsed at end |
+|---|---|---|---|---|---|---|---|---|
+| Never remind | 10.07 | 10.07 | 0.00 | 0% | 0.00 | 0.0% | 0.00 | 26.2% |
+| Fixed 19:00 every 3 days, no rules | 3.57 | 9.11 | 10.00 | 5% | 2.25 | 65.3% | 0.00 | 29.4% |
+| Fixed 19:00 every 3 days + rules | 9.52 | 10.43 | 4.28 | 9% | 1.09 | 12.2% | 0.00 | 25.7% |
+| Random (1 in 27 checks), no rules | -0.12 | 8.69 | 9.32 | 2% | 1.55 | 84.7% | 3.09 | 32.1% |
+| Random (1 in 10 checks) + rules | 9.76 | 10.36 | 2.82 | 8% | 0.69 | 8.3% | 0.00 | 25.1% |
+| Heuristic: usual hour + rules | 10.94 | 11.51 | 3.83 | 22% | 0.87 | 3.9% | 0.00 | 20.3% |
+| First allowed moment + rules | 9.97 | 10.91 | 4.79 | 13% | 1.15 | 11.8% | 0.00 | 23.9% |
+| Evolved network + rules | 11.40 | 11.95 | 3.94 | 27% | 0.85 | 3.3% | 0.00 | 17.7% |
+| Evolved network + bandit + rules | 11.23 | 11.73 | 3.67 | 25% | 0.78 | 2.9% | 0.00 | 19.1% |
+| Heuristic: usual hour, tip wording + rules | 11.38 | 11.94 | 3.89 | 27% | 0.84 | 3.8% | 0.00 | 17.6% |
+
+evolved network + rules minus baseline, score per user, held-out (mean and 95% interval):
+  vs Never remind                                 +1.32 [+1.24, +1.41]
+  vs Fixed 19:00 every 3 days + rules             +1.87 [+1.78, +1.96]
+  vs Heuristic: usual hour + rules                +0.46 [+0.40, +0.52]
+  vs Heuristic: usual hour, tip wording + rules   +0.02 [-0.03, +0.06]
+  vs Evolved network + bandit + rules             +0.17 [+0.12, +0.21]
+
+by segment (score per user, held-out):
+
+| Segment | Users | Never | Fixed 19:00 + rules | Usual hour + rules | Evolved + rules | Evolved + bandit |
+|---|---|---|---|---|---|---|
+| Morning people | 1050 | 11.69 | 10.24 | 12.98 | 13.44 | 13.21 |
+| Midday | 791 | 11.23 | 10.22 | 12.29 | 12.99 | 12.77 |
+| Evening people | 1112 | 11.43 | 12.72 | 12.61 | 13.17 | 12.93 |
+| Weekday only | 753 | 7.54 | 5.90 | 8.32 | 8.86 | 8.72 |
+| Weekend users | 496 | 3.36 | 2.53 | 3.67 | 3.87 | 3.77 |
+| Night owls | 798 | 11.49 | 11.21 | 11.59 | 11.73 | 11.73 |
+| Lapsing | 1799 | 5.53 | 5.31 | 6.77 | 7.98 | 7.43 |
+| Dislike notifications | 775 | 10.27 | 6.06 | 8.70 | 8.96 | 9.08 |
+
+evolved network's wording mix: plain 0%, progress 9%, tip 91%, quiet 0% (users reminded at least once: 845 of 1000)
+
+on-device personalisation (held-out, 2000 users, score per user per 28 days):
+
+| World | Reminder days | Network | Network + bandit | Network open rate | Network + bandit open rate |
+|---|---|---|---|---|---|
+| as trained | 28 | 11.37 | 11.22 | 27.0% | 26.2% |
+| as trained | 182 | 10.43 | 10.13 | 26.8% | 26.8% |
+| shifted | 28 | 9.00 | 9.27 | 1.8% | 4.6% |
+| shifted | 182 | 7.34 | 8.15 | 1.8% | 6.1% |
