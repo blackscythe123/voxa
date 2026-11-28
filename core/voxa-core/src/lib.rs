@@ -14,10 +14,14 @@
 //! ChatGPT, paste, show the strip). The core never does I/O itself, so every rule is unit-tested.
 
 pub mod copy;
+pub mod doodle;
 pub mod error;
 pub mod flow;
+pub mod greeting;
 pub mod job;
 pub mod readiness;
+pub mod splash;
+pub mod svgpath;
 pub mod text;
 pub mod trim;
 
