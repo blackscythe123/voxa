@@ -15,10 +15,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
-use gpui::{AnyElement, Context, FontWeight, Window, div, prelude::*, px, rgb, rgba};
+use gpui::{AnyElement, Context, FontWeight, Window, div, prelude::*, px, rgb};
 use voxa_core::splash as sp;
 
-use super::{Home, PAGE_BG, TEXT};
+use super::{Home, MUTED, PAGE_BG, TEXT};
 use crate::INK;
 use crate::greet;
 use crate::pen::{self, Art, Splash, SplashColors};
@@ -173,7 +173,7 @@ impl Home {
             return None;
         }
         window.request_animation_frame();
-        let colors = SplashColors { paper: rgb(PAGE_BG).into(), ink: rgb(TEXT).into(), nib: rgb(INK).into(), desc: rgba((TEXT << 8) | 0xB8).into() };
+        let colors = SplashColors { paper: rgb(PAGE_BG).into(), ink: rgb(TEXT).into(), nib: rgb(INK).into(), desc: rgb(MUTED).into() };
         let art = pen::splash(s.pen.clone(), if s.reduced { None } else { Some(t.min(sp::TOTAL_MS)) }, colors);
         let shift = (0.62 - 0.5) * (sp::BOX_H + 40.0) * pen::SPLASH_SCALE * 2.0;
         Some(
