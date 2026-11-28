@@ -4,7 +4,7 @@
 //! K2 is the offline backup (never in CI). docs/update-keys.md has the owner commands that make
 //! them and the rotation plan.
 //!
-//! PLACEHOLDERS: until the owner pastes the real keys, both are all zeros. An all-zero key never
+//! The real keys (owner, 2026-11-28). Before that both were all-zero placeholders. An all-zero key never
 //! verifies anything, the build prints a warning, and a release build fails: VOXA_RELEASE_BUILD=1
 //! (CI tags, every Android release build) in build.rs, and the Windows installer in voxa.iss,
 //! unless the explicit dev flag is set (VOXA_ALLOW_PLACEHOLDER_KEYS=1, /DAllowPlaceholderKeys).
@@ -12,9 +12,9 @@
 //! too. Never publish a build until the real keys are committed (docs/update-keys.md).
 
 /// K1, active (64 hex characters).
-pub const K1_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+pub const K1_HEX: &str = "d5dcc61b47367f71ce5f0d49d0d6164191520dc8df62706ffdc9060436c43e63";
 /// K2, offline backup (64 hex characters).
-pub const K2_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+pub const K2_HEX: &str = "bd6d08109c326f3f4c20e123cda50afb88c187a7ec81bb2a0209fc290e04592a";
 
 /// `(key_id, Ed25519 public key)`. The envelope's `key_id` picks one.
 pub const KEYS: [(u8, [u8; 32]); 2] = [(1, hex32(K1_HEX)), (2, hex32(K2_HEX))];
