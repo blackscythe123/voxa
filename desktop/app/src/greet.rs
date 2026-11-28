@@ -51,7 +51,7 @@ pub struct Header {
     pub play: bool,
 }
 
-pub fn header(entries: &[Entry], name: Option<String>) -> Header {
+pub fn header(entries: &[Entry], name: Option<String>, birthday: Option<greeting::MonthDay>) -> Header {
     let dir = crate::data_dir();
     let now = now();
     let today = date_of(now.date());
@@ -64,7 +64,7 @@ pub fn header(entries: &[Entry], name: Option<String>) -> Header {
         today,
         minutes: (now.hour() * 60 + now.minute()) as u16,
         name,
-        birthday: None,
+        birthday,
         installed,
         first_open: false,
         usage: ledger.usage(),

@@ -285,6 +285,12 @@ pub struct Settings {
     pub keep_audio_days: u32,
     /// Light, dark, or whatever the system uses (the default).
     pub appearance: Appearance,
+    /// "Your birthday": month 1..12 and day, 0 when not added. Day and month only, never the year;
+    /// it stays on this PC.
+    pub birthday_month: u8,
+    pub birthday_day: u8,
+    /// "Wish me on my birthday": a notification at midnight on the day. On by default.
+    pub birthday_wish: bool,
 }
 
 /// The "Appearance" choice in Settings. Stored as "system", "light" or "dark"; anything else
@@ -334,11 +340,22 @@ impl<'de> Deserialize<'de> for Appearance {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0, appearance: Appearance::System }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0, appearance: Appearance::System, birthday_month: 0, birthday_day: 0, birthday_wish: true }
     }
 }
 
 impl Settings {
+    /// The birthday, if one was added and it is a real day of the year.
+    pub fn birthday(&self) -> Option<voxa_core::greeting::MonthDay> {
+        Some(voxa_core::greeting::MonthDay { month: self.birthday_month, day: self.birthday_day }).filter(|b| b.valid())
+    }
+
+    /// "14 March".
+    pub fn birthday_label(month: u8, day: u8) -> String {
+        const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        format!("{day} {}", MONTHS.get(month.wrapping_sub(1) as usize).unwrap_or(&""))
+    }
+
     /// Settings, or the defaults if they can't be read (logged). Use `try_load` where a failed
     /// read must not act like defaults (pruning, importing, saving).
     pub fn load(dir: &Path) -> Self {
@@ -629,6 +646,21 @@ pub fn nice_ticks(max: f32) -> Vec<f32> {
     (0..=((top / step).round() as usize)).map(|i| i as f32 * step).collect()
 }
 
+/// Settings' birthday steppers: `field` 0 moves the day (wrapping within the month, 29 February
+/// allowed), 1 the month (the day kept within the new month).
+pub fn step_birthday(s: &mut Settings, field: u8, delta: i32) {
+    let days = |m: u8| voxa_core::greeting::days_in_month(2024, m) as i32;
+    let (mut m, mut d) = (s.birthday_month.clamp(1, 12) as i32, s.birthday_day.max(1) as i32);
+    if field == 0 {
+        d = (d - 1 + delta).rem_euclid(days(m as u8)) + 1;
+    } else {
+        m = (m - 1 + delta).rem_euclid(12) + 1;
+        d = d.min(days(m as u8));
+    }
+    s.birthday_month = m as u8;
+    s.birthday_day = d as u8;
+}
+
 #[cfg(test)]
 mod load_tests {
     use super::*;
@@ -638,6 +670,40 @@ mod load_tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn a_birthday_is_kept_in_settings_as_day_and_month_with_the_wish_on_by_default() {
+        let d = tmp("birthday");
+        // Older settings files have no birthday: none, and the wish defaults to on.
+        std::fs::write(d.join("settings.json"), br#"{"onboarded": true}"#).unwrap();
+        let s = Settings::load(&d);
+        assert_eq!((s.birthday(), s.birthday_wish), (None, true));
+        let s = Settings::update(&d, |s| {
+            s.birthday_month = 2;
+            s.birthday_day = 29;
+        })
+        .unwrap();
+        assert_eq!(Settings::load(&d).birthday(), Some(voxa_core::greeting::MonthDay { month: 2, day: 29 }));
+        assert_eq!(Settings::birthday_label(s.birthday_month, s.birthday_day), "29 February");
+        let raw = std::fs::read_to_string(d.join("settings.json")).unwrap();
+        assert!(raw.contains("\"birthday_month\": 2") && !raw.contains("year"), "{raw}");
+        // Not a real day: no birthday.
+        Settings::update(&d, |s| s.birthday_day = 31).unwrap();
+        assert_eq!(Settings::load(&d).birthday(), None);
+    }
+
+    #[test]
+    fn the_birthday_steppers_wrap_and_keep_the_day_inside_the_month() {
+        let mut s = Settings { birthday_month: 1, birthday_day: 31, ..Settings::default() };
+        step_birthday(&mut s, 0, 1);
+        assert_eq!((s.birthday_month, s.birthday_day), (1, 1));
+        step_birthday(&mut s, 0, -1);
+        assert_eq!((s.birthday_month, s.birthday_day), (1, 31));
+        step_birthday(&mut s, 1, 1);
+        assert_eq!((s.birthday_month, s.birthday_day), (2, 29), "29 February is a birthday");
+        step_birthday(&mut s, 1, -2);
+        assert_eq!((s.birthday_month, s.birthday_day), (12, 29));
     }
 
     #[test]

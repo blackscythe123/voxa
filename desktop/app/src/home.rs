@@ -47,6 +47,7 @@ const I_STOP: char = '\u{E71A}';
 const I_RETRY: char = '\u{E72C}';
 const I_FOLDER: char = '\u{E838}';
 const I_SORT: char = '\u{E8CB}';
+const I_GIFT: char = '\u{E88C}';
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Page {
@@ -1830,6 +1831,76 @@ impl Home {
         out
     }
 
+    /// "Your birthday" (day and month, optional) and, once added, "Wish me on my birthday": the
+    /// same rows as Android's Settings. Stored in settings.json; the tray shows the wish.
+    fn birthday_rows(&self, s: &Settings, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let text = |h: &str, sub: String| {
+            div().flex_1().min_w(px(0.)).child(div().text_size(px(14.)).line_height(px(20.)).child(h.to_string())).child(div().mt(px(1.)).text_size(px(12.)).line_height(px(16.)).text_color(rgb(p().muted)).child(sub))
+        };
+        let Some(b) = s.birthday() else {
+            return vec![
+                card()
+                    .mb(px(3.))
+                    .child(icon(I_GIFT, 18.).w(px(20.)))
+                    .child(text("Your birthday", "Voxa will wish you on the day. Day and month only, and it stays on this PC.".into()))
+                    .child(wbtn("bday-add", "Add", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.voxa.update(cx, |v, cx| {
+                            v.update_settings(
+                                |s| {
+                                    s.birthday_month = 1;
+                                    s.birthday_day = 1;
+                                },
+                                cx,
+                            )
+                        })
+                    })))
+                    .into_any_element(),
+            ];
+        };
+        let step = |field: u8, delta: i32| {
+            move |this: &mut Self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                this.voxa.update(cx, |v, cx| v.update_settings(|s| store::step_birthday(s, field, delta), cx));
+            }
+        };
+        let label = Settings::birthday_label(b.month, b.day);
+        let month = label.split_once(' ').map(|(_, m)| m.to_string()).unwrap_or_default();
+        let stepper = |id: &str, value: String, w: f32, field: u8, tips: (&'static str, &'static str), cx: &mut Context<Self>| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .child(self.icon_btn(format!("{id}-prev"), I_PREV, tips.0, false, cx.listener(step(field, -1))))
+                .child(div().w(px(w)).flex().justify_center().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(value))
+                .child(self.icon_btn(format!("{id}-next"), I_NEXT, tips.1, false, cx.listener(step(field, 1))))
+        };
+        let controls = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(stepper("bday-day", b.day.to_string(), 28., 0, ("A day earlier", "A day later"), cx))
+            .child(stepper("bday-month", month, 84., 1, ("The month before", "The month after"), cx))
+            .child(wbtn("bday-remove", "Remove", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.voxa.update(cx, |v, cx| {
+                    v.update_settings(
+                        |s| {
+                            s.birthday_month = 0;
+                            s.birthday_day = 0;
+                        },
+                        cx,
+                    )
+                })
+            })));
+        vec![
+            card().mb(px(3.)).child(icon(I_GIFT, 18.).w(px(20.))).child(text("Your birthday", format!("{label}. Voxa will wish you on the day"))).child(controls).into_any_element(),
+            card()
+                .mb(px(3.))
+                .child(div().w(px(20.)))
+                .child(text("Wish me on my birthday", "A notification at midnight on the day".into()))
+                .child(toggle("bday-wish", s.birthday_wish).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.voxa.update(cx, |v, cx| v.update_settings(|s| s.birthday_wish = !s.birthday_wish, cx)))))
+                .into_any_element(),
+        ]
+    }
+
     fn settings(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let v = self.voxa.read(cx);
         let s = v.settings.clone();
@@ -1896,6 +1967,7 @@ impl Home {
             }
             None => out.push(card().mb(px(3.)).child(icon(I_ACCOUNT, 18.).w(px(20.))).child(row_text("ChatGPT", acct)).child(btn).into_any_element()),
         }
+        out.extend(self.birthday_rows(&s, cx));
 
         out.push(section("Dictation").into_any_element());
         let shortcut_right = if self.capturing {

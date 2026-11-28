@@ -44,8 +44,8 @@ pub(super) struct SplashRun {
 }
 
 impl Greet {
-    pub(super) fn new(entries: &[crate::store::Entry], name: Option<String>) -> Self {
-        let header = greet::header(entries, name);
+    pub(super) fn new(entries: &[crate::store::Entry], name: Option<String>, birthday: Option<voxa_core::greeting::MonthDay>) -> Self {
+        let header = greet::header(entries, name, birthday);
         Self { header, art: Default::default(), t0: None, still: false }
     }
 }
@@ -69,12 +69,12 @@ impl Home {
 
     /// Pick the greeting and its doodle (when Home opens).
     pub(super) fn pick_greeting(&mut self, cx: &mut Context<Self>) {
-        let (entries, account) = {
+        let (entries, account, birthday) = {
             let v = self.voxa.read(cx);
-            (v.history.entries.clone(), v.account())
+            (v.history.entries.clone(), v.account(), v.settings.birthday())
         };
         let first = account.as_ref().and_then(|a| a.name.split_whitespace().next().map(str::to_string)).filter(|n| !n.is_empty());
-        self.greet = Some(Greet::new(&entries, first));
+        self.greet = Some(Greet::new(&entries, first, birthday));
     }
 
     /// Any click or key during the splash: straight to the crossfade.
