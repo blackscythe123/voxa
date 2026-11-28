@@ -24,6 +24,7 @@ public static class W {
 $Spike = "C:\projects\voxa\desktop\app\tests-e2e"
 $Exe = "C:\projects\voxa\target\debug\voxa-desktop.exe"
 $TestFile = "$env:TEMP\voxa-spike-notepad.txt"
+$Data = "$env:TEMP\voxa-e2e-data"
 
 function Get-Fg { $h=[W]::GetForegroundWindow(); "$h `"$([W]::Title($h))`"" }
 
@@ -38,14 +39,15 @@ function Start-Target {
 function Get-TargetText { "target text: [" + (Get-Content "$env:TEMP\voxa-spike-target.txt" -Raw) + "]" }
 
 function Start-Voxa([string]$fake = "", [string]$session = "") {
-  $env:VOXA_FAKE = $fake; $env:VOXA_SESSION = $session
+  # A test copy: its own data folder, so a stand-in take never reaches the real History or sign-in.
+  $env:VOXA_DATA = $Data; $env:VOXA_FAKE = $fake; $env:VOXA_SESSION = $session
   Start-Process $Exe -WorkingDirectory $Spike
   Start-Sleep 3
-  Remove-Item Env:VOXA_FAKE, Env:VOXA_SESSION -ErrorAction SilentlyContinue
+  Remove-Item Env:VOXA_DATA, Env:VOXA_FAKE, Env:VOXA_SESSION -ErrorAction SilentlyContinue
   "voxa started (fake=$fake session=$session); foreground = $(Get-Fg)"
 }
 
-function Show-Log([int]$n = 12) { Get-Content "$env:APPDATA\voxa-next\voxa-desktop.log" | Select-Object -Last $n }
+function Show-Log([int]$n = 12) { Get-Content "$Data\voxa-desktop.log" | Select-Object -Last $n }
 
 function Save-Screen([string]$name) {
   $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds

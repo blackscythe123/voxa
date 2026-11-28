@@ -108,7 +108,13 @@ fn confirm_after() -> Duration {
 }
 
 fn fake_mode() -> bool {
-    std::env::var("VOXA_FAKE").is_ok_and(|v| !v.is_empty())
+    fake_from(test_hooks(), std::env::var("VOXA_FAKE").ok().as_deref())
+}
+
+/// The stand-in recorder (VOXA_FAKE) is a test hook like VOXA_TEST_*: only in a test copy, so a
+/// stand-in take never lands in the real History (the e2e harness once ran it on real data).
+fn fake_from(test_hooks: bool, var: Option<&str>) -> bool {
+    test_hooks && var.is_some_and(|v| !v.is_empty())
 }
 
 /// Where the OS keeps per-user app data: %APPDATA% on Windows, ~/Library/Application Support on Mac.
@@ -2452,6 +2458,16 @@ mod test_hook_tests {
         assert!(!on(true, false, Some("yes")));
         assert!(on(true, false, Some("1")));
         assert!(on(true, true, None));
+    }
+
+    /// The stand-in recorder ran on real data from the e2e harness: it is a test hook now.
+    #[test]
+    fn the_stand_in_recorder_only_runs_in_a_test_copy() {
+        assert!(!super::fake_from(false, Some("ok")), "never against the real data");
+        assert!(!super::fake_from(true, Some("")));
+        assert!(super::fake_from(true, Some("ok")));
+        let harness = include_str!("../tests-e2e/harness.ps1");
+        assert!(harness.contains("$env:VOXA_DATA = $Data"), "the e2e harness runs a test copy");
     }
 }
 
