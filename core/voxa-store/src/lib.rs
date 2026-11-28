@@ -296,6 +296,34 @@ pub struct Week {
     pub per_day: [usize; 7],
     /// Index of today in `per_day`.
     pub today: usize,
+    /// Seconds spoken for those words.
+    pub secs: f32,
+}
+
+impl Week {
+    /// Seconds saved versus typing the same words (the desktop's "faster than typing").
+    pub fn saved_secs(&self) -> u32 {
+        typing_saved_secs(self.words, self.secs)
+    }
+
+    /// Speaking speed in words a minute, 0 when there is too little to tell.
+    pub fn wpm(&self) -> u32 {
+        if self.secs > 1.0 { (self.words as f32 / (self.secs / 60.0)).round() as u32 } else { 0 }
+    }
+}
+
+/// Typing speed "faster than typing" compares with: a typical 40 words a minute (as the desktop).
+pub const TYPING_WPM: f32 = 40.0;
+
+/// Seconds saved by saying `words` in `secs` instead of typing them at [`TYPING_WPM`]; 0 when
+/// speaking was not faster.
+pub fn typing_saved_secs(words: usize, secs: f32) -> u32 {
+    (words as f32 / TYPING_WPM * 60.0 - secs).max(0.0).round() as u32
+}
+
+/// Words in a text, as History counts them.
+pub fn word_count(text: &str) -> usize {
+    text.split_whitespace().count()
 }
 
 /// The local calendar day (days since 1970-01-01) of `ms`, for a UTC offset in milliseconds.
@@ -309,13 +337,26 @@ pub fn week(entries: &[Entry], now_ms: u64, offset_ms: i64) -> Week {
     let today = local_day(now_ms, offset_ms);
     let monday = today - (today + 3).rem_euclid(7);
     let mut per_day = [0usize; 7];
+    let mut secs = 0.0f32;
     for e in entries.iter().filter(|e| matches!(e.status, Status::Pasted | Status::Ready) && !e.text.trim().is_empty()) {
         let d = local_day(e.id, offset_ms) - monday;
         if (0..7).contains(&d) {
             per_day[d as usize] += e.words();
+            secs += e.secs;
         }
     }
-    Week { words: per_day.iter().sum(), per_day, today: (today - monday) as usize }
+    Week { words: per_day.iter().sum(), per_day, today: (today - monday) as usize, secs }
+}
+
+/// How many dictations each app has, most first (History's "Your apps"). Ties by name.
+pub fn app_counts(entries: &[Entry]) -> Vec<(String, usize)> {
+    let mut m: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for e in entries.iter().filter(|e| !e.app.is_empty()) {
+        *m.entry(e.app.as_str()).or_default() += 1;
+    }
+    let mut v: Vec<(String, usize)> = m.into_iter().map(|(a, n)| (a.to_string(), n)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    v
 }
 
 /// After transcription: filler removal (if on), then the user's word list for `app`.
@@ -387,12 +428,38 @@ mod tests {
             entry(monday + 2 * day + 7, "   ", Status::Pasted),
         ];
         let w = week(&entries, now, 0);
+        assert_eq!(w.secs, 2.0, "one second each for the two counted entries");
         assert_eq!(w.today, 2);
         assert_eq!(w.per_day, [3, 0, 2, 0, 0, 0, 0]);
         assert_eq!(w.words, 5);
         // Two hours east of UTC, the Sunday entry 1 s before midnight UTC is already Monday.
         let w = week(&entries, now, 2 * 3_600_000);
         assert_eq!(w.per_day[0], 3 + 4);
+    }
+
+    #[test]
+    fn typing_saved_and_speed_follow_the_desktop() {
+        // 40 words take a minute to type; said in 15 s that saves 45 s.
+        assert_eq!(typing_saved_secs(40, 15.0), 45);
+        assert_eq!(typing_saved_secs(2, 30.0), 0, "slower than typing saves nothing");
+        let w = Week { words: 9, per_day: [9, 0, 0, 0, 0, 0, 0], today: 0, secs: 15.0 };
+        assert_eq!(w.wpm(), 36);
+        assert_eq!(Week { secs: 0.5, ..w.clone() }.wpm(), 0);
+        assert_eq!(word_count("  one two
+three "), 3);
+    }
+
+    #[test]
+    fn app_counts_most_first() {
+        let mut a = entry(1, "x", Status::Pasted);
+        a.app = "Gmail".into();
+        let mut b = entry(2, "y", Status::Pasted);
+        b.app = "WhatsApp".into();
+        let mut c = entry(3, "z", Status::Ready);
+        c.app = "WhatsApp".into();
+        let mut d = entry(4, "", Status::Waiting("x".into()));
+        d.app = String::new();
+        assert_eq!(app_counts(&[a, b, c, d]), vec![("WhatsApp".to_string(), 2), ("Gmail".to_string(), 1)]);
     }
 
     #[test]

@@ -309,6 +309,13 @@ impl VoxaCore {
         History::edit(&self.dir, |h| (false, voxa_store::week(&h.entries, now_ms(), utc_offset_minutes as i64 * 60_000).into()))
     }
 
+    /// Apps in History with their number of dictations, most first ("Your apps").
+    pub fn app_counts(&self) -> Vec<AppCount> {
+        History::edit(&self.dir, |h| {
+            (false, voxa_store::app_counts(&h.entries).into_iter().map(|(app, n)| AppCount { app, count: n as u32 }).collect())
+        })
+    }
+
     /// The user edited a written dictation's text in History. Returns the entry as saved, or None
     /// when there is no such written entry.
     pub fn set_entry_text(&self, entry_id: u64, text: String) -> Option<HistoryEntry> {
@@ -379,6 +386,25 @@ pub fn changed_phrase(before: String, after: String) -> Option<WordPair> {
 #[uniffi::export]
 pub fn meter_level(pcm: Vec<u8>) -> f32 {
     voxa_store::audio::meter_level(&voxa_store::audio::samples_from_pcm(&pcm))
+}
+
+/// Seconds saved by saying `words` in `recording_secs` instead of typing them at 40 words a
+/// minute (0 when speaking was not faster). The keyboard's "That's N seconds of typing saved".
+#[uniffi::export]
+pub fn typing_saved_secs(words: u32, recording_secs: f32) -> u32 {
+    voxa_store::typing_saved_secs(words as usize, recording_secs)
+}
+
+/// Words in a text, as History counts them.
+#[uniffi::export]
+pub fn word_count(text: String) -> u32 {
+    voxa_store::word_count(&text) as u32
+}
+
+/// A recording's loudness as `bars` levels 0..1 (History's waveform). Empty if unreadable.
+#[uniffi::export]
+pub fn recording_levels(pcm_path: String, bars: u32) -> Vec<f32> {
+    voxa_store::audio::waveform(Path::new(&pcm_path), bars as usize)
 }
 
 /// Whether Voxa may listen in a field.

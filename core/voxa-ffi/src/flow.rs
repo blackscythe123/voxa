@@ -244,6 +244,17 @@ pub struct StatusText {
     pub dismissable: bool,
 }
 
+/// What the last dictation pasted (see [`VoxaFlow::delivered`]).
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DeliveredInfo {
+    pub app: String,
+    pub words: u32,
+    /// How long the user talked.
+    pub secs: f32,
+    /// Seconds saved versus typing at 40 words a minute; 0 when not meaningful.
+    pub saved_secs: u32,
+}
+
 #[derive(Clone, Debug, Default)]
 struct JobMeta {
     /// The history entry's id (ms when recording started).
@@ -346,6 +357,23 @@ impl VoxaFlow {
     pub fn status(&self) -> Option<StatusText> {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         status_text(&g.flow)
+    }
+
+    /// While the status line says "Pasted in <app>": what was pasted, for the keyboard's success
+    /// state ("11 words", "That's 6 seconds of typing saved"). `None` in any other state.
+    pub fn delivered(&self) -> Option<DeliveredInfo> {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let State::Delivered { job } = g.flow.state() else { return None };
+        let j = g.flow.job(*job)?;
+        let JobState::Delivered(text) = &j.state else { return None };
+        let words = voxa_store::word_count(text);
+        let secs = g.meta.get(job).map(|m| m.secs).unwrap_or(0.0);
+        Some(DeliveredInfo {
+            app: j.target.app.clone(),
+            words: words as u32,
+            secs,
+            saved_secs: if secs > 0.0 { voxa_store::typing_saved_secs(words, secs) } else { 0 },
+        })
     }
 
     /// Whether a history entry belongs to a dictation the flow is still handling.

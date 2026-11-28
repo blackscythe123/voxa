@@ -36,6 +36,22 @@ pub fn meter_level(samples: &[i16]) -> f32 {
     ((db + 52.0) / 28.0).clamp(0.0, 1.0)
 }
 
+/// A recording's loudness as `bars` meter levels (0..1), for History's waveform. Each bar is
+/// the loudest 30 ms frame in its slice of the take. Empty when the file can't be read.
+pub fn waveform(path: &Path, bars: usize) -> Vec<f32> {
+    let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
+    let samples = samples_from_pcm(&bytes);
+    if samples.is_empty() || bars == 0 {
+        return Vec::new();
+    }
+    let per = samples.len().div_ceil(bars).max(1);
+    let flen = (RATE as usize * 30) / 1000;
+    samples
+        .chunks(per)
+        .map(|slice| slice.chunks(flen).map(meter_level).fold(0.0, f32::max))
+        .collect()
+}
+
 pub fn wav_bytes(samples: &[i16]) -> Option<Vec<u8>> {
     let spec = hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut buf = std::io::Cursor::new(Vec::new());
@@ -122,5 +138,23 @@ mod tests {
     fn meter_follows_loudness() {
         assert_eq!(meter_level(&[0; 512]), 0.0);
         assert!(meter_level(&[3000, -3000].repeat(256)) > 0.5);
+    }
+
+    #[test]
+    fn waveform_has_one_level_per_bar_loud_where_the_voice_is() {
+        let dir = std::env::temp_dir().join(format!("voxa-wave-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("take.pcm");
+        // 1 s of silence, then 1 s of tone.
+        let mut s = vec![0i16; RATE as usize];
+        s.extend((0..RATE as usize).map(|i| if i % 16 < 8 { 4000i16 } else { -4000 }));
+        let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(&path, bytes).unwrap();
+        let w = waveform(&path, 8);
+        assert_eq!(w.len(), 8);
+        assert_eq!(w[0], 0.0);
+        assert!(w[7] > 0.5);
+        assert!(waveform(&dir.join("missing.pcm"), 8).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -62,12 +62,29 @@ pub struct WeekStats {
     pub per_day: Vec<u32>,
     /// Index of today in `per_day`.
     pub today: u8,
+    /// Seconds saved versus typing the same words at 40 words a minute.
+    pub saved_secs: u32,
+    /// Speaking speed this week, words a minute (0 when too little to tell).
+    pub wpm: u32,
 }
 
 impl From<vs::Week> for WeekStats {
     fn from(w: vs::Week) -> Self {
-        Self { words: w.words as u64, per_day: w.per_day.iter().map(|&n| n as u32).collect(), today: w.today as u8 }
+        Self {
+            words: w.words as u64,
+            per_day: w.per_day.iter().map(|&n| n as u32).collect(),
+            today: w.today as u8,
+            saved_secs: w.saved_secs(),
+            wpm: w.wpm(),
+        }
     }
+}
+
+/// An app the user dictates into and how many dictations History has for it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct AppCount {
+    pub app: String,
+    pub count: u32,
 }
 
 /// The settings Android shows. Saved into the shared settings.json (other fields untouched).
