@@ -5,8 +5,11 @@
 //! them and the rotation plan.
 //!
 //! PLACEHOLDERS: until the owner pastes the real keys, both are all zeros. An all-zero key never
-//! verifies anything, the build prints a warning, and a release build (VOXA_RELEASE_BUILD=1)
-//! fails in build.rs. The lint `update-key-present` reports them too.
+//! verifies anything, the build prints a warning, and a release build fails: VOXA_RELEASE_BUILD=1
+//! (CI tags, every Android release build) in build.rs, and the Windows installer in voxa.iss,
+//! unless the explicit dev flag is set (VOXA_ALLOW_PLACEHOLDER_KEYS=1, /DAllowPlaceholderKeys).
+//! Such a build says "Updates are off in this build". The lint `update-key-present` reports them
+//! too. Never publish a build until the real keys are committed (docs/update-keys.md).
 
 /// K1, active (64 hex characters).
 pub const K1_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -60,6 +63,21 @@ mod tests {
         assert_eq!(K2_HEX.len(), 64);
         if !placeholders() {
             assert_ne!(KEYS[0].1, KEYS[1].1, "K1 and K2 are different keys");
+        }
+    }
+
+    mod guard {
+        include!("guard.rs");
+
+        #[test]
+        fn a_release_build_with_placeholder_keys_fails_unless_the_dev_flag_is_set() {
+            assert!(release_refused(true, true, false), "a release with placeholders never builds");
+            assert!(!release_refused(true, true, true), "VOXA_ALLOW_PLACEHOLDER_KEYS=1: a local test build");
+            assert!(!release_refused(true, false, false), "everyday builds only warn");
+            assert!(!release_refused(false, true, false), "real keys build");
+            assert!(flag_on(Some("1")) && !flag_on(Some("0")) && !flag_on(Some("true")) && !flag_on(None));
+            let build = include_str!("../build.rs");
+            assert!(build.contains("include!(\"src/guard.rs\")") && build.contains("release_refused(placeholder, release, allow)"));
         }
     }
 }
