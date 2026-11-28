@@ -129,9 +129,10 @@ and no exact alarms (the birthday wish uses an inexact window alarm, owner decis
 **Check** (`android-size`, `android-deps`, `android-workmanager`, `android-exact-alarm`, `android.py`).
 
 - Size: the APK at `android/app/build/outputs/apk/release/*arm64*.apk`, or `--apk PATH`; the size
-  is printed, and over 6,000,000 bytes fails. CI does not build the APK, so there the check prints
-  that it was skipped; run it after `./gradlew assembleRelease`, or with `--require-apk` in a job
-  that builds one.
+  is printed, and over 6,000,000 bytes fails. The everyday CI lint does not build the APK, so
+  there the check prints that it was skipped; the Android release workflow
+  (`android-release.yml`, `build` job) runs it with `--require-apk --apk` on the APK it built, and
+  `android/release.ps1` does the same locally.
 - Dependencies: every line in `android/app/build.gradle.kts`'s `dependencies {}` and `plugins {}` is
   on `ALLOWED_DEPS` / `ALLOWED_PLUGINS`. A new library means adding it there with its reason.
 - WorkManager: `androidx.work`, `work-runtime`, `WorkManager`, `CoroutineWorker`, work requests,
@@ -177,7 +178,9 @@ docs, scripts and workflows that mentions Android or an `.apk` passes `--latest=
 messages are already checked by a hook.)
 
 The `update-feed` release that holds both signed feeds passes `--latest=false` or `--prerelease`
-too (same rule, same file).
+too (same rule, same file). The tag-built releases (`desktop.yml`, `android-release.yml`) are
+created with both `--prerelease` and `--latest=false`: the owner promotes them after the
+real-hardware gate (release-runbook.md B10).
 
 **Decision.** One version everywhere (auto update spec B6, 2026-11-28). The Cargo workspace version
 is the single source for the desktop; Android's `versionName` matches it and its `versionCode`
@@ -332,16 +335,40 @@ or an older feed can only be repaired by each friend reinstalling by hand.
   `/DAllowPlaceholderKeys`.
 - `release-android-signing`: no `--lineage` / `--next-signer` / `apksigner rotate` in the build;
   `releaseKeyIsDebug()` and `verifyReleaseSigner` exist; `android/signing/forbidden-signers.txt`
-  lists the test-build signer `e648aa43...`; `android-feed.yml` checks the pinned and forbidden
+  lists the test-build signer `e648aa43...`; `android-release.yml` checks the pinned and forbidden
   certificates. With `--release`, `android/signing/release-cert.sha256` must hold a digest that is
   not forbidden.
-- `release-feed-guard`: `android-feed.yml` refuses a run that is not from `refs/tags/$TAG`; both
+- `release-feed-guard`: `android-release.yml` refuses a run that is not from `refs/tags/$TAG`; both
   feed jobs run `voxa-update-tool guard-forward`; every job that writes `k.pem` has
   `trap 'rm -f k.pem' EXIT` and an empty-secret check; `feed-pause.yml` (the kill switch) exists.
 - `release-readme-links`: every README download link names a file the release uploads for the
   workspace version, under the right tag (or a version-free `latest` copy).
 - `release-runbook`: `docs/release-runbook.md` has the REAL-HARDWARE RELEASE GATE and the README
   links it.
+
+**Decision.** Android releases are built in CI (owner decision 2026-11-28):
+`.github/workflows/android-release.yml` on an `android-v*` tag builds both APKs with the
+permanent release key from the protected `release` Environment, creates the prerelease and signs
+the feed. `android/release.ps1` is the local fallback only.
+
+**Why.** One reproducible path, from a tagged commit, with the same checks every time; the cost
+is that the key now also lives in GitHub (the trade-off is in update-keys.md, step 6).
+
+**Check** (`release-android-ci`, `pipeline.py`). `android-release.yml` exists (while the Android
+app does) and runs on `android-v*` tags; every job that reads a secret has
+`environment: release`; no job holds both the release keystore and K1; a secret reaches a script
+only as an `env`/`with` value (never `${{ secrets.X }}` inline in a script); no `echo`/`printf`
+prints a secret-holding variable or copies it into `$GITHUB_ENV`, `$GITHUB_OUTPUT` or the step
+summary (piping into a command or writing a private file is fine); no `set -x`; the step that
+receives the keystore sets `umask 077` before decoding it; an `if: always()` step deletes the
+`.jks`; no dev flag (`voxa.devRelease`, `VOXA_DEV_RELEASE`, `VOXA_ALLOW_PLACEHOLDER_KEYS`,
+`AllowPlaceholderKeys`); and the size budget runs with `--require-apk`. `release-latest`
+(section 7) requires its `gh release create` to pass `--prerelease --latest=false`.
+Fixture: `tools/lint/fixtures/bad/.github/workflows/android-release.yml` (11 cases, plus Good
+lines that must stay quiet).
+
+Not checkable by a lint, verified only by the first real tag run: that the secrets are set, the
+NDK and cargo-ndk install, the Gradle build passes on Linux, and the approvals work.
 
 Tests: `voxa-update` `keys::tests::guard::a_release_build_with_placeholder_keys_fails_unless_the_dev_flag_is_set`,
 `policy::tests::the_feed_version_only_moves_forward_when_publishing`, the desktop

@@ -248,6 +248,7 @@ tools/lint.
 | Silent takes never sent; no speech offers no retry | flow audit | fT::silent_recordings_are_never_sent, cF::no_speech_offers_no_retry_and_closes_itself |
 | No byte slicing after a case change; no unwrap in core; atomic unique-temp writes | bug hunt, guardrails 8 | lint:robust-case-slice, lint:robust-unwrap, lint:robust-atomic-write |
 | Every bug gets a test and every decision a lint | owner, 11-28 | this file, `--self-test` (every rule has a fixture) |
+| Android releases are built in CI on an android-v tag, a prerelease until promoted; the key only in the protected release environment, never with K1 in one job, never echoed, deleted after | owner, 11-28 | lint:release-android-ci, lint:release-latest (android-release.yml), lint:release-feed-guard; the first real tag run is manual (runbook D16) |
 | HTML mockup first for a new UI direction; never name the owner's personal apps in the repo; a Mac change never alters Windows | owner | process rules: reviewed by hand (no automated check is possible without naming the private apps) |
 
 ## Voxa 1.0.0 final release review (11-28)
@@ -262,7 +263,7 @@ UpdateSafetyTest.
 | B2 README Android link was a 404 | lint:release-readme-links | automated |
 | B3/B4 README said uninstall; Android signing undecided (decision: one release key from 1.0.0, test builds uninstalled once, no lineage) | lint:release-android-signing (forbidden test-build signer e648aa43..., pinned release-cert.sha256 with --release, no lineage step), Gradle releaseRefusal + verifyReleaseSigner | automated; the release key itself is an owner step |
 | B5 the updater never ran on real hardware | docs/release-runbook.md REAL-HARDWARE RELEASE GATE, lint:release-runbook | manual gate |
-| S1 android-feed dispatched from main is refused by the release environment | lint:release-feed-guard (refs/tags/$TAG check) | automated |
+| S1 android-feed (now android-release.yml) dispatched from main is refused by the release environment | lint:release-feed-guard (refs/tags/$TAG check) | automated |
 | S2 a rollback's relaunch retried at once and burnt the 2-attempt cap | vU policy::tests::a_failed_install_waits_hours_before_the_second_attempt, dUp::a_start_by_setup_never_installs_again_at_once | automated |
 | S3 auto-update treated as on when settings.json was unreadable | dUp::auto_update_counts_as_off_when_settings_cannot_be_read | automated |
 | S4 "Restart and update" left a frozen window that Setup killed after 20 s | dUp::restart_and_update_closes_the_window_first_and_reopens_it | partly manual (the window closing on real hardware) |

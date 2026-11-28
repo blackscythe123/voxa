@@ -14,7 +14,7 @@ that guard it: `docs/guardrails.md` sections 6, 7 and 10. Notifications: `docs/n
 | Desktop updater (tray process only) | `desktop/app/src/update.rs`, Settings and Home bars in `home.rs`, tray item in `main.rs` |
 | Installer | `desktop/windows/voxa.iss` (`/VOXAUPDATE`, mutex wait, no UAC, relaunch with `--background --updated`) |
 | Android | `core/voxa-ffi/src/update.rs`, `notify/Updater.kt`, `notify/UpdateReceiver.kt`, jobs 7104 and 7105 in `VoxaJobs.kt`, `ui/UpdateUi.kt`, onboarding step in `SetupScreen.kt` |
-| Feeds | `.github/workflows/desktop.yml` job `feed`, `.github/workflows/android-feed.yml`, both on the `update-feed` prerelease |
+| Feeds | `.github/workflows/desktop.yml` job `feed`, `.github/workflows/android-release.yml` job `feed`, both on the `update-feed` prerelease |
 | Local TEST feeds | `tools/update/make_test_feed.py` (signs with the TEST key in `core/voxa-update/tests/fixtures/`) |
 
 ## Since the 1.0.0 release review (2026-11-28)
@@ -42,8 +42,8 @@ before friends get 1.0.0. What changed in the updater (each with its test, regre
   manual-only offer (`min_auto_from`) points to the release page instead of downloading.
 - The update notification is `VISIBILITY_PRIVATE`: the lock screen shows only "Voxa update ready".
 - CI: both feed jobs run `voxa-update-tool guard-forward` (the version only moves forward, the
-  serial always goes up); android-feed runs from its tag ref only and requires the pinned release
-  certificate.
+  serial always goes up); android-release runs from its tag ref only and requires the pinned release
+  certificate. Android is built in CI on the tag (android-release.yml), with release.ps1 as the local fallback.
 
 ## Cheap checks (owner rule, 2026-11-28)
 
