@@ -44,11 +44,14 @@ import kotlinx.coroutines.withContext
 import uniffi.voxa_ffi.EntryStatus
 import uniffi.voxa_ffi.SessionState
 
-private const val STEPS = 4
+private const val STEPS = 5
+/** "Keep Voxa up to date": after the keyboard, before "Try it". */
+private const val UPDATE_STEP = 3
 
 /**
- * First-run setup, one step per screen: sign in, allow the mic, turn on the keyboard, switch to it
- * and try once. Each step is re-checked live when the user comes back from Android settings.
+ * First-run setup, one step per screen: sign in, allow the mic, turn on the keyboard, allow updates
+ * (optional, the owner's one onboarding permission exception), switch to it and try once. Each step
+ * is re-checked live when the user comes back from Android settings.
  */
 @Composable
 fun SetupScreen(activity: MainActivity) {
@@ -69,6 +72,9 @@ fun SetupScreen(activity: MainActivity) {
     val mic = remember(tick) { app.micGranted() }
     val enabled = remember(tick) { app.keyboardEnabled() }
     val selected = remember(tick) { app.keyboardSelected() }
+    // Read live: the pref only records whether Voxa may ask again.
+    val updates = remember(tick) { com.voxa.android.notify.Updater.canInstall(activity) }
+    val updatePrefs = remember { activity.getSharedPreferences("update", 0) }
     var tried by remember { mutableStateOf(false) }
     LaunchedEffect(history, step) {
         if (step == STEPS - 1) {
@@ -83,10 +89,14 @@ fun SetupScreen(activity: MainActivity) {
         (if (signedIn && name != null) "Signed in as $name" else "Signed in to ChatGPT") to signedIn,
         "Microphone allowed" to mic,
         "Voxa keyboard turned on" to enabled,
+        "Updates allowed" to updates,
         "Tried Voxa once" to tried,
     )
     val done = checks[step].second
-    val next = { if (step < STEPS - 1) goTo(step + 1) else { goTo(0); activity.finishSetup() } }
+    val next = {
+        if (step == UPDATE_STEP) updatePrefs.edit().putString("onboarding_ask", if (updates) "granted" else "skipped").apply()
+        if (step < STEPS - 1) goTo(step + 1) else { goTo(0); activity.finishSetup() }
+    }
     var practice by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
@@ -100,6 +110,7 @@ fun SetupScreen(activity: MainActivity) {
                     0 -> SignInArt(name, signedIn, account?.image ?: "")
                     1 -> MicArt(mic)
                     2 -> KeyboardArt()
+                    UPDATE_STEP -> UpdateArt(updates)
                     else -> Box(Modifier.padding(24.dp)) {
                         VTextField(practice, { practice = it }, "Tap here, then tap the mic", singleLine = false, minHeight = 120.dp, rest = c.base)
                     }
@@ -110,6 +121,7 @@ fun SetupScreen(activity: MainActivity) {
                 0 -> "Sign in to ChatGPT" to "Voxa writes out what you say with your own ChatGPT account, free works. You sign in on ChatGPT's own page; Voxa never sees your password."
                 1 -> "Allow the microphone" to "Voxa listens only while the mic is on, and sends the recording to ChatGPT to write it out."
                 2 -> "Turn on the Voxa keyboard" to "Android will show a warning that keyboards can read what you type. Voxa only sends what you say, and only while the mic is on."
+                UPDATE_STEP -> "Keep Voxa up to date" to "New versions of Voxa install with one tap. Android asks you once to allow this. On the next screen, turn on the switch for Voxa, then come back."
                 else -> "Switch to Voxa and try it" to "Tap the field above and pick the Voxa keyboard. Tap the mic, say a sentence, and tap it again."
             }
             Text(title, Modifier.padding(bottom = 8.dp), style = Type.L, color = c.text)
@@ -130,6 +142,7 @@ fun SetupScreen(activity: MainActivity) {
                 step == 0 -> PrimaryButton(if (app.core.hasSession()) "Sign in again" else "Sign in to ChatGPT") { activity.go(Route.SignIn) }
                 step == 1 -> PrimaryButton("Allow microphone") { activity.requestMic() }
                 step == 2 -> PrimaryButton("Open keyboard settings") { activity.openKeyboardSettings() }
+                step == UPDATE_STEP -> PrimaryButton("Allow updates") { activity.openInstallSettings() }
                 !selected -> PrimaryButton("Switch keyboard", icon = R.drawable.ic_keyboard) { activity.showKeyboardPicker() }
                 else -> PrimaryButton("Finish", onClick = next)
             }

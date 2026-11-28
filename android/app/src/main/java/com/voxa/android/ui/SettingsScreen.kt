@@ -144,7 +144,8 @@ fun SettingsScreen(activity: MainActivity) {
                     Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(20.dp), tint = c.text40)
                 }
             }
-            OptionRow(R.drawable.ic_info, "Version", last = true) { OptionValue(BuildConfig.VERSION_NAME) }
+            // Download updates automatically, Check for updates, Version, What's new, Allow Voxa to install updates.
+            UpdateRows(activity)
         }
     }
 

@@ -99,6 +99,7 @@ fun HomeScreen(activity: MainActivity) {
             HomeHeader(activity, account, problems)
             Spacer(Modifier.height(24.dp))
             if (askNotify) NotifyHomeCard(activity) { askNotify = false }
+            UpdateHomeCard(activity)
             StatsCard(week)
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
