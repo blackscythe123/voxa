@@ -30,7 +30,7 @@ impl From<notices::Notice> for NoticeText {
 pub enum NoticeKind {
     SignIn,
     Dictations,
-    /// A4: a verified update is ready to install (ID 4, channel "updates").
+    /// A5: a verified update is ready to install (ID 4, channel "updates").
     Update,
 }
 
@@ -82,13 +82,13 @@ pub fn notice_record(posted: Vec<u64>, now_ms: u64) -> Vec<u64> {
     notices::record(&posted, now_ms)
 }
 
-/// A4: "Voxa 1.1.0 is ready to install".
+/// A5: "Voxa 1.1.0 is ready to install".
 #[uniffi::export]
 pub fn notice_update_ready(version: String) -> NoticeText {
     notices::update_ready(&version).into()
 }
 
-/// A4's lock screen title ("Voxa update ready"), not the global "Voxa needs you".
+/// A5's lock screen title ("Voxa update ready"), not the global "Voxa needs you".
 #[uniffi::export]
 pub fn notice_update_public_title() -> String {
     notices::UPDATE_PUBLIC_TITLE.into()
@@ -103,7 +103,7 @@ pub enum NoticeUpdateDecision {
     Never,
 }
 
-/// A4's rules (see `voxa_core::notices::decide_update`): once per version, never while Voxa is
+/// A5's rules (see `voxa_core::notices::decide_update`): once per version, never while Voxa is
 /// visible, and it counts toward the daily cap, deferred rather than dropped.
 #[uniffi::export]
 pub fn notice_decide_update(version: String, posted_for: String, visible: bool, now_ms: u64, posted: Vec<u64>) -> NoticeUpdateDecision {

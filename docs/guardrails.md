@@ -136,6 +136,9 @@ and no exact alarms (the birthday wish uses an inexact window alarm, owner decis
 - Exact alarms: `setExact*(` and `setAlarmClock(` calls, and the `SCHEDULE_EXACT_ALARM` /
   `USE_EXACT_ALARM` permissions, anywhere in the Android sources and manifest. Use
   `AlarmManager.setWindow` (as `notify/BirthdayWish.kt` does) or JobScheduler.
+- Signing (`android-signing`): `build.gradle.kts` enables the v1, v2 and v3 signature schemes, so
+  every installer takes a sideloaded APK (the universal APK once gave "There was a problem parsing
+  the package").
 
 ## 6. Isolation
 
@@ -199,13 +202,24 @@ version before publishing, and `android/app/build.gradle.kts` has the matching `
 - `robust-unwrap`: no `.unwrap()` / `.expect()` in `core/*/src` library code outside tests (the
   nudge trainer in `src/bin` is exempt). Network, file and user input must never panic the
   keyboard or the app; lock poisoning uses `unwrap_or_else(|e| e.into_inner())`.
+- `robust-rename`: no bare `fs::rename`; every file replacement goes through `voxa_core::fsx::replace_file`, which retries for about 2 s while Windows reports the target busy (an antivirus scan, another save). A single try silently lost saves under load.
 - `robust-atomic-write`: history, settings, session, account and other store files are written
   through the atomic writers (`voxa_store::write_atomic`, `desktop/app/src/store.rs`,
   `voxa_chatgpt::write_unique_then_rename`), never with a bare `fs::write` / `File::create` on the
   final path; and every write-temp-then-rename function uses a unique temp name (process id plus a
   counter or time), so two writers never clobber one temp file.
 
-## 9. Update
+## 9. Licence
+
+**Decision (owner, 2026-11-28):** Voxa is licensed Apache-2.0, with a `NOTICE` crediting
+Simiyon Vinscent Samuel L that anyone redistributing Voxa must carry. Releases before 1.0.0
+contained HeliBoard and were GPL-3.0; the code that remains is the owner's own.
+
+**Check:** `licence-consistent` (tools/lint/voxa_lint/licence.py) fails if `LICENSE` is not the
+Apache License 2.0, `NOTICE` is missing or doesn't name the author, `Cargo.toml`'s workspace
+licence isn't `Apache-2.0`, or the README's License section doesn't start with Apache-2.0.
+
+## 10. Update
 
 **Decision.** Voxa updates itself only from signed feeds on GitHub, never during a take, and the
 signing keys never enter the repo (auto update spec, owner approved 2026-11-28; `docs/updates.md`,
@@ -232,7 +246,7 @@ the middle of a dictation would hurt every user at once.
   `can_install_now` (or `can_install_on_request`) and `verify_file` before it spawns. On Android,
   every PackageInstaller `commit(` in `Updater.kt` comes after `dictationLive()` in the same
   function.
-- `android-signing`: `buildTypes.release` never names `signingConfigs.getByName("debug")`; the debug
+- `android-release-key`: `buildTypes.release` never names `signingConfigs.getByName("debug")`; the debug
   fallback (until the owner creates the release key) lives in a helper gated on the release key
   being absent, with a loud build warning, and the gradle build fails a debug-signed release once
   the lineage exists.

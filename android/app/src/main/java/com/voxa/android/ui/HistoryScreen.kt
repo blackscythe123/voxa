@@ -109,6 +109,11 @@ fun HistoryScreen(activity: MainActivity) {
     }
 }
 
+/** History search, "Your apps": the owner's cap is 8 (two rows of four), most used first. */
+const val YOUR_APPS_CAP = 8
+
+fun yourApps(apps: List<AppCount>): List<List<AppCount>> = apps.take(YOUR_APPS_CAP).chunked(4)
+
 @Composable
 private fun SearchSuggestions(recents: List<String>, apps: List<AppCount>, pick: (String) -> Unit) {
     val c = vx
@@ -129,7 +134,7 @@ private fun SearchSuggestions(recents: List<String>, apps: List<AppCount>, pick:
     }
     if (apps.isNotEmpty()) {
         Text("Your apps", Modifier.padding(bottom = 12.dp), style = Type.SBold, color = c.text)
-        apps.take(8).chunked(4).forEach { row ->
+        yourApps(apps).forEach { row ->
             Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 row.forEach { a ->
                     Column(

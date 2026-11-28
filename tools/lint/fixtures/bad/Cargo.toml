@@ -1,3 +1,4 @@
-# Fixture for tools/lint (release-version-sync): not built.
+# Fixture for tools/lint (release-version-sync, licence-consistent): not built.
 [workspace.package]
+license = "MIT"
 version = "1.0.0"

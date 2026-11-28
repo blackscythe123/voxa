@@ -233,6 +233,14 @@ impl Backend {
     }
 
     pub fn set_autostart(&mut self, on: bool, cx: &mut Context<Self>) {
+        // A test copy (VOXA_DATA) never changes the real login item: finishing the tour in one
+        // switched the owner's Start with Windows on, pointing at the test build.
+        if !crate::rules::changes_login_item(std::env::var_os("VOXA_DATA").is_some()) {
+            os::log("test copy: Start with Windows left as it is");
+            self.start_with_windows = on;
+            cx.notify();
+            return;
+        }
         // The tray app's exe, which is this same exe.
         if let Err(e) = os::set_start_with_windows(on) {
             os::log(&format!("FAIL start with Windows: {e}"));

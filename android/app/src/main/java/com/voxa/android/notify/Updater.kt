@@ -207,7 +207,7 @@ object Updater {
     // ── download ─────────────────────────────────────────────────────────────
 
     /** Download the current offer (the 7105 job, network). True when it is staged and verified;
-     *  false to try again later (the job's backoff). Posts A4 when it is ready. */
+     *  false to try again later (the job's backoff). Posts A5 when it is ready. */
     suspend fun download(ctx: Context): Boolean = withContext(Dispatchers.IO) {
         val o = offer(ctx) ?: return@withContext true
         if (staged(ctx) != null) {
@@ -440,7 +440,7 @@ object Updater {
         prefs(ctx).edit().remove("not_updated").remove("install_target").apply()
     }
 
-    /** At app start: the status record, and A4 again if the cap held it back. */
+    /** At app start: the status record, and A5 again if the cap held it back. */
     fun start(ctx: Context) {
         status.value = if (readyVersion(ctx) != null) Status.READY else loadStatus(ctx).let { if (it == Status.DOWNLOADING || it == Status.CHECKING) Status.NONE else it }
         if (auto(ctx)) VoxaJobs.scheduleUpdateCheck(ctx)

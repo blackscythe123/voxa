@@ -85,7 +85,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         f.write_all(bytes)?;
         f.sync_all()
     })();
-    if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
+    if let Err(e) = written.and_then(|_| voxa_core::fsx::replace_file(&tmp, path)) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
@@ -936,6 +936,27 @@ mod tests {
         assert_eq!(left, vec![2 * day, 3 * day, 99 * day]);
     }
 
+    /// "Delete all" while a dictation was live deleted its recording, then showed "Unreachable":
+    /// live entries and their audio stay.
+    #[test]
+    fn delete_all_spares_the_dictations_in_progress() {
+        let dir = std::env::temp_dir().join(format!("voxa-delete-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = |n: u64| {
+            let p = dir.join(format!("{n}.wav"));
+            std::fs::write(&p, b"RIFF").unwrap();
+            p
+        };
+        let mk = |id: u64, status: Status| Entry { id, app: "A".into(), text: "t".into(), secs: 1.0, status, audio: Some(wav(id)), started_in: None, via: None };
+        let mut h = History { unreadable: false, damaged: false, path: dir.join("history.json"), entries: vec![mk(1, Status::Pasted), mk(2, Status::Waiting("Writing it out".into()))] };
+        h.delete_all_except(&[2]);
+        assert_eq!(h.entries.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2]);
+        assert!(!dir.join("1.wav").exists(), "a finished dictation's recording goes");
+        assert!(dir.join("2.wav").exists(), "the live take keeps its recording");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn ticks_are_round_and_cover_the_max() {
         assert_eq!(nice_ticks(4062.0), vec![0.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0]);
@@ -989,6 +1010,8 @@ mod tests {
         let s = Settings::load(&dir);
         assert_eq!(s, Settings::default());
         assert!(!s.remove_fillers);
+        // The dictation no longer stayed on the clipboard after pasting: keeping it is the default.
+        assert!(s.keep_on_clipboard, "the dictation stays on the clipboard by default");
         let s2 = Settings { remove_fillers: true, keep_days: 7, ..s };
         s2.save(&dir);
         assert_eq!(Settings::load(&dir), s2);

@@ -133,7 +133,7 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     }
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, bytes)?;
-    std::fs::rename(tmp, path)
+    voxa_core::fsx::replace_file(tmp.as_ref(), path.as_ref())
 }
 
 pub fn write_live(live: &Live) {

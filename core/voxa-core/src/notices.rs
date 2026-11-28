@@ -7,7 +7,7 @@
 use crate::greeting::{Date, MonthDay};
 
 /// The kinds Voxa posts. Each is one notification, updated in place (Android ID 1 and 2,
-/// desktop tags "signin" and "dictations"). `Update` (A4) is Android only, ID 4: the desktop
+/// desktop tags "signin" and "dictations"). `Update` (A5, the update spec's A4) is Android only, ID 4: the desktop
 /// shows updates in context, never as a toast (docs/notifications.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -62,7 +62,7 @@ pub fn not_sent(count: u32, action: &str) -> Notice {
     }
 }
 
-/// A4 (Android only): a verified update finished downloading. Its lock screen text is
+/// A5 (Android only): a verified update finished downloading. Its lock screen text is
 /// [`UPDATE_PUBLIC_TITLE`], not "Voxa needs you".
 pub fn update_ready(version: &str) -> Notice {
     Notice {
@@ -72,21 +72,21 @@ pub fn update_ready(version: &str) -> Notice {
     }
 }
 
-/// A4's public (lock screen) title: the content is not private.
+/// A5's public (lock screen) title: the content is not private.
 pub const UPDATE_PUBLIC_TITLE: &str = "Voxa update ready";
 
-/// What to do with A4 now.
+/// What to do with A5 now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdateDecision {
     Post,
     /// Not now (Voxa is on screen, or the daily cap is used): try again at the next allowed
-    /// moment. A4 is never urgent, so it is deferred, never dropped.
+    /// moment. A5 is never urgent, so it is deferred, never dropped.
     Wait,
     /// Already posted for this version (even if it was swiped away): never again.
     Never,
 }
 
-/// A4's rules: at most once per version (`posted_for` is the version last posted, "" for none),
+/// A5's rules: at most once per version (`posted_for` is the version last posted, "" for none),
 /// never while Voxa is visible, and it counts toward the 2 per 24 hours cap like every kind.
 /// Quiet hours don't hold it back: its channel is low importance, so it never makes a sound.
 pub fn decide_update(version: &str, posted_for: &str, visible: bool, now_ms: u64, posted: &[u64]) -> UpdateDecision {
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(decide_update("1.1.0", "", false, now, &used), UpdateDecision::Wait, "deferred, not dropped");
         // A day later the cap has room again and the same version still posts.
         assert_eq!(decide_update("1.1.0", "", false, now + CAP_WINDOW_MS, &used), UpdateDecision::Post);
-        // And A4 itself counts toward the cap for the other kinds.
+        // And A5 itself counts toward the cap for the other kinds.
         let after = record(&[now - 1000], now);
         assert_eq!(decide(Kind::SignIn, now + 1, false, &after, 0), Decision::Skip);
     }

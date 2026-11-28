@@ -27,10 +27,9 @@ pub(crate) fn rotate(path: &std::path::Path) {
     }
 }
 
-/// Move `from` over `to` (becomes voxa_core::fsx::replace_file at the merge).
+/// Move `from` over `to`, retrying while Windows reports the target busy.
 fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(to);
-    std::fs::rename(from, to)
+    voxa_core::fsx::replace_file(from, to)
 }
 
 #[cfg(test)]
@@ -256,7 +255,7 @@ pub(crate) fn write_png(out: &std::path::Path, rgba: &[u8], n: u32) -> std::io::
         let mut w = enc.write_header().map_err(std::io::Error::other)?;
         w.write_image_data(rgba).map_err(std::io::Error::other)?;
     }
-    std::fs::rename(tmp, out)
+    voxa_core::fsx::replace_file(tmp.as_ref(), out.as_ref())
 }
 
 /// Cache icons for apps in `wanted` (names already in History) that have a window open now, so

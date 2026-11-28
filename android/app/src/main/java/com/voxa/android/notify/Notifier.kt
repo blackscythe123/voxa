@@ -42,7 +42,7 @@ object Notifier {
     const val ID_SIGN_IN = 1
     const val ID_DICTATIONS = 2
     const val ID_BIRTHDAY = 3
-    /** A4: a verified update is ready to install (channel Updates). */
+    /** A5: a verified update is ready to install (channel Updates). */
     const val ID_UPDATE = 4
 
     /** A notification channel. "Reminders" can be added to [CHANNELS] later. */
@@ -298,13 +298,13 @@ object Notifier {
         return ok
     }
 
-    // ── A4: an update is ready (Android only) ────────────────────────────────
+    // ── A5: an update is ready (Android only) ────────────────────────────────
 
     /**
-     * A4 "Voxa 1.1.0 is ready to install" (ID 4, channel Updates, low importance so it is always
+     * A5 "Voxa 1.1.0 is ready to install" (ID 4, channel Updates, low importance so it is always
      * silent). At most once per version: once posted, swiping it away never brings it back (Home
      * and Settings still show it). It counts toward the 2 per 24 h cap and is never urgent, so a
-     * capped or on-screen A4 is deferred (held here, and tried again at app start and at every
+     * capped or on-screen A5 is deferred (held here, and tried again at app start and at every
      * update check), never dropped. The lock screen shows "Voxa update ready" (not private).
      */
     fun updateReady(ctx: Context, version: String): Boolean {

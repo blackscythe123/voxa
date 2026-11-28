@@ -217,9 +217,93 @@ pub fn without_session(known: voxa_core::Session) -> NoSession {
     }
 }
 
+/// The stalled-mic watchdog: a take whose mic delivers nothing 0.7 s after it went live (start or
+/// resume) gets its stream restarted once (a Bluetooth reconnect, sleep or an audio service
+/// restart left it dead and the take was lost as "silence"). Never while paused.
+pub fn revive_mic(mic_on: bool, paused: bool, revived: bool, live_for: std::time::Duration, stalled: bool) -> bool {
+    mic_on && !paused && !revived && live_for > std::time::Duration::from_millis(700) && stalled
+}
+
+/// The shortcut is paused while the user picks a new one in Settings; if the window closed
+/// meanwhile (nobody answers), it comes back by itself after 30 s instead of staying dead.
+pub fn shortcut_pick_timed_out(paused: bool, paused_for: Option<std::time::Duration>) -> bool {
+    paused && paused_for.is_some_and(|d| d > std::time::Duration::from_secs(30))
+}
+
+/// Esc is Voxa's only while a take is recording (not paused): never taken from other apps otherwise.
+pub fn esc_wanted(state: &State) -> bool {
+    matches!(state, State::Recording { paused: false, .. })
+}
+
+/// History is written from a job only when the job's state changed since the last write: a
+/// rewrite on every tick undid the user's edits and brought deleted dictations back.
+pub fn sync_needed(last_synced: Option<&JobState>, now: &JobState) -> bool {
+    last_synced != Some(now)
+}
+
+/// Start with Windows (macOS: open at login) is the real user's setting: a test copy never changes it.
+pub fn changes_login_item(test_copy: bool) -> bool {
+    !test_copy
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Edits and deletes came back: an unchanged job is never written to History again.
+    #[test]
+    fn an_unchanged_job_is_not_written_to_history_again() {
+        let pasted = JobState::Delivered("hello".into());
+        assert!(sync_needed(None, &pasted), "first time");
+        assert!(!sync_needed(Some(&pasted), &pasted), "same state: the user's edit or delete stays");
+        assert!(sync_needed(Some(&JobState::Transcribing), &pasted));
+    }
+
+    /// Finishing the tour in a test copy switched the real Start with Windows on.
+    #[test]
+    fn a_test_copy_never_changes_the_real_login_item() {
+        assert!(!changes_login_item(true));
+        assert!(changes_login_item(false));
+        let remote = include_str!("remote.rs");
+        let f = remote.find("pub fn set_autostart").expect("set_autostart");
+        let guard = remote[f..].find("changes_login_item").expect("set_autostart checks for a test copy");
+        let write = remote[f..].find("os::set_start_with_windows").expect("writes the login item");
+        assert!(guard < write, "the test copy check comes before the write");
+    }
+
+    /// Mic dead after a reconnect or sleep: restarted once, never while paused or right at the start.
+    #[test]
+    fn a_mic_that_delivers_nothing_is_restarted_once_and_never_while_paused() {
+        use std::time::Duration as D;
+        assert!(revive_mic(true, false, false, D::from_millis(800), true));
+        assert!(!revive_mic(true, false, true, D::from_millis(800), true), "only once per take");
+        assert!(!revive_mic(true, true, false, D::from_secs(5), true), "paused: the mic is off on purpose");
+        assert!(!revive_mic(true, false, false, D::from_millis(300), true), "too early to judge");
+        assert!(!revive_mic(true, false, false, D::from_secs(5), false), "sound is arriving");
+        assert!(!revive_mic(false, false, false, D::from_secs(5), true));
+    }
+
+    /// The shortcut went dead if the window closed while a new one was being picked.
+    #[test]
+    fn a_shortcut_left_paused_by_a_closed_picker_comes_back() {
+        use std::time::Duration as D;
+        assert!(!shortcut_pick_timed_out(true, Some(D::from_secs(10))));
+        assert!(shortcut_pick_timed_out(true, Some(D::from_secs(31))));
+        assert!(!shortcut_pick_timed_out(false, Some(D::from_secs(99))));
+    }
+
+    /// Esc is released while paused and when idle, so Voxa never steals Esc from other apps.
+    #[test]
+    fn esc_is_taken_only_while_recording_and_not_paused() {
+        let mut f = Flow::new(ready());
+        assert!(!esc_wanted(f.state()));
+        take(&mut f);
+        assert!(esc_wanted(f.state()));
+        f.handle(voxa_core::Event::Pause);
+        assert!(!esc_wanted(f.state()), "paused: the user works elsewhere");
+        f.handle(voxa_core::Event::Resume);
+        assert!(esc_wanted(f.state()));
+    }
     use voxa_core::flow::Delivery;
     use voxa_core::{Event, Network, Readiness, Session, Target};
 

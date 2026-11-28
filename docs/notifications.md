@@ -5,7 +5,8 @@ the approved notifications spec (EGM design review, November 2026).
 
 Voxa says almost everything in context: the keyboard bar, the desktop strip, Home and the tray
 dot. A system notification is only for the few moments when you are not looking and something
-needs you: your ChatGPT sign-in ended, or a dictation finished in the background.
+needs you: your ChatGPT sign-in ended, or a dictation finished in the background. And one that is
+only kind: a wish at midnight on your birthday, if you added it.
 
 ## Copy rules
 
@@ -21,13 +22,15 @@ notification may name the app a dictation was for. All wording lives in one plac
 | A1, D1 | Signed out (must) | A session check says the session ended, it was known good before, and a second check about 2 minutes later agrees | You're signed out of ChatGPT | Voxa can't write anything until you sign in. (+ "N dictations are waiting and will send when you do.") | Sign in |
 | A2, D2 | Ready to copy (should) | A dictation that wasn't on screen was written out (background send, or sent when the network came back) | Your dictation for {App} is ready / N dictations are ready | It couldn't paste, so it's waiting in History. / They're waiting in History. | Copy (one only) |
 | A3, D3 | Couldn't send (should) | A background send gave up (unreachable after retries, or the dictation waited over 24 h) | Voxa couldn't send N dictation(s) | Your recordings are kept. Your sign-in is fine. | Retry (Android), Send now (desktop) |
-| A4 | Update ready (should) | A verified update has finished downloading on Android | Voxa {version} is ready to install | Tap to install. Your history and settings stay as they are. | Install |
+| A4, D4 | Birthday wish (owner decision, 2026-11-28) | 00:00 local time on the birthday from Settings, "Wish me on my birthday" on, not yet wished this year | Happy birthday, {first name} (or Happy birthday) | Have a lovely day. | None; tapping opens Home (birthday doodle) |
+| A5 | Update ready (should; the update spec's A4) | A verified update has finished downloading on Android | Voxa {version} is ready to install | Tap to install. Your history and settings stay as they are. | Install |
 
 Never a notification (already shown in context): waiting to send, mic permission, keyboard
 disabled or not selected, storage, recaps or streaks, Cloudflare blocking.
 
 Updates (amended on purpose by the owner, 2026-11-28, with the auto update spec): Android gets
-A4 only, once a verified update is downloaded. The Windows "Voxa was updated to X" note and the
+A5 only (called A4 in the update spec; the birthday wish took A4 first), once a verified update
+is downloaded. The Windows "Voxa was updated to X" note and the
 macOS "Voxa X is out" notice are in context only: a dismissible Home bar, the Settings status
 line and the tray tooltip. There is no desktop update toast (no D4).
 
@@ -51,17 +54,44 @@ A false "signed out" is worse than a late one (a Cloudflare 403 once caused a si
    desktop tags `signin` and `dictations`.
 2. Sign-in at most once per expiry episode.
 3. Dictations alert at most once every 6 hours; in between the count is only updated silently.
-4. No more than 2 new Voxa notifications in 24 hours across kinds. A4 counts toward the cap;
-   because it is never urgent, a capped A4 is deferred to the next allowed moment (the next
+4. No more than 2 new Voxa notifications in 24 hours across kinds. A5 (update ready) counts toward the cap;
+   because it is never urgent, a capped A5 is deferred to the next allowed moment (the next
    update job or app start), never dropped (`voxa_core::notices::decide_update`).
 5. Never posted while you can see Voxa: the Android keyboard showing or an app screen in front;
    the desktop strip visible or Voxa's window in front.
 6. Opening History or the dictation, copying it, deleting it or resending removes the dictations
    notification.
-7. Sign-in at night (21:00 to 08:00) arrives silently on Android. A4 is always silent (its
-   channel is low importance).
-8. A4 is posted at most once per version. If you swipe it away it never comes back for that
+7. Sign-in at night (21:00 to 08:00) arrives silently on Android. A5 (update ready) is always
+   silent (its channel is low importance).
+8. **The one exception to "never at night": the birthday wish.** The owner decided (2026-11-28)
+   that it arrives at midnight on purpose. It is outside rules 2 to 4 and 7 (its own ID or tag,
+   not counted against or held back by the daily cap, not silent), at most once a year (the year
+   is kept: Android `notify/birthday_wished`, desktop `notify.json` `birthday_wished`), and still
+   held back while you look at Voxa (rule 5). Do Not Disturb and Focus apply as usual. Guarded
+   by `voxa_core::notices` tests (`the_birthday_wish_is_the_only_notice_allowed_at_midnight` and
+   the next-midnight tests) and the `android-exact-alarm` lint.
+
+9. A5 is posted at most once per version. If you swipe it away it never comes back for that
    version; the Home card and the Settings row still show the update.
+
+### The birthday wish
+
+- Settings: "Your birthday" (day and month, never the year, kept on the device; Android private
+  prefs `ui`, desktop `settings.json` `birthday_month`, `birthday_day`) and, once added,
+  "Wish me on my birthday" (`birthday_wish`, on by default). Off, or no birthday: nothing is
+  scheduled. 29 February is wished on 28 February in other years.
+- The dates come from the core as local calendar dates (`next_birthday_wish`,
+  `birthday_wish_due`), so a time zone or daylight saving change can't move the day; the shells
+  turn the date into 00:00 in the current zone only when scheduling.
+- Android (`notify/BirthdayWish.kt`, channel "Birthday", default importance, ID 3): an inexact
+  `AlarmManager.setWindow` alarm from 00:00, 10 minutes wide, no exact-alarm permission. Set
+  again after it fires (next year), when the birthday or switch changes, at app start, and by
+  `BirthdayReceiver` after a reboot, an app update, a clock change or a time zone change. Doze
+  may hold the alarm back; a wish delivered any time on the day still shows, never on another
+  day. Lock screen shows "Happy birthday" without the name. Needs `POST_NOTIFICATIONS`.
+- Desktop (`notify.rs`, tag `birthday`): the tray checks about every 10 s and shows the toast
+  only in the first 2 minutes after midnight. A PC that was asleep or off at midnight gets no
+  late wish. Clicking opens Home.
 
 ## Android
 
@@ -72,9 +102,9 @@ Files: `android/app/src/main/java/com/voxa/android/notify/` (`Notifier.kt`, `Vox
 - Channels: "Sign-in" ("When you need to sign in to ChatGPT again", default importance) and
   "Dictations" ("Dictations sent in the background, or that couldn't be sent", low importance).
   `Notifier.CHANNELS` is a list so a third channel, "Reminders", can be added later.
-- "Updates" channel ("When a new version of Voxa is ready to install", low importance) for A4,
+- "Updates" channel ("When a new version of Voxa is ready to install", low importance) for A5,
   notification ID 4 (IDs 1 to 3 are taken).
-- Lock screen: `VISIBILITY_PRIVATE` with a public version that only says "Voxa needs you". A4 is
+- Lock screen: `VISIBILITY_PRIVATE` with a public version that only says "Voxa needs you". A5 is
   the exception: its content is not private, so it is `VISIBILITY_PUBLIC` with the public title
   "Voxa update ready".
 - Taps: A1 opens sign-in (`EXTRA_OPEN=sign-in`); A2 opens the dictation (`entry:<id>`) or
@@ -203,8 +233,20 @@ Steps (job IDs: 7101 session check, 7102 confirmation, 7103 background send):
    attempt: `DICTATIONS: UPDATE`, and ID 2 now reads "Voxa couldn't send 1 dictation" (still one
    Voxa notification). "Retry" schedules the send again and removes it.
 
-Diagnostics (`files/diag`, Settings, Share diagnostics) log every decision under `notify` and
-`jobs`.
+8. Birthday wish: set the birthday to tomorrow in Settings, check `dumpsys alarm` for
+   `*walarm*:com.voxa.android.notify.BIRTHDAY` at `origWhen=<tomorrow> 00:00:00 window=+10m`, press
+   Home, then (with `adb root`) `settings put global auto_time 0` and `date MMDD2358YYYY.20`. Within
+   the window the log shows `birthday: alarm: wishing`, `notify: BIRTHDAY: POST`, and the alarm
+   moves to next year. `--es debug_name Alexandria` gives the title a first name when no account
+   is known. Restore with `settings put global auto_time 1`.
+
+Diagnostics (`files/diag`, Settings, Share diagnostics) log every decision under `notify`,
+`jobs` and `birthday`.
+
+Desktop birthday wish: a test copy as above with `"birthday_month":11,"birthday_day":29` in
+`settings.json` and `VOXA_TEST_NOW=2026-11-29T00:00` (00:01 also shows; 00:05 must not): the log
+says `toast shown: birthday` and `birthday wish: shown`, and `notify.json` gets
+`"birthday_wished":2026`.
 
 ## Verification (2026-11-28)
 
@@ -235,3 +277,8 @@ Desktop on this Windows 11 PC (test copy with `VOXA_DATA`); Android on the API 3
 | A2 tap opens the dictation | `16-open-entry.png` (same extra the notification sends, started with adb) | Partly verified |
 | Keyboard path (A2/A3 for a dictation sent when the network came back while the keyboard lived) | Code only | Not verified |
 | Real ChatGPT session expiring | Needs a real account; all A1/D1 runs used test answers | Not verified |
+| Birthday wish rules (next midnight, 29 February, once a year, asleep at midnight, switch off) | `cargo test -p voxa-core notices`, `-p voxa-ffi --test birthday`, `-p voxa-desktop` (`notify::tests`, `store::load_tests`) | Unit tested |
+| A4 birthday wish on Android, alarm crossing midnight | `android/docs/verification/birthday/` (alarm window, POST log, notification screenshot, Home with the cake doodle) | Rendered (emulator clock moved) |
+| A4 after a reboot | Code only (`BirthdayReceiver`, BOOT_COMPLETED) | Not verified |
+| D4 birthday toast on Windows | Test copy with `VOXA_TEST_NOW` 00:00 and 00:01: `toast shown: birthday`; notification history held "Happy birthday" / "Happy birthday, Zz" with launch `home`; 00:05: nothing | Log and toast history |
+| D4 click opens Home; macOS | Not driven (no clicking on the owner's desktop; no Mac) | Not verified |

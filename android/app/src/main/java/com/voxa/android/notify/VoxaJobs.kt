@@ -133,10 +133,7 @@ class VoxaJobs : JobService() {
         val failedBefore = if (manual) ids(prefs.getString("bg_failed", "")) else emptyList()
         val ids = waiting(app) + failedBefore
         // Tries per entry ("id:count,..."), so one entry's failures never cut another's short.
-        val attempts = prefs.getString("send_attempts_by_entry", "").orEmpty().split(',').mapNotNull {
-            val (id, n) = it.split(':').takeIf { p -> p.size == 2 } ?: return@mapNotNull null
-            (id.toULongOrNull() ?: return@mapNotNull null) to (n.toIntOrNull() ?: 0)
-        }.toMap().toMutableMap()
+        val attempts = parseAttempts(prefs.getString("send_attempts_by_entry", ""))
         if (ids.isEmpty()) {
             prefs.edit().remove("send_attempts_by_entry").apply()
             Diag.log("jobs", "send: nothing waiting")
@@ -163,7 +160,7 @@ class VoxaJobs : JobService() {
             val attempt = (attempts[id] ?: 0) + 1
             // The entry's id is when it was recorded: it gives up a day later, after enough real
             // tries, or when the user's Retry is for this one (a failed one, not a waiting one).
-            val giveUp = id in failedBefore || now - id.toLong() > DAY_MS || attempt >= MAX_ATTEMPTS
+            val giveUp = givesUp(id, attempt, now, id in failedBefore)
             val outcome = if (unreachable) SendOutcome.Unreachable(false) else withContext(Dispatchers.IO) { app.core.sendWaiting(id, giveUp, canned) }
             app.keepRefreshedCookies()
             Diag.log("jobs", "send: $id -> ${outcome.javaClass.simpleName} (attempt $attempt${if (giveUp) ", last try" else ""})")
@@ -188,7 +185,7 @@ class VoxaJobs : JobService() {
                     } else {
                         attempts.remove(id)
                         changed = true
-                        if (!outcome.blocked) failed += id
+                        if (postsNotSent(outcome.blocked)) failed += id
                     }
                 }
                 is SendOutcome.NeedsSignIn -> {
@@ -201,7 +198,7 @@ class VoxaJobs : JobService() {
                 }
             }
         }
-        prefs.edit().putString("send_attempts_by_entry", attempts.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
+        prefs.edit().putString("send_attempts_by_entry", formatAttempts(attempts)).apply()
         // Only when something changed: a History change schedules another send, and a pass that
         // changed nothing must not start the next one at once.
         if (changed) app.historyChanged()
@@ -245,6 +242,22 @@ class VoxaJobs : JobService() {
          *  the session is good (dismissed ones and ones from earlier runs too). */
         private fun waiting(app: com.voxa.android.VoxaApp): List<ULong> =
             app.core.waitingForNetwork() + if (app.session.value == SessionState.VALID) app.core.waitingForSignInIds() else emptyList()
+
+        /** Tries per entry ("id:count,..."), so one entry's failures never cut another's short. */
+        fun parseAttempts(s: String?): MutableMap<ULong, Int> = s.orEmpty().split(',').mapNotNull {
+            val (id, n) = it.split(':').takeIf { p -> p.size == 2 } ?: return@mapNotNull null
+            (id.toULongOrNull() ?: return@mapNotNull null) to (n.toIntOrNull() ?: 0)
+        }.toMap().toMutableMap()
+
+        fun formatAttempts(m: Map<ULong, Int>): String = m.entries.joinToString(",") { "${it.key}:${it.value}" }
+
+        /** The entry's id is when it was recorded: it gives up a day later, after [MAX_ATTEMPTS]
+         *  real tries, or when the user's Retry is for one that already failed. */
+        fun givesUp(id: ULong, attempt: Int, nowMs: Long, failedBefore: Boolean): Boolean =
+            failedBefore || nowMs - id.toLong() > DAY_MS || attempt >= MAX_ATTEMPTS
+
+        /** Cloudflare blocking never posts "couldn't send" (the take stays in History). */
+        fun postsNotSent(blocked: Boolean): Boolean = !blocked
 
         private fun ids(s: String?): List<ULong> = s.orEmpty().split(',').mapNotNull { it.trim().toULongOrNull() }
 

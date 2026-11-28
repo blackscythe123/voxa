@@ -121,10 +121,9 @@ impl UpdateState {
     }
 }
 
-/// Move `from` over `to` (the one rename in this file; becomes voxa_core::fsx::replace_file).
+/// Move `from` over `to`, retrying while Windows reports the target busy.
 fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(to);
-    std::fs::rename(from, to)
+    voxa_core::fsx::replace_file(from, to)
 }
 
 /// update.log: append only, never deleted at start; at 256 KB it moves to update.old.log.

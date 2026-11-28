@@ -85,16 +85,9 @@ fn write_atomic_then(path: &Path, bytes: &[u8], before_rename: impl FnOnce() -> 
         f.write_all(bytes)?;
         f.sync_all()
     })();
-    // Windows refuses a rename over a file another writer is renaming at the same moment; a
-    // few short tries settle it.
-    let mut result = written.and_then(|()| before_rename()).and_then(|()| std::fs::rename(&tmp, path));
-    for _ in 0..20 {
-        if result.is_ok() || !tmp.exists() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        result = std::fs::rename(&tmp, path);
-    }
+    // Windows refuses a rename while anything holds the target (another save, an antivirus scan):
+    // the shared helper retries for up to about two seconds.
+    let result = written.and_then(|()| before_rename()).and_then(|()| voxa_core::fsx::replace_file(&tmp, path));
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -106,7 +99,7 @@ fn write_atomic_then(path: &Path, bytes: &[u8], before_rename: impl FnOnce() -> 
 /// reads it then).
 fn write_atomic_keeping(path: &Path, bytes: &[u8], keep: Option<&Path>) -> std::io::Result<()> {
     match keep {
-        Some(keep) => write_atomic_then(path, bytes, || std::fs::rename(path, keep)),
+        Some(keep) => write_atomic_then(path, bytes, || voxa_core::fsx::replace_file(path, keep)),
         None => write_atomic(path, bytes),
     }
 }

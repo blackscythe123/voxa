@@ -13,7 +13,7 @@
                      launch_installer(), and it calls can_install_now (or can_install_on_request)
                      and verify_file before it spawns. On Android, every PackageInstaller commit in
                      Updater.kt comes after the live dictation check in the same function.
-  android-signing    buildTypes.release never signs with signingConfigs.getByName("debug") directly;
+  android-release-key buildTypes.release never signs with signingConfigs.getByName("debug") directly;
                      the debug fallback lives in a helper gated on the release key being absent.
   android-onboarding-permissions
                      SetupScreen.kt only routes to the microphone permission, the keyboard settings
@@ -29,7 +29,7 @@ from .core import Ctx, Violation
 
 HOST_FILES = ("core/voxa-update/src/**/*.rs", "desktop/app/src/update.rs", "android/app/src/main/java/com/voxa/android/notify/Updater.kt")
 ALLOWED_URL = re.compile(r"^https://(github\.com/blackscythe123/voxa/|release-assets\.githubusercontent\.com/|objects\.githubusercontent\.com/)")
-DOC = "(docs/guardrails.md#9-update)"
+DOC = "(docs/guardrails.md#10-update)"
 
 
 def _code_ranges(src: S.Source) -> list[tuple[int, int]]:
@@ -170,7 +170,7 @@ def check_android_signing(ctx: Ctx) -> list[Violation]:
             re_end = S.match_brace(m, ro)
             block = src.code[ro:re_end]
             for d in re.finditer(r"signingConfigs\.getByName\(\s*\"debug\"\s*\)", block):
-                out.append(Violation("android-signing", rel, src.line_of(ro + d.start()), "the release build type signs with the debug key "
+                out.append(Violation("android-release-key", rel, src.line_of(ro + d.start()), "the release build type signs with the debug key "
                                      "directly. Rule: release APKs use the release key (with the v3 lineage); the debug fallback lives in "
                                      f"a helper that only applies while no release key is configured and warns loudly {DOC}",
                                      key="release: debug signing"))

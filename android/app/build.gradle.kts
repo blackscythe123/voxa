@@ -109,8 +109,8 @@ android {
         applicationId = "com.voxa.android"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 10000
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-test-rules.pro")
         // Only the ABIs the Rust core is built for, so no device installs an APK without it.

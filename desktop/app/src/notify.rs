@@ -102,7 +102,7 @@ impl Notifier {
 
     fn save(&self) {
         if let Ok(b) = serde_json::to_vec(&self.pacing) {
-            let _ = std::fs::write(path(), b);
+            let _ = crate::store::write_atomic(&path(), &b);
         }
     }
 
@@ -355,5 +355,43 @@ mod tests {
     fn a_birthday_toast_click_opens_home() {
         assert_eq!(parse("home"), Some(Click::Home));
         assert_eq!(parse("open"), Some(Click::Open));
+    }
+
+    /// Never touches the OS: `ready` is true only so the held-back paths run; nothing here posts.
+    fn notifier() -> Notifier {
+        Notifier { pacing: Pacing::default(), signin_showing: false, dictations: None, ready: true, pending: Pending::default() }
+    }
+
+    /// Toasts that came up while the user looked at Voxa were dropped; they are held back instead.
+    #[test]
+    fn a_toast_while_the_user_looks_at_voxa_is_held_back_not_dropped() {
+        let mut n = notifier();
+        n.signed_out(2, true);
+        n.ready(7, "Notes", true);
+        n.not_sent(true);
+        n.flush(true);
+        assert_eq!(n.pending.signed_out, Some(2), "still held while looking");
+        assert_eq!(n.pending.ready, vec![(7, "Notes".to_string())]);
+        assert_eq!(n.pending.not_sent, 1);
+        // What passed meanwhile is not posted later: clearing drops the held ones too.
+        n.ready = false;
+        n.clear_dictations();
+        n.clear_signin();
+        assert!(n.pending.ready.is_empty() && n.pending.not_sent == 0 && n.pending.signed_out.is_none());
+    }
+
+    /// A toast the user closed bypassed the 6 h and 2 a day limits (it was "updated" silently):
+    /// once dismissed, the next one is a new post counted against the limits.
+    #[cfg(windows)]
+    #[test]
+    fn a_dismissed_toast_counts_again_against_the_limits() {
+        let mut n = notifier();
+        n.dictations = Some(Dictations::Ready(vec![1]));
+        assert_eq!(n.decide(Kind::Dictations, true), Decision::Update, "on screen: updated in place");
+        backend::dismissed_for_test(TAG_DICTATIONS);
+        assert_eq!(n.decide(Kind::Dictations, true), Decision::Post, "closed: a new post");
+        let now = crate::now_ms();
+        n.pacing.posted = vec![now - 1000, now - 2000];
+        assert_eq!(n.decide(Kind::SignIn, true), Decision::Skip, "two in a day already");
     }
 }

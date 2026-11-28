@@ -88,8 +88,8 @@ where
         return Err(e);
     }
     let dest = dir.join(file_name(offer));
-    let _ = std::fs::remove_file(&dest);
-    if let Err(e) = std::fs::rename(&part, &dest) {
+    // Replaces an older copy; retries while Windows reports the target busy (antivirus).
+    if let Err(e) = voxa_core::fsx::replace_file(&part, &dest) {
         let _ = std::fs::remove_file(&part);
         return Err(e.into());
     }

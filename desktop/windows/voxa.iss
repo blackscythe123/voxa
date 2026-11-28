@@ -11,7 +11,7 @@
 ; The version comes from Cargo.toml (CI passes /DAppVersion). This default must equal the
 ; workspace version; the lint release-version-sync checks it.
 #ifndef AppVersion
-#define AppVersion "0.4.7"
+#define AppVersion "1.0.0"
 #endif
 #define Bin "..\..\target\release"
 

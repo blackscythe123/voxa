@@ -34,6 +34,12 @@ pub fn take_dismissed() -> Vec<String> {
     std::mem::take(&mut *DISMISSED.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Tests: the user closed the toast with this tag.
+#[cfg(test)]
+pub fn dismissed_for_test(tag: &str) {
+    DISMISSED.lock().unwrap_or_else(|e| e.into_inner()).push(tag.to_string());
+}
+
 fn gone(toast: Option<&ToastNotification>) {
     if let Some(tag) = toast.and_then(|t| t.Tag().ok()) {
         DISMISSED.lock().unwrap_or_else(|e| e.into_inner()).push(tag.to_string());

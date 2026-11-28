@@ -13,6 +13,14 @@ pub fn fine(path: &Path) -> Vec<u8> {
     std::fs::read(path).unwrap_or_default()                 // Good
 }
 
+pub fn save(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    std::fs::rename(tmp, path)                              // Bad: robust-rename
+}
+
+pub fn save_safely(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    voxa_core::fsx::replace_file(tmp, path)                 // Good
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

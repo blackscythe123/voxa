@@ -16,6 +16,7 @@ mod talk;
 mod store;
 mod recover;
 mod rules;
+mod strip_rules;
 mod uploads;
 mod update;
 mod audio;
@@ -108,7 +109,13 @@ fn confirm_after() -> Duration {
 }
 
 fn fake_mode() -> bool {
-    std::env::var("VOXA_FAKE").is_ok_and(|v| !v.is_empty())
+    fake_from(test_hooks(), std::env::var("VOXA_FAKE").ok().as_deref())
+}
+
+/// The stand-in recorder (VOXA_FAKE) is a test hook like VOXA_TEST_*: only in a test copy, so a
+/// stand-in take never lands in the real History (the e2e harness once ran it on real data).
+fn fake_from(test_hooks: bool, var: Option<&str>) -> bool {
+    test_hooks && var.is_some_and(|v| !v.is_empty())
 }
 
 /// Where the OS keeps per-user app data: %APPDATA% on Windows, ~/Library/Application Support on Mac.
@@ -407,9 +414,10 @@ impl Voxa {
                 .update(cx, |v, cx| {
                     // A take whose mic delivers nothing 0.7 s in: restart the stream once (no UI).
                     // Never while paused; after a resume it judges the time since the resume.
-                    if v.mic_on && !v.paused() && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
+                    let (mic_on, paused, revived, live_for) = (v.mic_on, v.paused(), v.mic_revived, v.rec_started.elapsed());
+                    if mic_on && !paused && !revived {
                         if let Some(m) = v.mic.as_mut() {
-                            if m.stalled() {
+                            if rules::revive_mic(mic_on, paused, revived, live_for, m.stalled()) {
                                 v.mic_revived = true;
                                 os::log("  mic delivered no sound: restarting the stream");
                                 if let Err(e) = m.revive() {
@@ -418,7 +426,7 @@ impl Voxa {
                             }
                         }
                     }
-                    if v.hotkey_paused && v.hotkey_paused_at.is_some_and(|t| t.elapsed() > Duration::from_secs(30)) {
+                    if rules::shortcut_pick_timed_out(v.hotkey_paused, v.hotkey_paused_at.map(|t| t.elapsed())) {
                         os::log("shortcut picking stopped answering: resuming the shortcut");
                         v.pause_hotkey(false);
                     }
@@ -1109,7 +1117,7 @@ impl Voxa {
         let jobs: Vec<voxa_core::Job> = self.flow.jobs().cloned().collect();
         for job in jobs {
             let Some(&id) = self.job_entries.get(&job.id) else { continue };
-            if self.job_synced.get(&job.id) == Some(&job.state) {
+            if !rules::sync_needed(self.job_synced.get(&job.id), &job.state) {
                 continue;
             }
             let secs = self.job_secs.get(&job.id).copied().unwrap_or(0.0);
@@ -1703,7 +1711,7 @@ impl Voxa {
     /// Esc is bound only while recording, so Voxa never steals Esc from other apps. Not while
     /// paused: the user is working elsewhere then, and Esc would throw the whole take away.
     fn sync_esc(&mut self) {
-        let want = matches!(self.flow.state(), State::Recording { paused: false, .. });
+        let want = rules::esc_wanted(self.flow.state());
         if want != self.esc_bound {
             let r = if want { self.hotkeys.register(self.esc_key) } else { self.hotkeys.unregister(self.esc_key) };
             self.esc_bound = want && r.is_ok();
@@ -2225,8 +2233,11 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
             v
         })
     });
-    let Ok(Ok(new)) = opened else {
-        // Keep using the old strip.
+    let live = voxa.update(cx, |v, _| !matches!(v.flow.state(), State::Idle)).unwrap_or(false);
+    let opened = opened.ok().and_then(|r| r.ok());
+    let plan = strip_rules::after_open(opened.is_some(), live);
+    let Some(new) = opened.filter(|_| plan != strip_rules::AfterOpen::KeepOld) else {
+        // Keep using the old strip, never blanked.
         os::STRIP.store(old_strip, std::sync::atomic::Ordering::Relaxed);
         return None;
     };
@@ -2235,8 +2246,7 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
         os::move_strip(x, y, w, h);
     }
     os::place_strip();
-    let wanted = voxa.update(cx, |v, _| !matches!(v.flow.state(), State::Idle)).unwrap_or(false);
-    if wanted {
+    if plan == strip_rules::AfterOpen::Show {
         os::strip_visible(true);
     } else {
         // Paint once, unseen, so it isn't blank when it's shown later.
@@ -2497,6 +2507,16 @@ mod test_hook_tests {
         assert!(on(true, false, Some("1")));
         assert!(on(true, true, None));
     }
+
+    /// The stand-in recorder ran on real data from the e2e harness: it is a test hook now.
+    #[test]
+    fn the_stand_in_recorder_only_runs_in_a_test_copy() {
+        assert!(!super::fake_from(false, Some("ok")), "never against the real data");
+        assert!(!super::fake_from(true, Some("")));
+        assert!(super::fake_from(true, Some("ok")));
+        let harness = include_str!("../tests-e2e/harness.ps1");
+        assert!(harness.contains("$env:VOXA_DATA = $Data"), "the e2e harness runs a test copy");
+    }
 }
 
 #[cfg(test)]
@@ -2507,5 +2527,14 @@ mod tests {
         assert!(super::is_window_close_noise(r#"Error { code: HRESULT(0x80040102), message: "Invalid window handle" }"#));
         assert!(super::is_window_close_noise(r#"Error { code: HRESULT(0x80070578), message: "Invalid window handle." }"#));
         assert!(!super::is_window_close_noise("DirectX device lost"));
+    }
+
+    /// The strip window never takes focus when it opens (Voxa never steals focus).
+    #[test]
+    fn the_strip_window_opens_without_focus() {
+        let o = super::strip_options(gpui::point(gpui::px(0.), gpui::px(0.)));
+        assert!(!o.focus, "the strip must open without focus");
+        assert!(matches!(o.kind, gpui::WindowKind::PopUp));
+        assert!(!o.is_movable && !o.is_resizable);
     }
 }

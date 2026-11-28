@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import com.voxa.android.diag.Diag
 import com.voxa.android.ui.Birthday
+import com.voxa.android.ui.GreetClock
 import com.voxa.android.voxa
 import uniffi.voxa_ffi.birthdayNextWish
 import uniffi.voxa_ffi.birthdayWishDue
@@ -79,7 +80,8 @@ object BirthdayWish {
             birthdayWishDue(now.toLocalDate().toString(), (now.hour * 60 + now.minute).toUShort(), bday.first.toUByte(), bday.second.toUByte(), wishedYear(ctx))
         Diag.log("birthday", "alarm: ${if (due) "wishing" else "not due"}")
         if (due) {
-            val name = runCatching { ctx.voxa.core.cachedAccount()?.name }.getOrNull()
+            // Debug builds: `--es debug_name Alexandria` stands in when no account is known.
+            val name = runCatching { ctx.voxa.core.cachedAccount()?.name }.getOrNull()?.takeIf { it.isNotBlank() } ?: GreetClock.debugName(ctx)
             if (Notifier.birthday(ctx, name)) {
                 ctx.getSharedPreferences("notify", Context.MODE_PRIVATE).edit().putInt("birthday_wished", now.year).apply()
             }

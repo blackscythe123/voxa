@@ -249,7 +249,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
-        std::fs::rename(&tmp, path)
+        voxa_core::fsx::replace_file(&tmp, path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);

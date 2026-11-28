@@ -14,6 +14,8 @@ net = ["dep:reqwest"]
 sign = []
 
 [dependencies]
+# Pure (no UI, no I/O beyond fsx::replace_file, which retries a busy rename on Windows).
+voxa-core = { path = "../voxa-core" }
 # Same minor as the ring that rustls already links, so it dedups and costs about 0 bytes.
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }

@@ -7913,7 +7913,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voxa-chatgpt"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -7923,14 +7923,14 @@ dependencies = [
 
 [[package]]
 name = "voxa-core"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "hound",
 ]
 
 [[package]]
 name = "voxa-desktop"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "block",
  "chrono",
@@ -7964,7 +7964,7 @@ dependencies = [
 
 [[package]]
 name = "voxa-ffi"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -7978,24 +7978,26 @@ dependencies = [
 
 [[package]]
 name = "voxa-nudge"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
+ "voxa-core",
 ]
 
 [[package]]
 name = "voxa-signin"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "tao",
+ "voxa-core",
  "wry",
 ]
 
 [[package]]
 name = "voxa-store"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "hound",
  "serde",
@@ -8006,17 +8008,18 @@ dependencies = [
 
 [[package]]
 name = "voxa-update"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "ring",
  "serde",
  "serde_json",
+ "voxa-core",
 ]
 
 [[package]]
 name = "voxa-vad"
-version = "0.4.7"
+version = "1.0.0"
 dependencies = [
  "hound",
  "ndarray",

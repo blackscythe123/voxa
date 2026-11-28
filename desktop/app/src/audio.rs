@@ -126,14 +126,23 @@ fn default_device() -> Result<(cpal::Device, String), MicError> {
 fn pick_device(preferred: Option<&str>) -> Result<(cpal::Device, String), MicError> {
     if let Some(want) = preferred {
         if let Ok(devices) = cpal::default_host().input_devices() {
-            for d in devices {
-                if d.name().is_ok_and(|n| n == want) {
+            let devices: Vec<cpal::Device> = devices.collect();
+            let names: Vec<String> = devices.iter().map(|d| d.name().unwrap_or_default()).collect();
+            if let Some(i) = chosen_mic(Some(want), &names) {
+                if let Some(d) = devices.into_iter().nth(i) {
                     return Ok((d, want.to_string()));
                 }
             }
         }
     }
     default_device()
+}
+
+/// Settings' microphone: the chosen one when it is plugged in, else (None) the system default,
+/// so an unplugged headset never leaves Voxa without a mic.
+pub fn chosen_mic(preferred: Option<&str>, names: &[String]) -> Option<usize> {
+    let want = preferred?;
+    names.iter().position(|n| n == want)
 }
 
 /// Names of the microphones the OS reports, for the picker in Settings.
@@ -445,6 +454,15 @@ mod tests {
         assert!(matches!(MicError::from_backend(gone.into()), MicError::NoDevice));
         let other = "A backend-specific error has occurred: The audio engine failed (0x88890008)";
         assert!(matches!(MicError::from_backend(other.into()), MicError::Failed(_)));
+    }
+
+    /// Mic picker: the chosen microphone when present, the system default otherwise.
+    #[test]
+    fn the_chosen_mic_is_used_when_present_and_the_default_otherwise() {
+        let names = vec!["Headset (USB)".to_string(), "Microphone Array".to_string()];
+        assert_eq!(super::chosen_mic(Some("Microphone Array"), &names), Some(1));
+        assert_eq!(super::chosen_mic(Some("Unplugged headset"), &names), None, "unplugged: follow the system default");
+        assert_eq!(super::chosen_mic(None, &names), None, "no choice: the system default");
     }
 
     /// Manual: cargo test -p voxa-desktop list_microphones -- --ignored --nocapture
