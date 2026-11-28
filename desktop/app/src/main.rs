@@ -441,6 +441,10 @@ impl Voxa {
                     for click in notify::take_clicks() {
                         v.on_notification(click, cx);
                     }
+                    // About every 10 s: the birthday wish at midnight.
+                    if v.command_tick % 250 == 0 {
+                        v.birthday_tick();
+                    }
                     if os::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         os::log("another launch asked to open the window");
                         v.open_home(None, cx);
@@ -747,10 +751,29 @@ impl Voxa {
         strip || os::is_own_window(os::foreground())
     }
 
+    /// The birthday wish: shown by the notifier only in the first minutes after midnight on the
+    /// birthday (the local clock; a test copy can pin it with VOXA_TEST_NOW).
+    fn birthday_tick(&mut self) {
+        use chrono::{Datelike, Timelike};
+        let Some(birthday) = self.settings.birthday() else { return };
+        let now = greet::now();
+        let today = voxa_core::greeting::Date::new(now.year(), now.month() as u8, now.day() as u8);
+        let minutes = (now.hour() * 60 + now.minute()) as u16;
+        let looking = self.user_is_looking();
+        // The account's name, for "Happy birthday, Sam": read only when the wish is due.
+        let name = if notify::birthday_due(today, minutes, Some(birthday), self.settings.birthday_wish, 0) {
+            std::fs::read(data_dir().join("account.json")).ok().and_then(|b| serde_json::from_slice::<voxa_chatgpt::Account>(&b).ok()).map(|a| a.name)
+        } else {
+            None
+        };
+        self.notifier.birthday(today, minutes, Some(birthday), self.settings.birthday_wish, name.as_deref(), looking);
+    }
+
     fn on_notification(&mut self, click: notify::Click, cx: &mut Context<Self>) {
         match click {
             notify::Click::SignIn => self.sign_in(cx),
             notify::Click::Open => self.open_home(Some(Page::History), cx),
+            notify::Click::Home => self.open_home(None, cx),
             notify::Click::Copy(id) => {
                 if let Some(e) = self.history.get(id).filter(|e| !e.text.is_empty()) {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(e.text.clone()));
