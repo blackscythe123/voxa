@@ -293,10 +293,7 @@ class VoxaKeyboard : InputMethodService() {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         }.getOrDefault(pkg)
         val id = if (info.fieldId == View.NO_ID) 0 else info.fieldId
-        var window = pkg.hashCode().toLong()
-        window = window * 1_000_003L + id
-        window = window * 1_000_003L + inputSession
-        return FfiTarget(label, window.toULong())
+        return FfiTarget(label, KeyRules.fieldIdentity(pkg, id, inputSession).toULong())
     }
 
     private fun pushReadiness() {
@@ -601,7 +598,7 @@ class VoxaKeyboard : InputMethodService() {
                     // block the main thread for a few hundred ms, which must not turn a tap into a hold.
                     val held = ev.eventTime - ev.downTime
                     val recording = flow.state() is FlowState.Recording
-                    val stop = recording && (!pressStarted || (holdToTalk && held > HOLD_MS))
+                    val stop = KeyRules.stopOnRelease(recording, pressStarted, holdToTalk, held)
                     Diag.log("ime", "mic up after $held ms: ${if (stop) "stop" else if (recording) "keep listening (tap)" else "not recording"}")
                     if (stop) dispatch(FlowEvent.Stop)
                     v.performClick()
@@ -612,7 +609,7 @@ class VoxaKeyboard : InputMethodService() {
                     v.isPressed = false
                     pressActive = false
                     val held = ev.eventTime - ev.downTime
-                    if (pressStarted && holdToTalk && held > HOLD_MS && flow.state() is FlowState.Recording) {
+                    if (KeyRules.stopOnCancel(flow.state() is FlowState.Recording, pressStarted, holdToTalk, held)) {
                         Diag.log("ime", "mic press cancelled after $held ms: stop")
                         dispatch(FlowEvent.Stop)
                     } else if (rebuildPending && !busyForRebuild()) {
@@ -685,10 +682,7 @@ class VoxaKeyboard : InputMethodService() {
     private fun audioMode(): Int = getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
 
     /** Phone call, VoIP call (WhatsApp, Meet), call screening or a redirected call. */
-    private fun inCall(): Boolean = audioMode() in setOf(
-        AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION,
-        4 /* MODE_CALL_SCREENING */, 5 /* MODE_CALL_REDIRECT */, 6 /* MODE_COMMUNICATION_REDIRECT */,
-    )
+    private fun inCall(): Boolean = KeyRules.inCall(audioMode())
 
     private fun showNotice(title: String, detail: String) {
         notice = title to detail
@@ -702,10 +696,11 @@ class VoxaKeyboard : InputMethodService() {
     private fun onMicInterrupted() {
         // Paused, the mic is already released: nothing of ours was interrupted.
         if (destroyed || flow.state() !is FlowState.Recording || isPaused()) return
-        if (recorder.peakLevel <= 0.001f) {
+        val taken = KeyRules.micTaken(recorder.peakLevel, inCall())
+        if (taken != KeyRules.MicTaken.StopAndSend) {
             Diag.log("ime", "mic taken with nothing recorded: cancelling (audio mode ${audioMode()})")
             dispatch(FlowEvent.Cancel)
-            if (inCall()) showNotice("You're on a call", "Voxa can't use the microphone during a call. Nothing was recorded.")
+            if (taken == KeyRules.MicTaken.CancelInCall) showNotice("You're on a call", "Voxa can't use the microphone during a call. Nothing was recorded.")
             else showNotice("Another app is using the microphone", "Nothing was recorded. Try again when it's free.")
         } else {
             stopIfRecording("interrupted")
@@ -851,7 +846,7 @@ class VoxaKeyboard : InputMethodService() {
 
     companion object {
         const val TAG = "VoxaKeyboard"
-        const val HOLD_MS = 400L
+        const val HOLD_MS = KeyRules.HOLD_MS
         /** How long "Pasted in X" stays before the keyboard is back to idle. */
         const val DONE_MS = 1500L
         /** How long a finished text waits for a field after the keyboard went away before the

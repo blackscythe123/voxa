@@ -159,6 +159,18 @@ fun HomeHeader(activity: MainActivity, account: AccountInfo?, problems: List<Pro
     }
 }
 
+/** The greeting's text and whether it is at 40 sp (else 32 sp); [fits40] measures one line at
+ *  40 sp. Owner decision: one line when it fits. */
+fun greetingLayout(lead: String, name: String?, fits40: (String) -> Boolean): Pair<String, Boolean> {
+    val full = if (name != null) "$lead, $name" else lead
+    return when {
+        fits40(full) -> full to true
+        name == null -> lead to false
+        fits40("$lead,") && fits40(name) -> "$lead,\n$name" to true
+        else -> "$lead,\n$name" to false
+    }
+}
+
 /** The greeting on one line when it fits at 40 sp; otherwise it breaks before the name, never
  *  inside the greeting words; if a line still doesn't fit, 32 sp, never smaller. */
 @Composable
@@ -170,13 +182,8 @@ fun GreetingLine(lead: String, name: String?) {
         val max = constraints.maxWidth
         fun fits(text: String, style: androidx.compose.ui.text.TextStyle) =
             measurer.measure(text, style, maxLines = 1, softWrap = false).size.width <= max
-        val full = if (name != null) "$lead, $name" else lead
-        val (text, style) = when {
-            fits(full, Greet40) -> full to Greet40
-            name == null -> lead to Greet32
-            fits("$lead,", Greet40) && fits(name, Greet40) -> "$lead,\n$name" to Greet40
-            else -> "$lead,\n$name" to Greet32
-        }
+        val (text, big) = greetingLayout(lead, name) { fits(it, Greet40) }
+        val style = if (big) Greet40 else Greet32
         Text(text, Modifier.semantics { heading() }, style = style, color = c.text, softWrap = false, maxLines = 2)
     }
 }

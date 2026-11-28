@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
         // The keyboard keeps the app's process alive, so "once per process" would mean almost never.
         val animationsOff = Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         val freeze = if (BuildConfig.DEBUG && intent.hasExtra("debug_launch_at")) intent.getFloatExtra("debug_launch_at", 0.5f) else null
-        val showLaunch = freeze != null || (savedInstanceState == null && openRequest == null)
+        val showLaunch = showsLaunch(freeze != null, savedInstanceState == null, openRequest)
         splashShowing = showLaunch && freeze == null
         com.voxa.android.ui.ThemePref.load(this)
         setContent {
@@ -346,6 +346,12 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /** The written splash plays on every launcher open (never once per process: the keyboard
+         *  keeps the process alive, so it almost never showed), not on rotation and not when the
+         *  keyboard opens the app for sign-in or the mic. A debug freeze always shows it. */
+        fun showsLaunch(frozen: Boolean, freshStart: Boolean, openRequest: String?): Boolean =
+            frozen || (freshStart && openRequest == null)
+
         const val EXTRA_OPEN = "open"
         const val OPEN_SIGN_IN = "sign-in"
         const val OPEN_MIC = "mic"

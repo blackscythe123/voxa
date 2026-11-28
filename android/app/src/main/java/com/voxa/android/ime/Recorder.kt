@@ -64,7 +64,7 @@ class Recorder(
             main.removeCallbacks(confirmSilenced)
             if (now) {
                 val sinceStart = SystemClock.elapsedRealtime() - startedAt
-                main.postDelayed(confirmSilenced, maxOf(1500L, 1000L - sinceStart + 1500L))
+                main.postDelayed(confirmSilenced, KeyRules.silencedConfirmDelayMs(sinceStart))
             }
         }
     }
@@ -170,7 +170,7 @@ class Recorder(
                         if (n <= 0) {
                             // A dead or invalid recorder returns at once, forever: never spin. A
                             // short run of errors is a hiccup; a lasting one ends the take.
-                            if (n < 0 && ++errors >= MAX_READ_ERRORS) {
+                            if (n < 0 && KeyRules.readErrorsEndTake(++errors)) {
                                 com.voxa.android.diag.Diag.log("mic", "read failed $errors times (code $n): stopping")
                                 main.post { if (running) onInterrupted() }
                                 break
@@ -243,7 +243,7 @@ class Recorder(
                 if (change == AudioManager.AUDIOFOCUS_LOSS) {
                     com.voxa.android.diag.Diag.log("mic", "audio focus lost after $sinceStart ms")
                     // A focus change in the first second is the system settling, not a call.
-                    if (running && sinceStart > 1000) onInterrupted()
+                    if (running && KeyRules.focusLossEndsTake(change, sinceStart)) onInterrupted()
                 } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
                     // An alarm, a timer or a navigation prompt: recording still works, so the take
                     // goes on. A call silences the mic, and that is caught separately.
