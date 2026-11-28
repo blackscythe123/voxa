@@ -153,6 +153,12 @@ reading `HOME`, `APPDATA`, `LOCALAPPDATA` (and similar), a `dirs::*_dir()`, or c
 `ALLOWED` lists `app_data_root` itself (only called from the guarded `data_dir` and
 `electron_dir`) and macOS `launch_agent` (the OS login item, not app data).
 
+**Check** (`update-isolation`, `isolation.py`). In `desktop/app/src/update.rs`, every function
+that builds the update client (`voxa_update::fetch::Client::new`) checks for a test copy
+(`VOXA_DATA` or `test_hooks()`, in its body or in a same-file function it calls), so a test copy
+uses its local test feed and never the real updater state. Starting the installer is covered by
+`update-gate`: the install gate refuses any test copy.
+
 ## 7. Release
 
 **Decision.** Release hygiene. Android GitHub releases never become the repo's "latest" release.
@@ -163,6 +169,22 @@ reading `HOME`, `APPDATA`, `LOCALAPPDATA` (and similar), a `dirs::*_dir()`, or c
 **Check** (`release-latest`, `release.py`). Every `gh release create` / `gh release edit` in the
 docs, scripts and workflows that mentions Android or an `.apk` passes `--latest=false`. (Commit
 messages are already checked by a hook.)
+
+The `update-feed` release that holds both signed feeds passes `--latest=false` or `--prerelease`
+too (same rule, same file).
+
+**Decision.** One version everywhere (auto update spec B6, 2026-11-28). The Cargo workspace version
+is the single source for the desktop; Android's `versionName` matches it and its `versionCode`
+follows `major*10000 + minor*100 + patch` (1.0.0 is 10000).
+
+**Why.** The updater compares the running version with the feed. A mismatch between the binary,
+the installer and the release tag makes it reinstall the same version forever, or downgrade.
+
+**Check** (`release-version-sync`, `release.py`). The workspace version equals the default
+`#define AppVersion` in `desktop/windows/voxa.iss` (and nothing hard-codes `AppVersion=x.y.z`),
+`desktop.yml` passes `/DAppVersion` to ISCC and compares `GITHUB_REF_NAME` with the Cargo
+version before publishing, and `android/app/build.gradle.kts` has the matching `versionName` and
+`versionCode`.
 
 ## 8. Robustness
 
@@ -182,6 +204,43 @@ messages are already checked by a hook.)
   `voxa_chatgpt::write_unique_then_rename`), never with a bare `fs::write` / `File::create` on the
   final path; and every write-temp-then-rename function uses a unique temp name (process id plus a
   counter or time), so two writers never clobber one temp file.
+
+## 9. Update
+
+**Decision.** Voxa updates itself only from signed feeds on GitHub, never during a take, and the
+signing keys never enter the repo (auto update spec, owner approved 2026-11-28; `docs/updates.md`,
+`docs/update-keys.md`).
+
+**Why.** An updater is the most powerful code in the app: a bad host, a leaked key or an install in
+the middle of a dictation would hurt every user at once.
+
+**Checks** (`update.py`):
+
+- `update-hosts`: the updater's code (`core/voxa-update/src`, `desktop/app/src/update.rs`,
+  `notify/Updater.kt`, outside tests) has no plain `http://` URL, never calls
+  `danger_accept_invalid*`, and every URL literal is under `https://github.com/blackscythe123/voxa/`
+  or `release-assets.githubusercontent.com` / `objects.githubusercontent.com`.
+- `update-key-present`: `core/voxa-update/src/keys.rs` holds at least 2 keys of 64 hex characters
+  with unique ids. All-zero placeholders are a note in everyday runs and a violation with
+  `--release` (`python tools/lint/run.py --release`, what a tagged release runs); the crate's
+  `build.rs` also fails a `VOXA_RELEASE_BUILD=1` build with placeholders.
+- `update-secret`: no PEM private key block, no Ed25519 PKCS#8 prefix (base64 of
+  `302e020100300506032b6570`) and no `.jks`, `.keystore`, `.p12` or `.pfx` file in the tree, outside
+  the labelled TEST fixtures (`core/voxa-update/tests/fixtures/`, `tools/lint/fixtures/`).
+- `update-gate`: the only desktop function that starts the installer (a `.spawn(` with
+  `/VERYSILENT` or `installer_args(`) is `update.rs` `launch_installer()`, and it calls
+  `can_install_now` (or `can_install_on_request`) and `verify_file` before it spawns. On Android,
+  every PackageInstaller `commit(` in `Updater.kt` comes after `dictationLive()` in the same
+  function.
+- `android-signing`: `buildTypes.release` never names `signingConfigs.getByName("debug")`; the debug
+  fallback (until the owner creates the release key) lives in a helper gated on the release key
+  being absent, with a loud build warning, and the gradle build fails a debug-signed release once
+  the lineage exists.
+- `android-onboarding-permissions`: `SetupScreen.kt` only routes to the microphone permission, the
+  keyboard settings and `ACTION_MANAGE_UNKNOWN_APP_SOURCES`; never `POST_NOTIFICATIONS`.
+
+The existing copy, privacy, focus, robustness, contrast and APK size rules apply to the update
+code unchanged.
 
 ## Open items found when the guardrails were added
 
