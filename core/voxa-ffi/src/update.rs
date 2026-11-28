@@ -5,7 +5,7 @@
 //! Trap: `core_version()` is the workspace version, not the APK's. The caller always passes
 //! `BuildConfig.VERSION_CODE`; nothing here uses this crate's own version for the comparison.
 
-use voxa_update::{Channel, Origin, UpdateError, fetch::Client, keys, policy};
+use voxa_update::{Channel, CheckState, Origin, UpdateError, fetch::Client, keys, policy};
 
 /// A verified update Android may install. Mirrors `voxa_update::Offer`.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
@@ -25,12 +25,21 @@ pub struct UpdateOffer {
     pub auto: bool,
 }
 
-/// One check: the offer, if any, and the serial to remember (the highest verified so far).
+/// One check. Always returned, also when the check failed, because the schedule state changes
+/// either way: store `state` as it is (SharedPreferences "update", key "check_state").
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct UpdateCheck {
     pub offer: Option<UpdateOffer>,
+    /// The highest feed serial verified so far.
     pub serial: u64,
     pub paused: bool,
+    /// False when nothing went to the network: an automatic check that isn't due, or a second
+    /// manual check within a minute (show the last result again).
+    pub checked: bool,
+    /// "" when the check worked, else "offline", "refused", "bad_file", "no_space" or "failed".
+    pub failure: String,
+    /// The updated schedule, ETag and cached feed (JSON). Opaque to Kotlin.
+    pub state: String,
 }
 
 /// What went wrong, as the app needs it (`voxa_update::UpdateError` folded into the five things
@@ -104,15 +113,45 @@ impl From<&UpdateOffer> for voxa_update::Offer {
 
 const PLATFORM: &str = "Android";
 
-fn check_with(origin: Origin, keys: &[(u8, [u8; 32])], abis: &[String], version_code: u64, highest_serial: u64) -> Result<UpdateCheck, UpdateFailure> {
-    let client = Client::new(origin, &version_name(version_code), PLATFORM)?;
-    let m = client.check(keys, Channel::Android, highest_serial)?;
-    let offer = policy::offer_android(&m, version_code, abis);
-    Ok(UpdateCheck {
-        offer: offer.map(Into::into),
-        serial: policy::next_serial(highest_serial, m.serial),
-        paused: m.paused,
-    })
+fn failure_code(f: UpdateFailure) -> &'static str {
+    match f {
+        UpdateFailure::Offline => "offline",
+        UpdateFailure::Refused => "refused",
+        UpdateFailure::BadFile => "bad_file",
+        UpdateFailure::NoSpace => "no_space",
+        UpdateFailure::Failed => "failed",
+    }
+}
+
+/// The owner's cheap check rules, all in `voxa_update::CheckState`: at most one automatic check a
+/// day at this install's own time of day (with 1 h, 4 h, then next day backoff), a manual check
+/// at most once a minute, and a conditional request (a 304 reuses the stored feed, verified again).
+fn check_with(origin: Origin, keys: &[(u8, [u8; 32])], abis: &[String], version_code: u64, state_json: &str, now_ms: u64, manual: bool) -> UpdateCheck {
+    let mut state: CheckState = serde_json::from_str(state_json).unwrap_or_default();
+    state.init_random(now_ms);
+    let wait = if manual { !state.manual_allowed(now_ms) } else { !state.due(now_ms) };
+    let done = |state: &CheckState, offer: Option<UpdateOffer>, paused: bool, checked: bool, failure: &str| UpdateCheck {
+        offer,
+        serial: state.highest_serial,
+        paused,
+        checked,
+        failure: failure.to_string(),
+        state: serde_json::to_string(state).unwrap_or_default(),
+    };
+    if wait {
+        return done(&state, None, false, false, "");
+    }
+    let client = match Client::new(origin, &version_name(version_code), PLATFORM) {
+        Ok(c) => c,
+        Err(e) => return done(&state, None, false, false, failure_code(e.into())),
+    };
+    match client.check_with_state(keys, Channel::Android, &mut state, now_ms, manual) {
+        Ok(m) => {
+            let offer = policy::offer_android(&m, version_code, abis).map(Into::into);
+            done(&state, offer, m.paused, true, "")
+        }
+        Err(e) => done(&state, None, false, true, failure_code(e.into())),
+    }
 }
 
 /// "1.0.0" from versionCode 10000, for the User-Agent only.
@@ -120,19 +159,21 @@ fn version_name(code: u64) -> String {
     format!("{}.{}.{}", code / 10000, code / 100 % 100, code % 100)
 }
 
-/// Check the Android feed. `abis`: `Build.SUPPORTED_ABIS`, best first; the universal APK is the
-/// fallback. `version_code`: `BuildConfig.VERSION_CODE`. `highest_serial`: the highest serial
-/// verified before (0 the first time).
+/// Check the Android feed, if the cheap check rules allow it now. `abis`: `Build.SUPPORTED_ABIS`,
+/// best first; the universal APK is the fallback. `version_code`: `BuildConfig.VERSION_CODE`.
+/// `state_json`: what the last call returned in `state` ("" the first time). `manual`: the user
+/// pressed "Check for updates".
 ///
 /// `test_feed` and `test_key` are for debug builds only: Kotlin passes them behind
 /// BuildConfig.DEBUG (so R8 drops that path from release) to read a LOCAL test feed signed with a
 /// TEST key. A test feed on plain http must be loopback or the emulator's host alias. With both
 /// None (always, in release) this is the published feed and the compiled keys.
 #[uniffi::export]
-pub fn update_check(abis: Vec<String>, version_code: u64, highest_serial: u64, test_feed: Option<String>, test_key: Option<String>) -> Result<UpdateCheck, UpdateFailure> {
-    match (test_feed, test_key) {
-        (Some(url), Some(key)) => check_with(Origin::test(&url).ok_or(UpdateFailure::Offline)?, &[(1, test_key_bytes(&key)?)], &abis, version_code, highest_serial),
-        _ => check_with(Origin::github(Channel::Android), &keys::KEYS, &abis, version_code, highest_serial),
+pub fn update_check(abis: Vec<String>, version_code: u64, state_json: String, now_ms: u64, manual: bool, test_feed: Option<String>, test_key: Option<String>) -> UpdateCheck {
+    let test = test_feed.and_then(|url| Some((Origin::test(&url)?, test_key_bytes(test_key.as_deref()?).ok()?)));
+    match test {
+        Some((origin, key)) => check_with(origin, &[(1, key)], &abis, version_code, &state_json, now_ms, manual),
+        None => check_with(Origin::github(Channel::Android), &keys::KEYS, &abis, version_code, &state_json, now_ms, manual),
     }
 }
 
@@ -172,6 +213,9 @@ pub fn update_verify_feed_bytes(feed: Vec<u8>, key_hex: String, abis: Vec<String
         offer: offer.map(Into::into),
         serial: policy::next_serial(highest_serial, m.serial),
         paused: m.paused,
+        checked: true,
+        failure: String::new(),
+        state: String::new(),
     })
 }
 
@@ -198,8 +242,40 @@ mod tests {
     }
 
     #[test]
-    fn a_test_feed_on_a_public_plain_host_is_refused() {
+    fn a_second_check_right_away_does_no_network() {
         let url = format!("{}://example.com/android.json", "http");
-        assert_eq!(update_check(vec![], 10000, 0, Some(url), Some("00".repeat(32))).unwrap_err(), UpdateFailure::Offline);
+        // A public plain-http test feed is not a test origin: the published feed is used instead,
+        // and it is never fetched again within the minute.
+        assert!(Origin::test(&url).is_none());
+        let first = check_with(Origin::test(&format!("{}://127.0.0.1:1/f/android.json", "http")).unwrap(), &[(1, [1; 32])], &[], 10000, "", 1_000_000, true);
+        assert!(first.checked);
+        assert_eq!(first.failure, "offline");
+        let again = check_with(Origin::test(&format!("{}://127.0.0.1:1/f/android.json", "http")).unwrap(), &[(1, [1; 32])], &[], 10000, &first.state, 1_000_000 + 5_000, true);
+        assert!(!again.checked, "a second manual check within a minute does no network");
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    #[test]
+    fn an_automatic_check_that_is_not_due_does_no_network() {
+        let origin = || Origin::test(&format!("{}://127.0.0.1:1/f/android.json", "http")).unwrap();
+        // The first call picks this install's slot and waits for it (no network yet unless due).
+        let first = check_with(origin(), &[(1, [1; 32])], &[], 10000, "", 1_000_000, false);
+        let st: CheckState = serde_json::from_str(&first.state).unwrap();
+        assert!(st.slot_ms.is_some());
+        if !first.checked {
+            assert_eq!(first.failure, "");
+        }
+        // Right after any automatic attempt, the next one is not due.
+        let again = check_with(origin(), &[(1, [1; 32])], &[], 10000, &first.state, 1_000_000 + 60_000, false);
+        if first.checked {
+            assert!(!again.checked);
+        }
+        // Bad stored JSON starts afresh, never crashes.
+        let fresh = check_with(origin(), &[(1, [1; 32])], &[], 10000, "{not json", 1_000_000, false);
+        assert!(serde_json::from_str::<CheckState>(&fresh.state).is_ok());
     }
 }
