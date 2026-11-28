@@ -1753,11 +1753,16 @@ fn main() {
                     v.handle(Event::Cancel, cx);
                 });
             }
-            // Test only (VOXA_TEST_PAUSE=<seconds>, and only with a separate VOXA_DATA folder): a real
-            // take that talks, pauses, resumes and talks for <seconds> each, then is CANCELLED, so
-            // nothing is ever sent or pasted. Logs Esc, the talking time and the file's length.
-            let pause_secs = std::env::var("VOXA_TEST_PAUSE").ok().and_then(|s| s.parse::<u64>().ok()).filter(|_| std::env::var_os("VOXA_DATA").is_some());
+            // Test only (VOXA_TEST_PAUSE=<s> or <talk>,<paused>,<resumed> in seconds, and only with a
+            // separate VOXA_DATA folder): a real take that talks, pauses and resumes, then is
+            // CANCELLED, so nothing is ever sent or pasted. Logs Esc, the talking time and the file.
+            let pause_secs: Option<Vec<f32>> = std::env::var("VOXA_TEST_PAUSE")
+                .ok()
+                .and_then(|s| s.split(',').map(|x| x.trim().parse::<f32>().ok()).collect::<Option<Vec<f32>>>())
+                .map(|v| if v.len() == 1 { vec![v[0]; 3] } else { v })
+                .filter(|v| v.len() == 3 && std::env::var_os("VOXA_DATA").is_some());
             if let (Some(secs), Ok(handle)) = (pause_secs, opened.as_ref()) {
+                let wait = |i: usize| Duration::from_secs_f32(secs[i].max(0.0));
                 let report = |v: &Voxa, at: &str| {
                     let written = v.mic.as_ref().filter(|_| v.mic_on).map(|m| m.written_secs()).unwrap_or(0.0);
                     os::log(&format!(
@@ -1777,19 +1782,19 @@ fn main() {
                     v.handle(Event::Readiness(r), cx);
                     v.handle(Event::Hotkey { target }, cx);
                 });
-                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                cx.background_executor().timer(wait(0)).await;
                 let _ = handle.update(cx, |v, _, cx| {
                     report(v, "before pause");
                     v.handle(Event::Pause, cx);
                     report(v, "paused");
                 });
-                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                cx.background_executor().timer(wait(1)).await;
                 let _ = handle.update(cx, |v, _, cx| {
                     report(v, "end of pause");
                     v.handle(Event::Resume, cx);
                     report(v, "resumed");
                 });
-                cx.background_executor().timer(Duration::from_secs(secs)).await;
+                cx.background_executor().timer(wait(2)).await;
                 let _ = handle.update(cx, |v, _, cx| {
                     report(v, "before cancel");
                     v.handle(Event::Cancel, cx);
