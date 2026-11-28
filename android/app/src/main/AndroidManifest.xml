@@ -6,7 +6,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Notifications (docs/notifications.md): signed out, dictations ready or not sent. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Keeps the 12 h session check and the background send scheduled after a restart. -->
+    <!-- Keeps the 12 h session check, the background send and the birthday wish's alarm
+         scheduled after a restart. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
@@ -64,6 +65,19 @@
         <receiver
             android:name=".notify.NotifyReceiver"
             android:exported="false" />
+
+        <!-- The birthday wish's midnight alarm, set again after a reboot, an update, or a clock
+             or time zone change. Not exported: only the system and Voxa's own alarm reach it. -->
+        <receiver
+            android:name=".notify.BirthdayReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!-- The Voxa voice keyboard. Same process as the app, so they share the core. -->
 

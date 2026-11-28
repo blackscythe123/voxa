@@ -96,6 +96,8 @@ class VoxaApp : Application() {
         // background send of dictations recorded offline, checked whenever History changes.
         Notifier.createChannels(this)
         VoxaJobs.schedulePeriodic(this)
+        // The birthday wish's alarm (set again at every start, in case it was lost).
+        scope.launch(Dispatchers.IO) { com.voxa.android.notify.BirthdayWish.schedule(this@VoxaApp) }
         scope.launch {
             historyVersion.collectLatest {
                 delay(1500)

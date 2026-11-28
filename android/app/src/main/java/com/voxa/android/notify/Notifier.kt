@@ -18,6 +18,7 @@ import uniffi.voxa_ffi.NoticeDecision
 import uniffi.voxa_ffi.NoticeKind
 import uniffi.voxa_ffi.SessionCheck
 import uniffi.voxa_ffi.SessionState
+import uniffi.voxa_ffi.noticeBirthday
 import uniffi.voxa_ffi.noticeDecide
 import uniffi.voxa_ffi.noticeNotSent
 import uniffi.voxa_ffi.noticePublicTitle
@@ -36,13 +37,15 @@ import java.time.LocalTime
 object Notifier {
     const val ID_SIGN_IN = 1
     const val ID_DICTATIONS = 2
+    const val ID_BIRTHDAY = 3
 
-    /** A notification channel. A third, "Reminders", can be added to [CHANNELS] later. */
+    /** A notification channel. "Reminders" can be added to [CHANNELS] later. */
     data class Channel(val id: String, val name: String, val description: String, val importance: Int)
 
     val SIGN_IN = Channel("sign-in", "Sign-in", "When you need to sign in to ChatGPT again", NotificationManager.IMPORTANCE_DEFAULT)
     val DICTATIONS = Channel("dictations", "Dictations", "Dictations sent in the background, or that couldn't be sent", NotificationManager.IMPORTANCE_LOW)
-    private val CHANNELS = listOf(SIGN_IN, DICTATIONS)
+    val BIRTHDAY = Channel("birthday", "Birthday", "A wish at midnight on your birthday, if you added it in Settings", NotificationManager.IMPORTANCE_DEFAULT)
+    private val CHANNELS = listOf(SIGN_IN, DICTATIONS, BIRTHDAY)
 
     /** The Voxa keyboard is on screen (set by the keyboard). */
     @Volatile var keyboardShowing = false
@@ -67,6 +70,8 @@ object Notifier {
     private var pendingSignIn = false
     private val pendingReady = mutableListOf<Pair<List<ULong>, String>>()
     private var pendingNotSent = 0
+    private var pendingBirthday: String? = null
+    private var birthdayHeld = false
 
     /** Post what was held back while the user was looking. Off the main thread (History is read). */
     private fun flush() {
@@ -79,12 +84,19 @@ object Notifier {
             pendingNotSent = 0
             r
         }
-        if (!signIn && ready.isEmpty() && notSent == 0) return
+        val (birthday, name) = synchronized(pending) {
+            val r = birthdayHeld to pendingBirthday
+            birthdayHeld = false
+            pendingBirthday = null
+            r
+        }
+        if (!signIn && ready.isEmpty() && notSent == 0 && !birthday) return
         Thread {
             Diag.log("notify", "posting what was held back while Voxa was on screen")
             if (signIn) (ctx as? VoxaApp)?.let { signedOut(it) }
             for ((entries, app) in ready) ready(ctx, entries, app)
             if (notSent > 0) notSent(ctx, notSent)
+            if (birthday) birthday(ctx, name)
         }.start()
     }
 
@@ -238,6 +250,42 @@ object Notifier {
         }
         NotificationManagerCompat.from(ctx).cancel(ID_DICTATIONS)
         prefs(ctx).edit().remove("dict_kind").remove("ready_ids").remove("failed_count").apply()
+    }
+
+    // ── the birthday wish ────────────────────────────────────────────────────
+
+    /**
+     * The birthday wish (ID 3, channel Birthday), from [BirthdayWish]'s midnight alarm. The owner's
+     * one exception to "never at night"; not counted against the daily cap, and never held back by
+     * it. Held back (not dropped) while Voxa is on screen, like the others. `name`: the account's
+     * name; only the first word is shown. True when it was posted or is held back to post.
+     */
+    fun birthday(ctx: Context, name: String?): Boolean {
+        if (looking) {
+            Diag.log("notify", "BIRTHDAY held back: Voxa is on screen")
+            synchronized(pending) {
+                birthdayHeld = true
+                pendingBirthday = name
+            }
+            return true
+        }
+        if (!allowed(ctx)) {
+            Diag.log("notify", "BIRTHDAY not posted: notifications are off for Voxa")
+            return false
+        }
+        val t = noticeBirthday(name)
+        // Tapping opens Home, which shows the birthday doodle today.
+        val open = PendingIntent.getActivity(
+            ctx, ID_BIRTHDAY,
+            Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN, MainActivity.OPEN_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        // The lock screen shows the wish without the name.
+        val public = NotificationCompat.Builder(ctx, BIRTHDAY.id).setSmallIcon(R.drawable.ic_notify).setContentTitle(noticeBirthday(null).title).build()
+        val n = builder(ctx, BIRTHDAY, t.title, t.body, false).setContentIntent(open).setPublicVersion(public).build()
+        val ok = NotificationManagerCompat.from(ctx).safeNotify(ctx, ID_BIRTHDAY, n)
+        Diag.log("notify", "BIRTHDAY: ${if (ok) "POST" else "not posted"}")
+        return ok
     }
 
     // ── posting ──────────────────────────────────────────────────────────────

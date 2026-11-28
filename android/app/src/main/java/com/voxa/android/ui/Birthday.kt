@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.voxa.android.MainActivity
 import com.voxa.android.R
+import com.voxa.android.notify.BirthdayWish
 import kotlinx.coroutines.launch
 
 private val MONTHS = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -57,12 +58,15 @@ object Birthday {
         return if (m in 1..12 && d in 1..daysIn(m)) m to d else null
     }
 
+    /** Saved, then the midnight wish's alarm is set for it (see notify/BirthdayWish.kt). */
     fun set(context: Context, month: Int, day: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("birthday_month", month).putInt("birthday_day", day).apply()
+        BirthdayWish.schedule(context)
     }
 
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("birthday_month").remove("birthday_day").apply()
+        BirthdayWish.schedule(context)
     }
 
     /** 29 February is allowed (it is celebrated on the 28th in other years). */
@@ -81,6 +85,7 @@ fun BirthdayCard(activity: MainActivity) {
     val c = vx
     val context = LocalContext.current
     var value by remember { mutableStateOf(Birthday.get(context)) }
+    var wish by remember { mutableStateOf(BirthdayWish.enabled(context)) }
     val open = {
         activity.showSheet {
             BirthdaySheet(value, onSave = { m, d ->
@@ -107,6 +112,20 @@ fun BirthdayCard(activity: MainActivity) {
                 )
             }
             Text(if (value != null) "Change" else "Add", Modifier.padding(start = 8.dp), style = Type.SBold, color = c.accent)
+        }
+        // The midnight wish: only once there is a birthday to wish on.
+        if (value != null) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(c.hair))
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(start = 48.dp)) {
+                    Text("Wish me on my birthday", style = Type.M, color = c.text)
+                    Text("A notification at midnight on the day", Modifier.padding(top = 2.dp), style = Type.S, color = c.text72)
+                }
+                VSwitch(wish) {
+                    wish = it
+                    BirthdayWish.setEnabled(context, it)
+                }
+            }
         }
     }
     Text(

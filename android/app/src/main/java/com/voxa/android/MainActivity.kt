@@ -304,6 +304,10 @@ class MainActivity : ComponentActivity() {
                     if (stack.lastOrNull() != Route.SignIn) go(Route.SignIn)
                 }
                 OPEN_HISTORY -> go(Route.Tabbed(Tab.History))
+                OPEN_HOME -> if (voxa.core.settings().onboarded) {
+                    stack.clear()
+                    stack.add(Route.Tabbed(Tab.Home))
+                }
                 OPEN_MIC -> {
                     if (stack.lastOrNull() == Route.SignIn) back()
                     requestMic()
@@ -353,6 +357,8 @@ class MainActivity : ComponentActivity() {
         const val OPEN_HISTORY = "history"
         /** Followed by a History entry id. */
         const val OPEN_ENTRY = "entry:"
+        /** The birthday wish: Home, where the birthday doodle is today. */
+        const val OPEN_HOME = "home"
 
         /** The launch animation plays once per process (a cold start). */
     }
