@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voxa app icon options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #1F1A17; --muted: #6B625C; --line: #E8E3DE; --sepia: #8F4C2C; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--ink); font-family: Manrope, system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  header { padding: 40px 48px 8px; max-width: 1480px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); max-width: 760px; }
+  main { padding: 16px 48px 64px; display: grid; gap: 24px; max-width: 1480px; }
+  .concept { display: grid; grid-template-columns: 296px 1fr; gap: 32px; padding: 32px 0; border-top: 1px solid var(--line); }
+  .head h2 { font-size: 20px; margin: 16px 0 4px; }
+  .head p { margin: 0; color: var(--muted); }
+  .big { width: 256px; height: 256px; display: block; }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; align-content: start; }
+  .cap { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .strip { display: flex; align-items: center; gap: 20px; height: 64px; padding: 0 16px; border-radius: 8px; }
+  .strip.light { background: #F3F3F3; border: 1px solid #E2E2E2; }
+  .strip.dark { background: #202020; border: 1px solid #202020; }
+  .strip .sz { display: grid; justify-items: center; gap: 4px; font-size: 10px; }
+  .strip.light .sz { color: #777; } .strip.dark .sz { color: #9a9a9a; }
+  .strip .tray { margin-left: auto; padding-left: 16px; border-left: 1px solid rgba(128,128,128,.3); display: flex; gap: 14px; align-items: center; height: 32px; }
+  .phone { display: flex; gap: 22px; align-items: flex-end; padding: 18px 20px 12px; border-radius: 12px; }
+  .phone.wall { background: linear-gradient(160deg, #3D5A6C, #20323D 60%, #1A2329); }
+  .phone.theme { background: linear-gradient(160deg, #DCE3CF, #C5D0B5); }
+  .phone.themedark { background: linear-gradient(160deg, #2A3226, #1B2019); }
+  .app { display: grid; justify-items: center; gap: 6px; font-size: 11px; color: #fff; }
+  .phone.theme .app { color: #2E3A26; }
+  .app svg { width: 56px; height: 56px; }
+  .mac { padding: 28px 24px 0; border-radius: 12px; background: linear-gradient(135deg, #C9B8D8, #8DA9C9 45%, #E4C7A9); display: flex; justify-content: center; }
+  .dock { display: flex; gap: 10px; align-items: flex-end; padding: 8px 10px; background: rgba(255,255,255,.38); border: 1px solid rgba(255,255,255,.5); border-bottom: 0; border-radius: 18px 18px 0 0; backdrop-filter: blur(10px); }
+  .dock .ph { width: 64px; height: 64px; }
+  .dock .voxa { width: 64px; height: 64px; position: relative; }
+  .dock .voxa::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: #333; }
+  .span2 { grid-column: 1 / -1; display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; }
+  .androids { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .rec { padding: 24px 28px; border: 1px solid var(--line); border-left: 4px solid var(--sepia); border-radius: 8px; max-width: 900px; }
+  .rec h2 { margin: 0 0 4px; font-size: 18px; }
+  .rec p { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Voxa app icon options</h1>
+  <p>Five directions for the desktop (Windows, macOS) and Android icon. Each is one flat colour on a tile, so it also works as the Android 13 themed icon and the tray glyph. Sizes 24 px and below use a heavier stroke cut of the same mark, the way Windows .ico files carry hand-tuned small frames.</p>
+</header>
+<main id="list"></main>
+
+<script>
+const SEPIA = '#8F4C2C', INK = '#1F1A17', CREAM = '#F6EEE4';
+let uid = 0;
+const R = (d, c, w) => `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+// Every glyph lives in a 60x60 box. small = the heavy cut used at 24 px and below.
+const concepts = [
+  {
+    name: 'Swing V',
+    why: 'The voice line itself writes the V: flat in silence, a small lift, one deep swing down and back, then flat again. A monogram and the product signature in one stroke.',
+    bg: SEPIA, ink: '#FFF8F0',
+    glyph: (s, c) => s
+      ? R('M2,22 H10 L15,15 L30,47 L45,15 L50,22 H58', c, 8.5)
+      : R('M3,24 H12 L17,17 L30,45 L43,17 L48,24 H57', c, 5.6),
+  },
+  {
+    name: 'Speaking nib',
+    why: 'A pen nib, the tool that writes, with its slit cut as a voice line. The nib silhouette is also a V. Warm on near-black, the most "premium tool" of the set.',
+    bg: '#211B17', border: '#3F342D', ink: '#D99366',
+    glyph: (s, c) => {
+      const id = 'm' + (++uid);
+      const nib = s ? 'M12,4 H48 V15 C48,30 39,42 30,58 C21,42 12,30 12,15 Z'
+                    : 'M14,4 H46 V16 C46,30 38,42 30,57 C22,42 14,30 14,16 Z';
+      const cut = s
+        ? `<circle cx="30" cy="25" r="5.6" fill="#000"/>${R('M30,28 V60', '#000', 4.4)}`
+        : `<circle cx="30" cy="24" r="4.4" fill="#000"/><rect x="10" y="11" width="40" height="2.6" fill="#000"/>${R('M30,28 L26.6,35 L33.4,41 L27.6,48 L30,58', '#000', 2.6)}`;
+      return `<mask id="${id}" maskUnits="userSpaceOnUse" x="-10" y="-10" width="80" height="80"><path d="${nib}" fill="#fff"/>${cut}</mask><rect x="0" y="0" width="60" height="60" fill="${c}" mask="url(#${id})"/>`;
+    },
+  },
+  {
+    name: 'Ink drop',
+    why: 'A drop of Voxa ink with the voice line running through it: your words, turned into ink. A solid silhouette, so it holds at 16 px better than any line mark.',
+    bg: CREAM, border: '#E7D8C8', ink: SEPIA,
+    glyph: (s, c) => {
+      const id = 'm' + (++uid);
+      const drop = s ? 'M30,1 C30,1 53,25 53,38 A23,23 0 0 1 7,38 C7,25 30,1 30,1 Z'
+                     : 'M30,3 C30,3 50,26 50,38 A20,20 0 0 1 10,38 C10,26 30,3 30,3 Z';
+      const line = s ? R('M0,39 H16 L24,29 L33,48 L41,39 H60', '#000', 5.2)
+                     : R('M0,38 H16 L20.5,31 L26,46 L31.5,26 L37,44 L41,35 L44,38 H60', '#000', 3.6);
+      return `<mask id="${id}" maskUnits="userSpaceOnUse" x="-10" y="-10" width="80" height="80"><path d="${drop}" fill="#fff"/>${line}</mask><rect x="0" y="0" width="60" height="60" fill="${c}" mask="url(#${id})"/>`;
+    },
+  },
+  {
+    name: 'Voice caret',
+    why: 'The text cursor, where Voxa puts your words, with its stem drawn as a sound wave. Says "talk, and it types here" without a microphone in sight.',
+    bg: '#FFFFFF', border: '#E2DCD6', ink: SEPIA,
+    glyph: (s, c) => s
+      ? R('M17,6 C24,6 28,8 30,12 C32,8 36,6 43,6', c, 7) + R('M17,54 C24,54 28,52 30,48 C32,52 36,54 43,54', c, 7) + R('M30,12 C36,20 24,40 30,48', c, 7)
+      : R('M18,6 C25,6 28,8 30,11 C32,8 35,6 42,6', c, 5) + R('M18,54 C25,54 28,52 30,49 C32,52 35,54 42,54', c, 5)
+        + R('M30,11 C34.5,14 34.5,20 30,23.5 C25.5,27 25.5,33 30,36.5 C34.5,40 34.5,46 30,49', c, 5),
+  },
+  {
+    name: 'Live line',
+    why: 'An evolution of today\'s icon: the voice line runs edge to edge like seismograph paper, with one strong burst and a sepia pen point still writing. Bolder and calmer than the current zigzag.',
+    bg: '#FFFFFF', border: '#E2DCD6', ink: INK, accent: SEPIA, bleed: true,
+    glyph: (s, c, a) => s
+      ? R('M-30,32 H11 L19,15 L28,47 L36,32 H40', c, 7) + `<circle cx="45" cy="32" r="7" fill="${a || c}"/>`
+      : R('M-30,32 H12 L17,21 L23,44 L29.5,13 L35,39 L38.5,29 L41,32', c, 4.6) + `<circle cx="47" cy="32" r="5.6" fill="${a || c}"/>`,
+  },
+];
+
+// Square tile (Windows / generic). size in px, small cut at <= 24.
+function tile(cn, size, opts = {}) {
+  const small = size <= 24;
+  const id = 'c' + (++uid);
+  const m = small ? 2 : 4, rx = small ? 20 : 22;
+  const sc = small ? 1.27 : 1.0, off = 50 - 30 * sc;
+  const border = cn.border ? `<rect x="${m + .5}" y="${m + .5}" width="${99 - 2 * m}" height="${99 - 2 * m}" rx="${rx}" fill="none" stroke="${cn.border}" stroke-width="${small ? 4 : 1.2}"/>` : '';
+  return `<svg class="${opts.cls || ''}" width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <defs><clipPath id="${id}"><rect x="${m}" y="${m}" width="${100 - 2 * m}" height="${100 - 2 * m}" rx="${rx}"/></clipPath></defs>
+    <rect x="${m}" y="${m}" width="${100 - 2 * m}" height="${100 - 2 * m}" rx="${rx}" fill="${cn.bg}"/>
+    <g clip-path="url(#${id})"><g transform="translate(${off} ${off}) scale(${sc})">${cn.glyph(small, cn.ink, cn.accent)}</g></g>${border}</svg>`;
+}
+
+// Bare glyph for the tray (Windows tray icons are tile-less, single colour) + a status dot.
+function tray(cn, color, dot) {
+  const id = 'c' + (++uid);
+  return `<svg width="16" height="16" viewBox="-4 -4 68 68"><defs><clipPath id="${id}"><rect x="-4" y="-4" width="68" height="68"/></clipPath></defs>
+    <g clip-path="url(#${id})"><g>${cn.glyph(true, color)}</g></g>
+    ${dot ? `<circle cx="54" cy="54" r="11" fill="${dot}" stroke="${color === '#fff' ? '#202020' : '#F3F3F3'}" stroke-width="5"/>` : ''}</svg>`;
+}
+
+// Android adaptive icon: 108 canvas, show the 72 visible area through a launcher mask.
+const MASKS = {
+  circle: '<circle cx="54" cy="54" r="36"/>',
+  squircle: '<path d="M54,18 C80,18 90,28 90,54 C90,80 80,90 54,90 C28,90 18,80 18,54 C18,28 28,18 54,18 Z"/>',
+  rounded: '<rect x="18" y="18" width="72" height="72" rx="13"/>',
+};
+function adaptive(cn, mask, mono) {
+  const id = 'c' + (++uid);
+  const bg = mono ? mono.bg : cn.bg, ink = mono ? mono.ink : cn.ink, acc = mono ? null : cn.accent;
+  // Foreground: glyph 60 box scaled to 50 dp, centred, inside the 66 dp safe circle.
+  const sc = 50 / 60, off = 54 - 30 * sc;
+  return `<svg viewBox="18 18 72 72"><defs><clipPath id="${id}">${MASKS[mask]}</clipPath></defs>
+    <g clip-path="url(#${id})"><rect x="0" y="0" width="108" height="108" fill="${bg}"/>
+    <g transform="translate(${off} ${off}) scale(${sc})">${cn.glyph(false, ink, acc)}</g></g></svg>`;
+}
+
+// macOS: 1024 grid, 824 tile with ~185 radius, glyph a bit smaller, soft shadow.
+function mac(cn, size) {
+  const id = 'c' + (++uid), f = 'f' + uid;
+  const sc = 0.78, off = 50 - 30 * sc;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 100 100"><defs>
+    <clipPath id="${id}"><rect x="10" y="10" width="80" height="80" rx="18"/></clipPath>
+    <filter id="${f}" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-color="#000" flood-opacity=".28"/></filter></defs>
+    <rect x="10" y="10" width="80" height="80" rx="18" fill="${cn.bg}" filter="url(#${f})"/>
+    <g clip-path="url(#${id})"><g transform="translate(${off} ${off}) scale(${sc})">${cn.glyph(false, cn.ink, cn.accent)}</g></g>
+    ${cn.border ? `<rect x="10.3" y="10.3" width="79.4" height="79.4" rx="17.7" fill="none" stroke="${cn.border}" stroke-width=".6"/>` : ''}</svg>`;
+}
+const ph = c => `<svg class="ph" viewBox="0 0 100 100"><rect x="10" y="10" width="80" height="80" rx="18" fill="${c}"/></svg>`;
+
+const list = document.getElementById('list');
+concepts.forEach(cn => {
+  const sizes = [16, 24, 32, 48];
+  const strip = (cls, trayColor) => `<div class="strip ${cls}">
+      ${sizes.map(s => `<div class="sz">${tile(cn, s)}<span>${s}</span></div>`).join('')}
+      <div class="tray"><div class="sz">${tray(cn, trayColor)}<span>tray</span></div>
+      <div class="sz">${tray(cn, trayColor, '#C0392B')}<span>rec</span></div>
+      <div class="sz">${tray(cn, trayColor, '#2E9D57')}<span>ready</span></div></div></div>`;
+  const app = (svg, label = 'Voxa') => `<div class="app">${svg}<span>${label}</span></div>`;
+  const el = document.createElement('section');
+  el.className = 'concept';
+  el.innerHTML = `
+    <div class="head">${tile(cn, 256, { cls: 'big' })}<h2>${cn.name}</h2><p>${cn.why}</p></div>
+    <div class="rows">
+      <div><p class="cap">Windows taskbar and tray, light (real pixel sizes)</p>${strip('light', '#1A1A1A')}</div>
+      <div><p class="cap">Windows taskbar and tray, dark</p>${strip('dark', '#fff')}</div>
+      <div class="span2">
+        <div><p class="cap">Android adaptive icon: circle, squircle, rounded square, then the themed monochrome layer (light and dark)</p>
+          <div class="androids">
+            <div class="phone wall">${app(adaptive(cn, 'circle'))}${app(adaptive(cn, 'squircle'))}${app(adaptive(cn, 'rounded'))}</div>
+            <div class="phone theme">${app(adaptive(cn, 'circle', { bg: '#E6ECDB', ink: '#3B4A2F' }))}${app(adaptive(cn, 'squircle', { bg: '#E6ECDB', ink: '#3B4A2F' }))}</div>
+            <div class="phone themedark">${app(adaptive(cn, 'circle', { bg: '#34402C', ink: '#CFDDBA' }))}${app(adaptive(cn, 'squircle', { bg: '#34402C', ink: '#CFDDBA' }))}</div>
+          </div></div>
+        <div><p class="cap">macOS dock (1024 grid, 824 tile)</p>
+          <div class="mac"><div class="dock">${ph('#E9E9EC')}${ph('#4A7BD8')}<div class="voxa">${mac(cn, 64)}</div>${ph('#F2F2F2')}</div></div></div>
+      </div>
+    </div>`;
+  list.appendChild(el);
+});
+
+const rec = document.createElement('section');
+rec.className = 'rec';
+rec.innerHTML = `<h2>Recommendation: Swing V</h2><p>It is the only option that is both a letter and the product's signature voice line, so it names the app and shows what it does. One thick stroke on flat sepia stays a clear V at 16 px, on light and dark taskbars, inside every Android mask and as a themed icon. Ink drop is the runner-up if the owner wants a solid shape over a line mark.</p>`;
+list.appendChild(rec);
+</script>
+</body>
+</html>
