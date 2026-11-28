@@ -1,3 +1,4 @@
+import java.io.ByteArrayOutputStream
 import java.util.Properties
 
 plugins {
@@ -35,31 +36,51 @@ val pathWithCargo = File(cargoHome, "bin").path + File.pathSeparator + (System.g
 // unit, panic = abort, stripped) by default; -PrustProfile=debug for faster local Rust builds.
 val rustProfile = (findProperty("rustProfile") as String?) ?: "release-android"
 val rustProfileDir = if (rustProfile == "dev") "debug" else rustProfile
-// -Pvoxa.release=true: a real release. The Rust core then refuses to build while the update
-// public keys are placeholders (core/voxa-update/build.rs). Everyday builds only warn.
-val voxaRelease = (findProperty("voxa.release") as String?) == "true"
-
-// ── Release signing (B2, docs/update-keys.md) ────────────────────────────────────────────────
+// ── Release builds (docs/update-keys.md, docs/release-runbook.md) ────────────────────────────
 //
-// The permanent release key comes from android/local.properties (never committed) or the
-// environment: voxa.release.storeFile / storePassword / keyAlias / keyPassword
-// (VOXA_RELEASE_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD). The APK Signature
-// Scheme v3 lineage from the old debug key to it is voxa.release.lineage (VOXA_RELEASE_LINEAGE):
-// with it, installs signed with the debug key update in place. AGP can't sign with a lineage, so
-// after packaging, lineageSignRelease re-signs the release APKs with apksigner (old signer, then
-// --next-signer the release key, --lineage). Without a release key the build falls back to the
-// debug key with a loud warning; once the lineage exists that fallback fails the build.
+// Voxa 1.0.0 and every later version are signed with ONE permanent release key, from day one
+// (owner decision 2026-11-28: the pre-1.0 APKs were test builds, so there is no lineage from the
+// debug key and no rotation). The key comes from android/local.properties (never committed) or
+// the environment: voxa.release.storeFile / storePassword / keyAlias / keyPassword
+// (VOXA_RELEASE_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD).
+//
+// Any release build (assemble/package/bundle/install ...Release) FAILS when:
+//  - the update public keys are still placeholders (it could never update itself), or
+//  - no release key is configured (it would be signed with the debug key), or
+//  - the configured key is a debug key (~/.android/debug.keystore or alias androiddebugkey), or
+//  - after signing, the APK's certificate is a known test-build signer
+//    (android/signing/forbidden-signers.txt) or differs from the pinned release certificate
+//    (android/signing/release-cert.sha256, once the owner has committed it).
+// Only the explicit dev flag -Pvoxa.devRelease=true (or VOXA_DEV_RELEASE=1) allows such a build:
+// for local size checks and R8 tests, never handed out. It then says "Updates are off in this build".
 fun releaseProp(key: String, env: String): String? = (localProps.getProperty(key) ?: System.getenv(env))?.trim()?.takeIf { it.isNotEmpty() }
 val releaseStoreFile = releaseProp("voxa.release.storeFile", "VOXA_RELEASE_STORE_FILE")
 val releaseStorePassword = releaseProp("voxa.release.storePassword", "VOXA_RELEASE_STORE_PASSWORD")
 val releaseKeyAlias = releaseProp("voxa.release.keyAlias", "VOXA_RELEASE_KEY_ALIAS")
 val releaseKeyPassword = releaseProp("voxa.release.keyPassword", "VOXA_RELEASE_KEY_PASSWORD")
-val releaseLineage = releaseProp("voxa.release.lineage", "VOXA_RELEASE_LINEAGE")
 val hasReleaseKey = releaseStoreFile != null && File(releaseStoreFile).isFile && releaseStorePassword != null && releaseKeyAlias != null
-// Once the owner made the lineage (or says so), a release build may never use the debug key again.
-val lineageCreated = (releaseLineage != null && File(releaseLineage).isFile) ||
-    releaseProp("voxa.release.lineageCreated", "VOXA_RELEASE_LINEAGE_CREATED") == "true"
 val debugKeystore = File(System.getProperty("user.home"), ".android/debug.keystore")
+val devRelease = (findProperty("voxa.devRelease") as String?) == "true" || System.getenv("VOXA_DEV_RELEASE") == "1"
+val signingDir: File = rootProject.file("signing")
+
+/** A release key that is really a debug key: never acceptable for a release. */
+fun releaseKeyIsDebug(): Boolean =
+    releaseStoreFile != null && (File(releaseStoreFile).canonicalFile == debugKeystore.canonicalFile || releaseKeyAlias.equals("androiddebugkey", ignoreCase = true))
+
+/** The update public keys in core/voxa-update/src/keys.rs are still the all-zero placeholders. */
+fun placeholderUpdateKeys(): Boolean = repoRoot.resolve("core/voxa-update/src/keys.rs").readText().contains("0".repeat(64))
+
+/** SHA-256 digests (lowercase hex) listed in a file under android/signing, one per line, # comments. */
+fun pinnedDigests(name: String): Set<String> =
+    File(signingDir, name).takeIf { it.isFile }?.readLines()?.map { it.substringBefore("#").trim().lowercase() }?.filter { it.matches(Regex("[0-9a-f]{64}")) }?.toSet().orEmpty()
+
+/** True when this Gradle run builds a release APK of this app. */
+var releasing = false
+gradle.taskGraph.whenReady {
+    releasing = allTasks.any { t ->
+        t.project == project && t.name.contains("Release") && listOf("assemble", "package", "bundle", "install", "sign").any { t.name.startsWith(it) }
+    }
+}
 
 val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
     group = "rust"
@@ -67,7 +88,12 @@ val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
     workingDir = repoRoot
     environment("ANDROID_NDK_HOME", "$sdkDir/ndk/$ndkVersionPinned")
     environment("PATH", pathWithCargo)
-    if (voxaRelease) environment("VOXA_RELEASE_BUILD", "1")
+    // A release build tells the Rust core so (core/voxa-update/build.rs refuses placeholder keys
+    // too); the dev flag lets a local test build through.
+    doFirst {
+        if (releasing) (this as Exec).environment("VOXA_RELEASE_BUILD", "1")
+        if (devRelease) (this as Exec).environment("VOXA_ALLOW_PLACEHOLDER_KEYS", "1")
+    }
     val args = mutableListOf(cargo, "ndk")
     rustAbis.forEach { args += listOf("-t", it) }
     args += listOf("-P", "29", "-o", rustJniLibs.get().asFile.path, "build", "-p", "voxa-ffi")
@@ -77,7 +103,6 @@ val cargoNdkBuild = tasks.register<Exec>("cargoNdkBuild") {
     inputs.file(repoRoot.resolve("Cargo.lock"))
     inputs.file(repoRoot.resolve("Cargo.toml"))
     inputs.property("rustProfile", rustProfile)
-    inputs.property("voxaRelease", voxaRelease)
     outputs.dir(rustJniLibs)
     onlyIf { !project.hasProperty("skipRust") }
 }
@@ -198,59 +223,75 @@ android {
 
 tasks.named("preBuild") { dependsOn(uniffiBindgen) }
 
-/** The release signing config: the permanent key when local.properties or the environment has it,
- *  otherwise today's debug key, with a loud warning. */
+/** The release signing config: the permanent release key. Without one, only a dev release
+ *  (-Pvoxa.devRelease=true) gets this far; it is signed with the debug key and never handed out. */
 fun releaseSigning(): com.android.build.api.dsl.ApkSigningConfig =
-    if (hasReleaseKey) android.signingConfigs.getByName("release") else debugFallback()
+    if (hasReleaseKey) android.signingConfigs.getByName("release") else devFallback()
 
-fun debugFallback(): com.android.build.api.dsl.ApkSigningConfig {
-    if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
-        logger.warn(
-            "\n  WARNING: no Voxa release key (voxa.release.* in android/local.properties). The release APK is signed with the\n" +
-                "  DEBUG key, as before. Create the release key and lineage (docs/update-keys.md) before publishing.\n",
-        )
+fun devFallback(): com.android.build.api.dsl.ApkSigningConfig {
+    if (devRelease && gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+        logger.warn("\n  Voxa DEV release (-Pvoxa.devRelease=true): signed with the DEBUG key, never hand this APK out.\n")
     }
     return android.signingConfigs.getByName("debug")
 }
 
-// Once the lineage exists, a release build signed with the debug key is refused.
+/** Why this release build must not run (null: it may). Pure, so the rules read in one place. */
+fun releaseRefusal(releasing: Boolean, dev: Boolean, placeholderKeys: Boolean, hasKey: Boolean, keyIsDebug: Boolean): String? = when {
+    !releasing || dev -> null
+    placeholderKeys -> "the update public keys in core/voxa-update/src/keys.rs are still placeholders, so this APK could never update itself. Add the real keys (docs/update-keys.md)"
+    !hasKey -> "no release key is configured (voxa.release.* in android/local.properties), so it would be signed with the debug key. Set up the release key (docs/update-keys.md)"
+    keyIsDebug -> "the configured release key is a debug key. Voxa releases are signed only with the permanent release key (docs/update-keys.md)"
+    else -> null
+}
+
 gradle.taskGraph.whenReady {
-    val releasing = allTasks.any { it.project == project && it.name.contains("Release") && (it.name.startsWith("assemble") || it.name.startsWith("package")) }
-    if (releasing && lineageCreated && !hasReleaseKey) {
-        throw GradleException("Voxa: the signing lineage exists, so a release must be signed with the release key, never the debug key. Set voxa.release.* in android/local.properties (docs/update-keys.md).")
+    releaseRefusal(releasing, devRelease, placeholderUpdateKeys(), hasReleaseKey, releaseKeyIsDebug())?.let {
+        throw GradleException("Voxa release refused: $it. A local test build only: -Pvoxa.devRelease=true.")
+    }
+    // Instrumented tests uninstall the app afterwards (and share its id): never on a real phone.
+    val deviceTests = allTasks.any { it.project == project && it.name.startsWith("connected") && it.name.endsWith("AndroidTest") }
+    val serial = System.getenv("ANDROID_SERIAL").orEmpty()
+    if (deviceTests && !serial.startsWith("emulator-") && findProperty("voxa.allowDeviceTests") != "true") {
+        throw GradleException("Voxa: instrumented tests run on an emulator only (they uninstall the app and its data). Set ANDROID_SERIAL=emulator-5554.")
     }
 }
 
-// Re-sign the release APKs with the v3 lineage: debug key first (old installs trust it), then the
-// release key, so 0.3.0 and later debug-signed installs update in place.
-val lineageSignRelease = tasks.register("lineageSignRelease") {
+/** apksigner from the newest build-tools, by version number (not text: "35.0.0-rc1" never beats "35.0.0"). */
+fun apksigner(): String {
+    fun parts(name: String): List<Int> = name.split('.', '-').map { it.toIntOrNull() ?: -1 }
+    val bt = File(sdkDir, "build-tools").listFiles()?.filter { it.isDirectory && !it.name.contains("rc") }
+        ?.maxWithOrNull { a, b -> parts(a.name).zip(parts(b.name)).map { (x, y) -> x.compareTo(y) }.firstOrNull { it != 0 } ?: 0 }
+        ?: throw GradleException("no Android build-tools in $sdkDir")
+    return File(bt, if (isWindows) "apksigner.bat" else "apksigner").path
+}
+
+// After packaging: the APK's own signing certificate is the pinned release certificate, and never a
+// known test-build signer (the owner's debug key signed every pre-1.0 test APK).
+val verifyReleaseSigner = tasks.register("verifyReleaseSigner") {
     group = "voxa"
-    description = "Signs the release APKs with the debug to release key lineage (apksigner rotate output)."
-    onlyIf { hasReleaseKey && releaseLineage != null && File(releaseLineage).isFile }
+    description = "Checks the release APKs' signing certificate against android/signing."
+    onlyIf { !devRelease }
     doLast {
-        val bt = File(sdkDir, "build-tools").listFiles()?.filter { it.isDirectory }?.maxByOrNull { it.name }
-            ?: throw GradleException("no Android build-tools in $sdkDir")
-        val apksigner = File(bt, if (isWindows) "apksigner.bat" else "apksigner").path
+        val forbidden = pinnedDigests("forbidden-signers.txt")
+        val pinned = pinnedDigests("release-cert.sha256")
         val apks = layout.buildDirectory.dir("outputs/apk/release").get().asFile.listFiles()?.filter { it.name.endsWith(".apk") }.orEmpty()
         for (apk in apks) {
+            val out = ByteArrayOutputStream()
             project.exec {
-                commandLine(
-                    apksigner, "sign",
-                    "--ks", debugKeystore.path, "--ks-pass", "pass:android", "--ks-key-alias", "androiddebugkey", "--key-pass", "pass:android",
-                    "--next-signer",
-                    "--ks", releaseStoreFile!!, "--ks-pass", "env:VOXA_LINEAGE_STORE_PASS", "--ks-key-alias", releaseKeyAlias!!, "--key-pass", "env:VOXA_LINEAGE_KEY_PASS",
-                    "--lineage", releaseLineage!!,
-                    "--v1-signing-enabled", "true", "--v2-signing-enabled", "true", "--v3-signing-enabled", "true",
-                    apk.path,
-                )
-                environment("VOXA_LINEAGE_STORE_PASS", releaseStorePassword!!)
-                environment("VOXA_LINEAGE_KEY_PASS", releaseKeyPassword ?: releaseStorePassword)
+                commandLine(apksigner(), "verify", "--print-certs", apk.path)
+                standardOutput = out
             }
-            logger.lifecycle("Voxa: ${apk.name} signed with the debug to release lineage")
+            val digests = Regex("certificate SHA-256 digest: ([0-9a-fA-F]{64})").findAll(out.toString()).map { it.groupValues[1].lowercase() }.toSet()
+            if (digests.isEmpty()) throw GradleException("Voxa: could not read the signing certificate of ${apk.name}")
+            digests.firstOrNull { it in forbidden }?.let { throw GradleException("Voxa: ${apk.name} is signed by a test-build key ($it), never a release") }
+            if (pinned.isNotEmpty() && digests.any { it !in pinned }) {
+                throw GradleException("Voxa: ${apk.name} is signed by $digests, not the pinned release certificate (android/signing/release-cert.sha256)")
+            }
+            logger.lifecycle("Voxa: ${apk.name} signed by the release certificate ${digests.joinToString()}")
         }
     }
 }
-tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy(lineageSignRelease) }
+tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy(verifyReleaseSigner) }
 
 dependencies {
     implementation(libs.androidx.core.ktx)

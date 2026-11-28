@@ -1,0 +1,8 @@
+# The SHA-256 of Voxa's permanent Android release certificate (lowercase hex, one line).
+# Public, safe to commit. EMPTY until the owner creates the release key (docs/update-keys.md,
+# "Android release key"); then paste the digest that
+#   keytool -list -v -keystore <voxa-release.jks> -alias voxa
+# prints as "SHA256" (without colons, lowercase) on the next line and commit it.
+#
+# Once set: every release build (verifyReleaseSigner) and the android-feed workflow refuse an
+# APK signed by anything else. `python tools/lint/run.py --release` fails while it is empty.
