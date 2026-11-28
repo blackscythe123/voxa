@@ -6,12 +6,14 @@
 
 use crate::greeting::{Date, MonthDay};
 
-/// The two kinds Voxa posts. Each is one notification, updated in place (Android ID 1 and 2,
-/// desktop tags "signin" and "dictations").
+/// The kinds Voxa posts. Each is one notification, updated in place (Android ID 1 and 2,
+/// desktop tags "signin" and "dictations"). `Update` (A4) is Android only, ID 4: the desktop
+/// shows updates in context, never as a toast (docs/notifications.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     SignIn,
     Dictations,
+    Update,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +59,46 @@ pub fn not_sent(count: u32, action: &str) -> Notice {
         title: format!("Voxa couldn't send {}", plural(count.max(1), "dictation", "dictations")),
         body: "Your recordings are kept. Your sign-in is fine.".into(),
         action: Some(action.into()),
+    }
+}
+
+/// A4 (Android only): a verified update finished downloading. Its lock screen text is
+/// [`UPDATE_PUBLIC_TITLE`], not "Voxa needs you".
+pub fn update_ready(version: &str) -> Notice {
+    Notice {
+        title: format!("Voxa {} is ready to install", version.trim()),
+        body: "Tap to install. Your history and settings stay as they are.".into(),
+        action: Some("Install".into()),
+    }
+}
+
+/// A4's public (lock screen) title: the content is not private.
+pub const UPDATE_PUBLIC_TITLE: &str = "Voxa update ready";
+
+/// What to do with A4 now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateDecision {
+    Post,
+    /// Not now (Voxa is on screen, or the daily cap is used): try again at the next allowed
+    /// moment. A4 is never urgent, so it is deferred, never dropped.
+    Wait,
+    /// Already posted for this version (even if it was swiped away): never again.
+    Never,
+}
+
+/// A4's rules: at most once per version (`posted_for` is the version last posted, "" for none),
+/// never while Voxa is visible, and it counts toward the 2 per 24 hours cap like every kind.
+/// Quiet hours don't hold it back: its channel is low importance, so it never makes a sound.
+pub fn decide_update(version: &str, posted_for: &str, visible: bool, now_ms: u64, posted: &[u64]) -> UpdateDecision {
+    if version.trim().is_empty() || posted_for.trim() == version.trim() {
+        return UpdateDecision::Never;
+    }
+    if visible {
+        return UpdateDecision::Wait;
+    }
+    match decide(Kind::Update, now_ms, false, posted, 0) {
+        Decision::Post => UpdateDecision::Post,
+        _ => UpdateDecision::Wait,
     }
 }
 
@@ -157,6 +199,46 @@ pub fn birthday_wish_due(today: Date, minutes: u16, birthday: MonthDay, wished_y
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_ready_copy_has_no_dash_and_is_sentence_case() {
+        let n = update_ready("1.1.0");
+        assert_eq!(n.title, "Voxa 1.1.0 is ready to install");
+        assert_eq!(n.body, "Tap to install. Your history and settings stay as they are.");
+        assert_eq!(n.action.as_deref(), Some("Install"));
+        assert_eq!(UPDATE_PUBLIC_TITLE, "Voxa update ready");
+        for s in [n.title.as_str(), n.body.as_str(), UPDATE_PUBLIC_TITLE, "Install"] {
+            assert!(!s.contains(" - ") && !s.contains('\u{2013}') && !s.contains('\u{2014}') && s.is_ascii(), "{s}");
+            // Sentence case: a capital only starts a sentence, or is the name Voxa.
+            let words: Vec<&str> = s.split_whitespace().collect();
+            for (i, w) in words.iter().enumerate() {
+                let cap = w.chars().next().is_some_and(char::is_uppercase);
+                let starts = i == 0 || words[i - 1].ends_with('.');
+                assert!(!cap || starts || *w == "Voxa", "{s}: {w}");
+            }
+        }
+    }
+
+    #[test]
+    fn update_ready_posts_once_per_version() {
+        let now = 10 * CAP_WINDOW_MS;
+        assert_eq!(decide_update("1.1.0", "", false, now, &[]), UpdateDecision::Post);
+        assert_eq!(decide_update("1.1.0", "1.1.0", false, now, &[]), UpdateDecision::Never, "swiped away or not, once per version");
+        assert_eq!(decide_update("1.2.0", "1.1.0", false, now, &[]), UpdateDecision::Post);
+        assert_eq!(decide_update("1.1.0", "", true, now, &[]), UpdateDecision::Wait, "never while Voxa is on screen");
+    }
+
+    #[test]
+    fn update_ready_waits_when_the_daily_cap_is_used() {
+        let now = 10 * CAP_WINDOW_MS;
+        let used = [now - 1000, now - 2000];
+        assert_eq!(decide_update("1.1.0", "", false, now, &used), UpdateDecision::Wait, "deferred, not dropped");
+        // A day later the cap has room again and the same version still posts.
+        assert_eq!(decide_update("1.1.0", "", false, now + CAP_WINDOW_MS, &used), UpdateDecision::Post);
+        // And A4 itself counts toward the cap for the other kinds.
+        let after = record(&[now - 1000], now);
+        assert_eq!(decide(Kind::SignIn, now + 1, false, &after, 0), Decision::Skip);
+    }
 
     const MARCH_14: MonthDay = MonthDay { month: 3, day: 14 };
     const FEB_29: MonthDay = MonthDay { month: 2, day: 29 };

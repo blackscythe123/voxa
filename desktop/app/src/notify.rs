@@ -111,6 +111,8 @@ impl Notifier {
         let showing = showing && match kind {
             Kind::SignIn => self.signin_showing,
             Kind::Dictations => self.dictations.is_some(),
+            // Android only: the desktop shows updates in context, never as a toast.
+            Kind::Update => false,
         };
         notices::decide(kind, crate::now_ms(), showing, &self.pacing.posted, self.pacing.last_dictations)
     }
