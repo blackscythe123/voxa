@@ -197,7 +197,13 @@ pub fn merge_set_cookies_at(cookie_header: &str, set_cookies: &[&str], now: i64)
             let a = a.trim();
             let lower = a.to_ascii_lowercase();
             if let Some(x) = lower.strip_prefix("max-age=") {
-                max_age = Some(x.trim().parse::<i64>().unwrap_or(0));
+                // RFC 6265 5.2.2: a value that isn't a number is ignored; one too large to hold
+                // means "a very long time", never "delete".
+                let x = x.trim();
+                let digits = x.strip_prefix('-').unwrap_or(x);
+                if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+                    max_age = Some(x.parse::<i64>().unwrap_or(if x.starts_with('-') { 0 } else { i64::MAX }));
+                }
             } else if lower.starts_with("expires=") {
                 expires = parse_http_date(&a[8..]);
             }
@@ -239,14 +245,25 @@ pub fn parse_http_date(s: &str) -> Option<i64> {
     let parts: Vec<&str> = s.split([' ', '-']).filter(|p| !p.is_empty()).collect();
     let [day, mon, year, time, ..] = parts.as_slice() else { return None };
     let day: i64 = day.parse().ok()?;
+    if !(1..=31).contains(&day) {
+        return None;
+    }
     const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
     let m = MONTHS.iter().position(|x| mon.to_ascii_lowercase().starts_with(x))? as i64 + 1;
     let mut y: i64 = year.parse().ok()?;
     if y < 100 {
         y += if y < 70 { 2000 } else { 1900 };
     }
+    // Dates come from the network: anything outside a real calendar is rejected, so the
+    // arithmetic below can never overflow.
+    if !(1601..=9999).contains(&y) {
+        return None;
+    }
     let hms: Vec<i64> = time.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
     let [h, mi, sec] = hms.as_slice() else { return None };
+    if !(0..24).contains(h) || !(0..60).contains(mi) || !(0..61).contains(sec) {
+        return None;
+    }
     // Days from the civil date (Howard Hinnant's algorithm).
     let (yy, mm) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
     let era = yy.div_euclid(400);
@@ -284,12 +301,41 @@ impl Default for ChatGpt {
 }
 
 /// Time allowed to upload and transcribe `bytes` of audio: 30 s, plus 60 s per started MB (a
-/// slow ~130 kbit/s uplink, and ChatGPT's own time to transcribe a long take), at most 15
-/// minutes. A 70 s dictation (2.3 MB of WAV) gets 210 s; it timed out at 70 s on a slow network
-/// before. No connection at all still fails within the 10 s connect timeout.
+/// slow ~130 kbit/s uplink, and ChatGPT's own time to transcribe a long take). A 70 s dictation
+/// (2.3 MB of WAV) gets 210 s; it timed out at 70 s on a slow network before. The cap, 30
+/// minutes, sits above what the largest upload ([`MAX_UPLOAD_BYTES`]) needs on that uplink, so
+/// the premise holds for every upload. No connection at all still fails within the 10 s connect
+/// timeout.
 pub fn upload_timeout(bytes: usize) -> Duration {
     let mb = (bytes as u64).div_ceil(1_000_000);
-    Duration::from_secs((30 + mb * 60).min(15 * 60))
+    Duration::from_secs((30 + mb * 60).min(30 * 60))
+}
+
+/// The largest audio file sent in one request. ChatGPT's transcription takes about 25 MB; longer
+/// recordings are sent in parts below this size (see `voxa_store::audio::upload_parts`).
+pub const MAX_UPLOAD_BYTES: usize = 20_000_000;
+
+/// Waits before trying again when the connection to ChatGPT could not even be opened (nothing
+/// was sent). Any failure after the audio started going out is never retried here: one press
+/// of Send never uploads the same audio twice.
+pub const CONNECT_RETRY_WAITS_MS: [u64; 2] = [1500, 4000];
+
+/// The wait before try number `attempt + 2`, or None to stop. Only a failure to connect (nothing
+/// uploaded) is tried again.
+pub fn retry_wait(nothing_sent: bool, attempt: usize) -> Option<Duration> {
+    if !nothing_sent {
+        return None;
+    }
+    CONNECT_RETRY_WAITS_MS.get(attempt).map(|ms| Duration::from_millis(*ms))
+}
+
+/// The audio for one request, shared between tries without copying it.
+struct SharedAudio(std::sync::Arc<Vec<u8>>);
+
+impl AsRef<[u8]> for SharedAudio {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl ChatGpt {
@@ -355,7 +401,17 @@ impl ChatGpt {
 
     /// Fetch a short-lived access token. This is also the readiness check for the session.
     pub fn access_token(&self, s: &Session) -> Result<String, TranscribeError> {
-        let v = self.session_json(s)?;
+        // A small GET: a dropped connection is worth two more tries.
+        let mut attempt = 0;
+        let v = loop {
+            match self.session_json(s) {
+                Err(TranscribeError::Offline) if attempt < CONNECT_RETRY_WAITS_MS.len() => {
+                    std::thread::sleep(Duration::from_millis(CONNECT_RETRY_WAITS_MS[attempt]));
+                    attempt += 1;
+                }
+                r => break r?,
+            }
+        };
         // An empty session object ({}) means signed out.
         v.get("accessToken").and_then(|t| t.as_str()).map(str::to_string).ok_or(TranscribeError::SessionExpired)
     }
@@ -403,36 +459,70 @@ impl ChatGpt {
         Ok(v)
     }
 
-    /// Turn recorded speech into text. `audio` is a complete file (e.g. WAV), `file_name` carries its extension.
+    /// Turn recorded speech into text. `audio` is a complete file (e.g. WAV), `file_name` carries
+    /// its extension. The audio is uploaded at most once: only a failure to connect is tried
+    /// again (see [`retry_wait`]).
     pub fn transcribe(&self, s: &Session, audio: Vec<u8>, file_name: &str, mime: &str) -> Result<String, TranscribeError> {
         let token = self.access_token(s)?;
         let limit = upload_timeout(audio.len());
-        let part = multipart::Part::bytes(audio).file_name(file_name.to_string()).mime_str(mime).map_err(|_| TranscribeError::Server(0))?;
-        let form = multipart::Form::new().part("file", part).text("model", "whisper-1");
-        let resp = self
-            .base(self.http.post(TRANSCRIBE_URL), s)
-            .bearer_auth(token)
-            .header("oai-client-build-number", "5503767")
-            .header("x-openai-target-path", "/backend-api/transcribe")
-            .header("x-openai-target-route", "/backend-api/transcribe")
-            .multipart(form)
-            .timeout(limit)
-            .send()
-            .map_err(|e| classify_send_error(&e))?;
+        let audio = std::sync::Arc::new(audio);
+        let mut attempt = 0;
+        let resp = loop {
+            let len = audio.len() as u64;
+            let reader = std::io::Cursor::new(SharedAudio(audio.clone()));
+            let part = multipart::Part::reader_with_length(reader, len)
+                .file_name(file_name.to_string())
+                .mime_str(mime)
+                .map_err(|_| TranscribeError::Server(0))?;
+            let form = multipart::Form::new().part("file", part).text("model", "whisper-1");
+            let sent = self
+                .base(self.http.post(TRANSCRIBE_URL), s)
+                .bearer_auth(&token)
+                .header("oai-client-build-number", "5503767")
+                .header("x-openai-target-path", "/backend-api/transcribe")
+                .header("x-openai-target-route", "/backend-api/transcribe")
+                .multipart(form)
+                .timeout(limit)
+                .send();
+            match sent {
+                Ok(r) => break r,
+                Err(e) => match retry_wait(e.is_connect(), attempt) {
+                    Some(wait) => {
+                        std::thread::sleep(wait);
+                        attempt += 1;
+                    }
+                    None => return Err(classify_send_error(&e)),
+                },
+            }
+        };
+        drop(audio);
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
         let body = resp.text().map_err(|e| classify_send_error(&e))?;
-        if let Some(e) = TranscribeError::from_response(status, is_html(&headers, &body), headers.contains_key("cf-mitigated")) {
+        if let Some(e) = transcribe_reply_error(status, is_html(&headers, &body), headers.contains_key("cf-mitigated")) {
             return Err(e);
         }
         let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| TranscribeError::Server(status))?;
         self.note_cookies(s, &headers);
-        Ok(["text", "transcript", "message"]
-            .iter()
-            .find_map(|k| v.get(*k).and_then(|t| t.as_str()))
-            .unwrap_or_default()
-            .to_string())
+        transcript_from(&v).ok_or(TranscribeError::Server(status))
     }
+}
+
+/// How a reply to the transcribe request failed, if it did. The access token was accepted just
+/// before, so a 401 or 403 here is about this request (a rate limit, a region or plan refusal),
+/// not a sign-out: it never blocks recording or asks the user to sign in again.
+pub fn transcribe_reply_error(status: u16, body_is_html: bool, cf_mitigated: bool) -> Option<TranscribeError> {
+    match TranscribeError::from_response(status, body_is_html, cf_mitigated) {
+        Some(TranscribeError::SessionExpired) => Some(TranscribeError::Server(status)),
+        e => e,
+    }
+}
+
+/// The transcript in a 2xx reply, or None when the reply has none: a reply in a shape this
+/// client doesn't know is a server problem (the recording is kept and can be sent again), never
+/// "no speech". An empty string is a real answer: ChatGPT heard nothing.
+pub fn transcript_from(v: &serde_json::Value) -> Option<String> {
+    ["text", "transcript"].iter().find_map(|k| v.get(*k).and_then(|t| t.as_str())).map(str::to_string)
 }
 
 /// The signed-in ChatGPT account, as shown in Settings.
@@ -499,7 +589,8 @@ mod timeout_tests {
         // A 71 s take (16 kHz mono 16-bit WAV, about 2.27 MB) on a slow network.
         assert_eq!(upload_timeout(2_272_000), Duration::from_secs(210));
         // A 10-minute WAV is about 19 MB: capped at 15 minutes.
-        assert_eq!(upload_timeout(19_200_000), Duration::from_secs(15 * 60));
+        assert_eq!(upload_timeout(19_200_000), Duration::from_secs(30 + 20 * 60));
+        assert_eq!(upload_timeout(100_000_000), Duration::from_secs(30 * 60));
     }
 }
 
