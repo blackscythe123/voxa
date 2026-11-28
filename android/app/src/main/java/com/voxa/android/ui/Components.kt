@@ -150,9 +150,9 @@ enum class PillKind { Warn, Copy, Good }
 fun Pill(text: String, kind: PillKind, modifier: Modifier = Modifier) {
     val c = vx
     val (bg, fg) = when (kind) {
-        PillKind.Warn -> c.warn10 to c.warn
+        PillKind.Warn -> c.warn10 to c.warnText
         PillKind.Copy -> c.accent5 to c.accent
-        PillKind.Good -> c.good12 to c.good
+        PillKind.Good -> c.good12 to c.goodText
     }
     Text(text, modifier.clip(RoundedCornerShape(8.dp)).background(bg).padding(horizontal = 8.dp, vertical = 4.dp), style = Type.XSBold, color = fg)
 }
@@ -162,7 +162,7 @@ fun Pill(text: String, kind: PillKind, modifier: Modifier = Modifier) {
 fun VSwitch(on: Boolean, onChange: (Boolean) -> Unit) {
     val c = vx
     Box(
-        Modifier.size(48.dp, 28.dp).clip(CircleShape).background(if (on) c.accent else c.text16)
+        Modifier.size(48.dp, 28.dp).clip(CircleShape).background(if (on) c.accent else c.switchOff)
             .clickable(role = Role.Switch) { onChange(!on) },
     ) {
         Box(
@@ -365,7 +365,7 @@ fun ConfirmDialog(title: String, body: String, confirm: String, danger: Boolean 
         shape = RoundedCornerShape(24.dp),
         title = { Text(title, style = Type.L, color = c.text) },
         text = { Text(body, style = Type.M, color = c.text72) },
-        confirmButton = { TextButton({ onConfirm() }) { Text(confirm, style = Type.MBold, color = if (danger) c.danger else c.accent) } },
+        confirmButton = { TextButton({ onConfirm() }) { Text(confirm, style = Type.MBold, color = if (danger) c.dangerText else c.accent) } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel", style = Type.MBold, color = c.text72) } },
     )
 }

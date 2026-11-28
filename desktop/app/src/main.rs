@@ -47,7 +47,8 @@ use voxa_core::flow::Delivery;
 use voxa_chatgpt::{ChatGpt, Session as GptSession};
 use voxa_core::{Effect, Event, Flow, JobId, Mic, Network, Problem, Readiness, Session, State, Target, TranscribeError};
 
-pub(crate) const INK: u32 = 0x8F4C2C;
+/// The 1.0 sepia: 8.2:1 with white, 7.7:1 on the strip.
+pub(crate) const INK: u32 = 0x7A3F22;
 /// Below this peak RMS a recording is treated as silence and never sent. Measured: soft speech
 /// peaked at 0.0156, a silent take at 0.0079, so the cutoff sits well under soft speech.
 const SILENCE: f32 = 0.003;
@@ -1689,7 +1690,7 @@ impl Voxa {
                 let paused = *paused;
                 let app = self.flow.job(*job).map(|j| j.target.app.clone()).unwrap_or_default();
                 let secs = self.talk_time().as_secs();
-                row.push(div().text_size(px(12.)).text_color(rgb(0x5F5F5F)).child(app).into_any_element());
+                row.push(div().text_size(px(12.)).text_color(rgb(0x555555)).child(app).into_any_element());
                 // This pass's levels: the last (tick + 1) ticks.
                 let tick = self.frame as usize % QUILL_CYCLE;
                 let pass: Vec<f32> = self.levels.iter().skip(self.levels.len().saturating_sub(tick + 1)).copied().collect();
@@ -1704,7 +1705,7 @@ impl Voxa {
                     if paused {
                         let mut col = div().flex().flex_col().text_size(px(12.)).child(div().child(t.title.clone()));
                         if let Some(d) = t.detail.clone() {
-                            col = col.child(div().text_color(rgb(0x5F5F5F)).child(d));
+                            col = col.child(div().text_color(rgb(0x555555)).child(d));
                         }
                         row.push(col.into_any_element());
                     } else if t.title != "Listening" {
@@ -1736,7 +1737,7 @@ impl Voxa {
                 if let Some(t) = text {
                     let mut col = div().flex().flex_col().child(div().child(t.title.clone()));
                     if let Some(d) = t.detail.clone() {
-                        col = col.child(div().text_size(px(12.)).text_color(rgb(0x5F5F5F)).child(d));
+                        col = col.child(div().text_size(px(12.)).text_color(rgb(0x555555)).child(d));
                     }
                     row.push(col.into_any_element());
                     if matches!(state, State::Transcribing { .. }) {

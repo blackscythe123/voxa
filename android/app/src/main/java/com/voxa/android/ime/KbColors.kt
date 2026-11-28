@@ -58,8 +58,14 @@ class KbColors(
         const val LIGHT_FG = 0xFFF2F2F0.toInt()
         const val DARK_FG = 0xFF141414.toInt()
         private const val WHITE = 0xFFFFFFFF.toInt()
-        private const val SEPIA = 0xFF8F4C2C.toInt()
+        /** The 1.0 sepia: 8.2:1 with white. Dark keeps #D9946D (#7A3F22 is only 2.3:1 on near-black). */
+        private const val SEPIA = 0xFF7A3F22.toInt()
         private const val SEPIA_DARK = 0xFFD9946D.toInt()
+        private fun MUTED(dark: Boolean) = if (dark) 0xFFB8B8B6.toInt() else 0xFF505050.toInt()
+
+        /** On the dark check (#45C27C): 7.2:1, where white was 2.3:1. */
+        const val ON_GOOD_DARK = 0xFF0E2416.toInt()
+
         /** Green that reads as text on the light surfaces (5.2:1 on #F3F3F1). */
         const val GOOD_TEXT_LIGHT = 0xFF17743F.toInt()
 
@@ -93,9 +99,8 @@ class KbColors(
                 surface = surface, photo = false, washAlpha = 1f,
                 key = if (!look.keyShapes) 0 else if (dark) 0xFF2E2E2C.toInt() else WHITE,
                 keyElevation = !dark && look.keyShapes,
-                // Secondary text: 56 % reads at 5.6:1 on the dark surface, but only 4.0:1 on the light
-                // one, so light uses 62 % (4.95:1 on #F3F3F1, WCAG AA).
-                text = text, muted = withAlpha(text, if (dark) 0.56f else 0.62f), stageMuted = withAlpha(text, if (dark) 0.56f else 0.62f), keyText = withAlpha(text, 0.72f),
+                // Secondary text at AAA: #505050 is 7.3:1 on #F3F3F1, #B8B8B6 is 8.8:1 on #1A1A19.
+                text = text, muted = mutedFor(dark), stageMuted = mutedFor(dark), keyText = withAlpha(text, 0.72f),
                 accent = accent, onAccent = onAccent,
                 micRing = ring(accent, surface, text, dark), micGlow = withAlpha(accent, if (dark) 0.25f else 0.35f),
                 bars = withAlpha(accent, 0.3f), spinner = accent,
@@ -308,7 +313,7 @@ object Photo {
             Contrast.ratioGrey(goodText, a * wash + (1f - a) * sb.hi),
         ) >= 4.5f
         val stageLight = stage == LIGHT_FG
-        val mic = if (look.micColor != 0) look.micColor else if (stageLight) 0xFFD9946D.toInt() else 0xFF8F4C2C.toInt()
+        val mic = if (look.micColor != 0) look.micColor else if (stageLight) 0xFFD9946D.toInt() else 0xFF7A3F22.toInt()
         val st = bs[1]
         val micReads = minOf(
             Contrast.ratioGrey(mic, a * wash + (1f - a) * st.lo),

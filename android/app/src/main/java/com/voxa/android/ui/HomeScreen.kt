@@ -157,10 +157,16 @@ private fun greeting(): String = when (LocalTime.now().hour) {
 @Composable
 fun Readiness(problem: Problem?, checking: Boolean, onFix: () -> Unit) {
     val c = vx
+    // The dot in the status colour, the words in its darker text colour (4.5:1).
     val (color, text) = when {
         problem != null -> c.warn to problem.text
         checking -> c.text56 to "Checking your sign-in"
         else -> c.good to "Ready to dictate"
+    }
+    val words = when {
+        problem != null -> c.warnText
+        checking -> c.text56
+        else -> c.goodText
     }
     Row(
         Modifier.clip(RoundedCornerShape(8.dp)).then(if (problem != null) Modifier.clickable(onClick = onFix) else Modifier),
@@ -173,9 +179,9 @@ fun Readiness(problem: Problem?, checking: Boolean, onFix: () -> Unit) {
             },
         )
         Spacer(Modifier.width(4.dp))
-        Text(text, style = Type.SBold, color = color)
+        Text(text, style = Type.SBold, color = words)
         if (problem != null && problem != Problem.Offline) {
-            Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(16.dp), tint = color)
+            Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(16.dp), tint = words)
         }
     }
 }

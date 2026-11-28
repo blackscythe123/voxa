@@ -20,7 +20,7 @@ import com.voxa.android.R
 
 /**
  * The v6 tokens (docs/ui-mocks/v6-app-redesign.html). 60/30/10: a neutral base, near-black text at
- * 100 / 72 / 56 %, and Voxa's sepia only for the mic and the primary actions. Dark mode keeps the
+ * 100 / 72 % and an opaque muted grey, and Voxa's sepia only for the mic and the primary actions. Dark mode keeps the
  * same roles on a neutral near-black, with the sepia lightened for contrast.
  */
 @Immutable
@@ -34,18 +34,26 @@ data class VxColors(
     val text: Color,
     val accent: Color,
     val onAccent: Color,
+    /** Status dots, fills and icons. */
     val good: Color,
     val warn: Color,
     val danger: Color,
+    /** The same statuses as text (WCAG AA 4.5:1 on the page and the surface). */
+    val goodText: Color,
+    val warnText: Color,
+    val dangerText: Color,
+    /** Secondary text, opaque, at AAA: 7.2:1 on white in light, 8.6:1 on the card in dark. */
+    val muted: Color,
+    /** A switch's track when off: 3:1 or more on the card (WCAG 1.4.11). */
+    val switchOff: Color,
     /** Soft shadow tint (light only; dark cards are lifted by colour instead). */
     val shadow: Color,
     val avatar: Color,
     val dark: Boolean,
 ) {
     val text72 get() = text.copy(alpha = 0.72f)
-    /** Secondary text. 56 % in dark (5.3:1 or more); 62 % in light, where 56 % gave only 4.2:1 on
-     *  white and 4.0:1 on #F3F3F1 (62 %: 5.2:1 and 4.95:1, WCAG AA). */
-    val text56 get() = text.copy(alpha = if (dark) 0.56f else 0.62f)
+    /** Secondary text: [muted] (the name is from when it was text at 56 %). */
+    val text56 get() = muted
     val text40 get() = text.copy(alpha = 0.40f)
     val text16 get() = text.copy(alpha = 0.16f)
     val hair get() = text.copy(alpha = if (dark) 0.10f else 0.06f)
@@ -61,11 +69,16 @@ val LightVx = VxColors(
     surface = Color(0xFFF3F3F1),
     card = Color(0xFFFFFFFF),
     text = Color(0xFF141414),
-    accent = Color(0xFF8F4C2C),
+    accent = Color(0xFF7A3F22),
     onAccent = Color(0xFFFFFFFF),
     good = Color(0xFF1F9D55),
     warn = Color(0xFFB26B00),
     danger = Color(0xFFC8281E),
+    goodText = Color(0xFF17743F),
+    warnText = Color(0xFF9A5B00),
+    dangerText = Color(0xFFB3241B),
+    muted = Color(0xFF575757),
+    switchOff = Color(0xFF939393),
     shadow = Color(0xFF3C2819),
     avatar = Color(0xFF384656),
     dark = false,
@@ -81,6 +94,11 @@ val DarkVx = VxColors(
     good = Color(0xFF45C27C),
     warn = Color(0xFFE3A44A),
     danger = Color(0xFFF07A70),
+    goodText = Color(0xFF45C27C),
+    warnText = Color(0xFFE3A44A),
+    dangerText = Color(0xFFF07A70),
+    muted = Color(0xFFB8B8B6),
+    switchOff = Color(0xFF939393),
     shadow = Color(0xFF000000),
     avatar = Color(0xFF4A5868),
     dark = true,

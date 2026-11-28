@@ -220,7 +220,7 @@ private fun PairEditor(fix: Boolean, initial: WordPair?, onSave: (WordPair) -> U
                 Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onDelete),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(if (fix) "Delete this fix" else "Delete this snippet", style = Type.MBold, color = c.danger)
+                Text(if (fix) "Delete this fix" else "Delete this snippet", style = Type.MBold, color = c.dangerText)
             }
         }
     }

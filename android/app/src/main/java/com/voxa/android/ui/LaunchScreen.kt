@@ -32,7 +32,7 @@ import androidx.core.graphics.PathParser
 const val VOICE_LINE = "M2,20H14L18,8L24,34L30,4L36,36L42,14L46,24L50,20H62"
 
 /** Voxa's sepia: the app icon is this colour in both themes. */
-val BrandSepia = Color(0xFF8F4C2C)
+val BrandSepia = Color(0xFF7A3F22)
 
 private const val TOTAL_MS = 950f
 

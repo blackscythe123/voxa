@@ -127,7 +127,7 @@ class KeyboardPanel(context: Context, val colors: KbColors) : LinearLayout(conte
         check = RoundView(context, 72f, 12f).apply {
             icon = context.getDrawable(R.drawable.ic_check)?.mutate()
             iconSizeDp = 36f
-            style(c.good, c.alpha(c.good, if (c.dark) 0.2f else 0.12f), c.alpha(c.good, 0.35f), 16f, 0f, 0xFFFFFFFF.toInt())
+            style(c.good, c.alpha(c.good, if (c.dark) 0.2f else 0.12f), c.alpha(c.good, 0.35f), 16f, 0f, if (c.dark) KbColors.ON_GOOD_DARK else 0xFFFFFFFF.toInt())
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         // 72 + a 12 dp ring each side + the 16 dp glow; the caption tucks into the glow's room.

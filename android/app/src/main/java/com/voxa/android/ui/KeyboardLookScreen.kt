@@ -216,7 +216,7 @@ fun KeyboardLookScreen(activity: MainActivity) {
                         Box(Modifier.weight(1f).fillMaxSize().background(Color(0xFFF3F3F1)))
                         Box(Modifier.weight(1f).fillMaxSize().background(Color(0xFF1A1A19)))
                     }
-                    Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF8F4C2C)))
+                    Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF7A3F22)))
                 }
                 if (KeyboardLook.phoneColorsAvailable) {
                     val n = remember { Color(ctx.getColor(if (dark) android.R.color.system_neutral1_900 else android.R.color.system_neutral1_50)) }
@@ -272,7 +272,7 @@ fun KeyboardLookScreen(activity: MainActivity) {
             if (failed) {
                 Text(
                     "That photo couldn't be used. Try another one.",
-                    Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp), style = Type.S, color = c.danger,
+                    Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp), style = Type.S, color = c.dangerText,
                 )
             }
 
@@ -319,7 +319,7 @@ fun KeyboardLookScreen(activity: MainActivity) {
             ) {
                 // The default follows the look: Voxa sepia, or the phone's accent with Phone colours.
                 val def = if (look.type == KeyboardLook.PHONE) KbColors.forLook(ctx, look.copy(micColor = 0), dark).accent
-                else if (colors.dark) 0xFFD9946D.toInt() else 0xFF8F4C2C.toInt()
+                else if (colors.dark) 0xFFD9946D.toInt() else 0xFF7A3F22.toInt()
                 MicDot("Default", Color(def), look.micColor == 0) { update(look.copy(micColor = 0)) }
                 for (m in KeyboardLook.micColors) {
                     MicDot(m.name, Color(m.color), look.micColor == m.color) { update(look.copy(micColor = m.color)) }

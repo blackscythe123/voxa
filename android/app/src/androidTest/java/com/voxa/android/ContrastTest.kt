@@ -12,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** WCAG contrast of the keyboard's fixed colours (review findings S19 to S22). */
+/** WCAG contrast of the keyboard's fixed colours (review findings S19 to S22, the 1.0 palette). */
 @RunWith(AndroidJUnit4::class)
 class ContrastTest {
     private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
@@ -36,10 +36,14 @@ class ContrastTest {
     fun voxaLookSecondaryTextAndPastedTitleReadInLightAndDark() {
         for (dark in listOf(false, true)) {
             val c = KbColors.voxa(dark, KeyboardLook.Look())
+            // Secondary text at AAA (the 1.0 palette).
             val muted = Contrast.ratio(over(c.muted, c.surface), c.surface)
-            assertTrue("muted dark=$dark: $muted", muted >= 4.5f)
+            assertTrue("muted dark=$dark: $muted", muted >= 7f)
             val saved = Contrast.ratio(over(c.stageMuted, c.surface), c.surface)
-            assertTrue("stage dark=$dark: $saved", saved >= 4.5f)
+            assertTrue("stage dark=$dark: $saved", saved >= 7f)
+            assertTrue("mic on surface dark=$dark", Contrast.ratio(c.accent, c.surface) >= 4.5f)
+            val onCheck = if (dark) KbColors.ON_GOOD_DARK else Color.WHITE
+            assertTrue("check icon dark=$dark", Contrast.ratio(onCheck, c.good) >= 3f)
             val title = Contrast.ratio(c.goodTitle, c.surface)
             assertTrue("pasted title dark=$dark: $title", title >= 4.5f)
             assertTrue(Contrast.ratio(c.onAccent, c.accent) >= 4.5f)
