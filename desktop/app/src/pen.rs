@@ -56,50 +56,82 @@ fn place(m: [f32; 6], k: f32, origin: gpui::Point<Pixels>) -> Transform {
     Transform::new(m[0], m[1], m[2], m[3], m[4], m[5]).then_scale(k, k).then_translate(lyon::math::vector(f32::from(origin.x), f32::from(origin.y)))
 }
 
+/// Whether `s` is the long horizon (the phone band's ground line, "M6 92 ..."): Home's hero draws
+/// its own line across the content instead.
+pub fn is_horizon(s: &doodle::Stroke) -> bool {
+    s.kind == Kind::Ground && s.d.starts_with("M6 92")
+}
+
+/// Paints `art` at `t` ms, band units scaled by `k` with the band's (0, 0) at `origin`.
+fn paint_strokes(art: &Art, t: f32, ink: Hsla, dark: bool, k: f32, origin: gpui::Point<Pixels>, skip_horizon: bool, window: &mut gpui::Window) {
+    for (s, (segs, len)) in art.drawing.strokes.iter().zip(&art.strokes) {
+        let t0 = s.start_ms as f32;
+        if t < t0 || (skip_horizon && is_horizon(s)) {
+            continue;
+        }
+        let p = doodle::progress(s, t);
+        let flourish = if s.tag != Tag::None { doodle::flourish_at(art.doodle, s, art.drawing.scale, t) } else { None };
+        let (m, fa) = flourish.unwrap_or(([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 1.0));
+        let tr = place(m, k, origin);
+        let (style, alpha) = match s.kind {
+            Kind::Ink => (Some(doodle::INK_W), 1.0),
+            Kind::Ground => (Some(doodle::GROUND_W), doodle::ground_alpha(dark)),
+            Kind::Hatch => (Some(doodle::HATCH_W), doodle::HATCH_ALPHA),
+            Kind::Wash => (None, doodle::wash_alpha(dark) * p),
+            Kind::Dot => (None, p),
+        };
+        let mut pb = match style {
+            Some(w) => {
+                let pb = PathBuilder::default().with_style(round(w * stroke_scale(k)));
+                if p < 1.0 { pb.dash_array(&[px(len * k * p), px(len * k + 1.0)]) } else { pb }
+            }
+            None => PathBuilder::fill(),
+        };
+        if style.is_some() && p <= 0.0 {
+            continue;
+        }
+        add(&mut pb, segs);
+        pb.transform(tr);
+        if let Ok(path) = pb.build() {
+            window.paint_path(path, Hsla { a: ink.a * alpha * fa, ..ink });
+        }
+    }
+}
+
 /// The doodle at `t` ms, in a band `height` tall (the band's 112 units fit the height).
 /// `art_for` gives the drawing for the band's width in band units (cache it: it is asked each frame).
 pub fn doodle(art_for: impl Fn(f32) -> Rc<Art> + 'static, t: f32, ink: Hsla, dark: bool, height: f32) -> AnyElement {
     canvas(
         move |b: Bounds<Pixels>, _, _| art_for(f32::from(b.size.width) / (height / doodle::BAND_H)),
-        move |b: Bounds<Pixels>, art: Rc<Art>, window, _| {
-            let k = height / doodle::BAND_H;
-            for (s, (segs, len)) in art.drawing.strokes.iter().zip(&art.strokes) {
-                let t0 = s.start_ms as f32;
-                if t < t0 {
-                    continue;
-                }
-                let p = doodle::progress(s, t);
-                let flourish = if s.tag != Tag::None { doodle::flourish_at(art.doodle, s, art.drawing.scale, t) } else { None };
-                let (m, fa) = flourish.unwrap_or(([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 1.0));
-                let tr = place(m, k, b.origin);
-                let (style, alpha) = match s.kind {
-                    Kind::Ink => (Some(doodle::INK_W), 1.0),
-                    Kind::Ground => (Some(doodle::GROUND_W), doodle::ground_alpha(dark)),
-                    Kind::Hatch => (Some(doodle::HATCH_W), doodle::HATCH_ALPHA),
-                    Kind::Wash => (None, doodle::wash_alpha(dark) * p),
-                    Kind::Dot => (None, p),
-                };
-                let mut pb = match style {
-                    Some(w) => {
-                        let pb = PathBuilder::default().with_style(round(w * k));
-                        if p < 1.0 { pb.dash_array(&[px(len * k * p), px(len * k + 1.0)]) } else { pb }
-                    }
-                    None => PathBuilder::fill(),
-                };
-                if style.is_some() && p <= 0.0 {
-                    continue;
-                }
-                add(&mut pb, segs);
-                pb.transform(tr);
-                if let Ok(path) = pb.build() {
-                    window.paint_path(path, Hsla { a: ink.a * alpha * fa, ..ink });
-                }
-            }
-        },
+        move |b: Bounds<Pixels>, art: Rc<Art>, window, _| paint_strokes(&art, t, ink, dark, height / doodle::BAND_H, b.origin, false, window),
     )
     .w_full()
     .h(px(height))
     .into_any_element()
+}
+
+/// Home's hero: the doodle alone, cropped to `crop` (x0, y0, x1, y1 in band units: its drawn
+/// bounds plus padding), drawn `k` times its band size, without the long horizon.
+pub fn doodle_fit(art: Rc<Art>, t: f32, ink: Hsla, dark: bool, k: f32, crop: [f32; 4]) -> AnyElement {
+    let (w, h) = ((crop[2] - crop[0]) * k, (crop[3] - crop[1]) * k);
+    canvas(
+        |_, _, _| (),
+        move |b: Bounds<Pixels>, _, window, _| {
+            let origin = point(b.origin.x - px(crop[0] * k), b.origin.y - px(crop[1] * k));
+            paint_strokes(&art, t, ink, dark, k, origin, true, window)
+        },
+    )
+    .flex_none()
+    .w(px(w))
+    .h(px(h))
+    .into_any_element()
+}
+
+/// How much thicker the pen gets when the doodle is drawn `k` times its band size. Up to the band
+/// (k <= 1) the pen scales with the drawing, as before; above it, with the square root, so the
+/// bigger Home hero reads at the band's weight, not a felt marker.
+pub fn stroke_scale(k: f32) -> f32 {
+    if k <= 1.0 { k } else { k.sqrt() }
 }
 
 /// The wordmark measured once, for the nib.

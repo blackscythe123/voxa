@@ -1,9 +1,16 @@
 //! Home's header and the written splash in the Voxa window (docs/ui-mocks/
 //! v7-home-greeting-and-splash.html, section 3).
 //!
-//! The header: a doodle band across the page with the subject on the right, then the greeting at
-//! 40 on one line. The doodle draws itself once per doodle per day and is drawn finished while an
-//! InfoBar shows or with reduced motion.
+//! The header (locked by the owner on 2026-11-28, docs/ui-mocks/v7-home-fullscreen-compare.html,
+//! "Desktop, new"): the greeting on the left and the doodle on the right of one row, both standing
+//! on one ink line across the content. The doodle is cropped to its own drawn bounds (every stroke
+//! but the long horizon, plus [`CROP_PAD`]) so none is cut off and none carries empty margins; it
+//! is about 150 px tall at a 1280 px window, its width capped near 420 px there (a wide doodle
+//! shrinks instead of pushing the greeting onto two lines). No fixed height: the row is as tall as
+//! the taller of the two. A window too narrow for even a small greeting beside the doodle falls
+//! back to the band above the greeting ([`hero_layout`] returns None).
+//! The doodle draws itself once per doodle per day and is drawn finished while an InfoBar shows or
+//! with reduced motion.
 //!
 //! The splash: only on a cold open of the window by the user (the tray passes `--splash` the
 //! first time it opens the window in a run), inside the window's own content area, never over
@@ -23,13 +30,79 @@ use crate::theme::p;
 use crate::greet;
 use crate::pen::{self, Art, Splash, SplashColors};
 
-/// The band's height and the greeting's size, as in the mockup.
+/// The band's height, as in the mockup (the stacked fallback).
 const BAND_H: f32 = 112.0;
+/// The nav column and the page's side padding (home.rs render): the content width is the
+/// window's width less these.
+const NAV_W: f32 = 240.0;
+const PAGE_PAD_X: f32 = 80.0;
+/// The hero at a 1280 px window (content 960): the doodle 150 tall and at most 420 wide, the
+/// greeting at 46; both grow with the content, up to the max.
+const REF_CONTENT: f32 = 1280.0 - NAV_W - PAGE_PAD_X;
+const DOODLE_H: f32 = 150.0;
+const DOODLE_H_MAX: f32 = 240.0;
+const DOODLE_W_CAP: f32 = 420.0;
+const TEXT: f32 = 46.0;
+const TEXT_MAX: f32 = 64.0;
+/// Below this the greeting would be too small to read as a greeting: stack instead.
+const TEXT_MIN: f32 = 30.0;
+/// Space between the greeting's end and the doodle.
+const GAP: f32 = 32.0;
+/// Padding around the doodle's drawn bounds, in band units.
+pub(super) const CROP_PAD: f32 = 4.0;
+/// The ground the doodles stand on, in band units.
+const GROUND_Y: f32 = 92.0;
+
+/// The doodle's drawn bounds (x0, y0, x1, y1, band units) plus [`CROP_PAD`]: every stroke, wash
+/// and dot except the long horizon.
+pub(super) fn crop(d: &voxa_core::doodle::Drawing) -> [f32; 4] {
+    use voxa_core::svgpath;
+    let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for s in d.strokes.iter().filter(|s| !pen::is_horizon(s)) {
+        for (x, y) in svgpath::flatten(&s.segs(), 0.25).into_iter().flatten() {
+            b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+        }
+    }
+    [b[0] - CROP_PAD, b[1] - CROP_PAD, b[2] + CROP_PAD, b[3].max(GROUND_Y) + CROP_PAD]
+}
+
+/// The hero's sizes for a content `content_w` px wide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Hero {
+    /// The doodle's scale (px per band unit).
+    pub k: f32,
+    /// The greeting's font size.
+    pub text: f32,
+}
+
+/// Lays out the hero, or None when even a small greeting won't fit beside the doodle (stacked).
+/// `crop`: the doodle's cropped box in band units.
+pub(super) fn hero_layout(content_w: f32, greeting: &str, crop: [f32; 4]) -> Option<Hero> {
+    let (cw, ch) = (crop[2] - crop[0], crop[3] - crop[1]);
+    if content_w <= 0.0 || cw <= 0.0 || ch <= 0.0 || greeting.is_empty() {
+        return None;
+    }
+    let s = content_w / REF_CONTENT;
+    let k = ((DOODLE_H * s).clamp(DOODLE_H, DOODLE_H_MAX) / ch).min(DOODLE_W_CAP * s / cw);
+    let room = content_w - cw * k - GAP;
+    let mut text = (TEXT * s).clamp(TEXT, TEXT_MAX);
+    let w = text_w(greeting, text);
+    if w > room {
+        text *= room / w;
+    }
+    (text >= TEXT_MIN).then_some(Hero { k, text })
+}
+
+/// The greeting's width at `size` px, Segoe UI Semibold, generous so a long name never runs into
+/// the doodle (wide letters average about 0.6 em).
+pub(super) fn text_w(s: &str, size: f32) -> f32 {
+    s.chars().map(|c| if c.is_uppercase() || "mwMW".contains(c) { 0.72 } else if " ,.'ilj".contains(c) { 0.3 } else { 0.56 }).sum::<f32>() * size
+}
 
 pub(super) struct Greet {
     header: greet::Header,
-    /// The drawing for the band's current width.
-    art: Rc<RefCell<Option<(f32, Rc<Art>)>>>,
+    /// The drawing for the band's current width, and whether it was placed for the hero.
+    art: Rc<RefCell<Option<(f32, bool, Rc<Art>)>>>,
     /// When the drawing started (None: not started, or drawn finished).
     t0: Option<Instant>,
     still: bool,
@@ -123,13 +196,55 @@ impl Home {
         };
         let cache = g.art.clone();
         let greeting = g.header.greeting.clone();
+        // The hero: the phone band's drawing (no shift), cropped to its drawn bounds.
+        let content_w = (self.view_w - NAV_W - PAGE_PAD_X).max(0.0);
+        let art = {
+            let mut c = cache.borrow_mut();
+            if c.as_ref().is_none_or(|(w, hero, _)| *w != voxa_core::doodle::BAND_W || !*hero) {
+                *c = Some((voxa_core::doodle::BAND_W, true, Rc::new(Art::new(greeting.doodle, greet::drawing(&greeting, voxa_core::doodle::BAND_W)))));
+            }
+            c.as_ref().map(|(_, _, a)| a.clone()).expect("just set")
+        };
+        let bounds = crop(&art.drawing);
+        if let Some(h) = hero_layout(content_w, &line, bounds) {
+            let ink = rgb(p().accent);
+            // The line sits where the doodle stands (y 92); the greeting's descenders clear it.
+            let line_y = (bounds[3] - GROUND_Y) * h.k;
+            let mut ground: gpui::Hsla = ink.into();
+            ground.a = voxa_core::doodle::ground_alpha(p().dark);
+            return div()
+                .id("hero")
+                .relative()
+                .pt(px(8.))
+                .mb(px(13.))
+                .flex()
+                .items_end()
+                .justify_between()
+                .gap(px(GAP))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .pb(px(line_y + 6.0))
+                        .text_size(px(h.text))
+                        .line_height(px(h.text * 1.2))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(line),
+                )
+                .child(pen::doodle_fit(art, t.min(1e9), ink.into(), false, h.k, bounds))
+                .child(div().absolute().left_0().right_0().bottom(px(line_y - 0.75)).h(px(1.5)).bg(ground))
+                .into_any_element();
+        }
         let band = pen::doodle(
             move |w| {
                 let mut c = cache.borrow_mut();
-                if c.as_ref().is_none_or(|(cw, _)| (cw - w).abs() > 0.5) {
-                    *c = Some((w, Rc::new(Art::new(greeting.doodle, greet::drawing(&greeting, w)))));
+                if c.as_ref().is_none_or(|(cw, hero, _)| (cw - w).abs() > 0.5 || *hero) {
+                    *c = Some((w, false, Rc::new(Art::new(greeting.doodle, greet::drawing(&greeting, w)))));
                 }
-                c.as_ref().map(|(_, a)| a.clone()).unwrap_or_else(|| Rc::new(Art::new(greeting.doodle, greet::drawing(&greeting, w))))
+                c.as_ref().map(|(_, _, a)| a.clone()).unwrap_or_else(|| Rc::new(Art::new(greeting.doodle, greet::drawing(&greeting, w))))
             },
             t.min(1e9),
             rgb(p().accent).into(),
@@ -202,3 +317,91 @@ impl Home {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use voxa_core::doodle;
+    use voxa_core::greeting::{Date, Doodle};
+    use voxa_core::svgpath;
+
+    /// Every doodle as Home can draw it: the 11 kinds, the streak tally at 3 and at 30 marks (the
+    /// widest), on a few dates (the sky's variations and the moon move with the date).
+    fn every_doodle() -> Vec<(String, doodle::Drawing)> {
+        let mut out = Vec::new();
+        for date in [Date { y: 2026, m: 11, d: 28 }, Date { y: 2027, m: 3, d: 14 }, Date { y: 2027, m: 7, d: 2 }] {
+            for d in Doodle::ALL {
+                for n in if d == Doodle::Streak { vec![3, 30] } else { vec![5] } {
+                    out.push((format!("{d:?} {n} on {}-{}-{}", date.y, date.m, date.d), doodle::draw(d, date, n, doodle::BAND_W, 0.0)));
+                }
+            }
+        }
+        out
+    }
+
+    /// Locked layout rule 2: each doodle is cropped to its own drawn bounds, so none is cut off
+    /// (earlier fixed boxes cut the evening hills, the night's stars, the weekend mug and book and
+    /// the 30 day tally in half) and none carries empty margins.
+    #[test]
+    fn every_doodle_is_cropped_to_its_own_drawn_bounds() {
+        for (name, d) in every_doodle() {
+            assert_eq!(d.strokes.iter().filter(|s| pen::is_horizon(s)).count(), 1, "{name}: one long horizon, left out of the crop");
+            let c = crop(&d);
+            let (mut x0, mut y0, mut x1) = (f32::MAX, f32::MAX, f32::MIN);
+            for s in d.strokes.iter().filter(|s| !pen::is_horizon(s)) {
+                for (x, y) in svgpath::flatten(&s.segs(), 0.25).into_iter().flatten() {
+                    assert!(x >= c[0] + CROP_PAD - 0.01 && x <= c[2] - CROP_PAD + 0.01 && y >= c[1] + CROP_PAD - 0.01 && y <= c[3] - CROP_PAD + 0.01, "{name}: ({x}, {y}) outside {c:?}");
+                    (x0, y0, x1) = (x0.min(x), y0.min(y), x1.max(x));
+                }
+            }
+            assert!((c[0] - (x0 - CROP_PAD)).abs() < 0.01 && (c[1] - (y0 - CROP_PAD)).abs() < 0.01 && (c[2] - (x1 + CROP_PAD)).abs() < 0.01, "{name}: no empty margin");
+            assert!(c[3] >= GROUND_Y + CROP_PAD - 0.01, "{name}: the doodle's ground is inside the box");
+        }
+    }
+
+    /// Locked layout rules 3 and 1: about 150 px tall at a 1280 px window, never wider than the
+    /// cap (the widest doodle shrinks instead), and the greeting stays on one line beside it.
+    #[test]
+    fn the_hero_caps_the_doodle_and_keeps_the_greeting_on_one_line() {
+        let content = |w: f32| w - NAV_W - PAGE_PAD_X;
+        let leads = ["Good afternoon", "Saturday morning", "Happy New Year", "One year with Voxa", "Nearly weekend", "First words", "Happy birthday", "Early start"];
+        let mut widest = (String::new(), 0.0f32);
+        for (name, d) in every_doodle() {
+            let c = crop(&d);
+            for lead in leads {
+                for who in ["Sam", "Alexandria"] {
+                    let g = format!("{lead}, {who}");
+                    let h = hero_layout(content(1280.0), &g, c).unwrap_or_else(|| panic!("{name} at 1280 px: side by side for {g}"));
+                    let (w, ht) = ((c[2] - c[0]) * h.k, (c[3] - c[1]) * h.k);
+                    assert!(w <= DOODLE_W_CAP + 0.01, "{name}: {w} px wide at 1280");
+                    assert!(ht <= DOODLE_H + 0.01, "{name}: {ht} px tall at 1280");
+                    assert!(text_w(&g, h.text) + GAP + w <= content(1280.0) + 0.01, "{name}: {g} on one line");
+                    if w > widest.1 {
+                        widest = (name.clone(), w);
+                    }
+                    if (c[2] - c[0]) / (c[3] - c[1]) < DOODLE_W_CAP / DOODLE_H {
+                        assert!((ht - DOODLE_H).abs() < 0.01, "{name}: 150 px tall when not capped");
+                    }
+                }
+            }
+        }
+        assert!((widest.1 - DOODLE_W_CAP).abs() < 0.01, "the widest doodle ({}) is held at the cap, not past it", widest.0);
+        let tally = crop(&doodle::draw(Doodle::Streak, Date { y: 2026, m: 11, d: 28 }, 30, doodle::BAND_W, 0.0));
+        let h = hero_layout(content(1280.0), "30 days running, Sam", tally).unwrap();
+        assert!((tally[2] - tally[0]) * h.k <= DOODLE_W_CAP + 0.01, "the 30 day tally fits the cap");
+        // Wider windows grow the hero; a window too narrow for a readable greeting stacks.
+        let big = hero_layout(content(1600.0), "Happy birthday, Sam", crop(&doodle::draw(Doodle::Birthday, Date { y: 2026, m: 11, d: 28 }, 0, doodle::BAND_W, 0.0))).unwrap();
+        assert!(big.text > TEXT && big.k > 1.0);
+        assert_eq!(hero_layout(content(760.0), "Happy birthday, Alexandria", tally), None);
+        assert_eq!(hero_layout(content(1280.0), "", tally), None);
+    }
+
+    /// The hero's pen reads at the band's weight, not a felt marker.
+    #[test]
+    fn the_hero_pen_is_not_a_felt_marker() {
+        assert_eq!(pen::stroke_scale(1.0), 1.0);
+        assert_eq!(pen::stroke_scale(0.5), 0.5);
+        assert!(pen::stroke_scale(2.6) < 1.7);
+    }
+}
+

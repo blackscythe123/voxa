@@ -129,6 +129,8 @@ pub struct Home {
     drawn_with: Option<(store::Appearance, bool)>,
     /// Home's greeting and doodle, picked when Home opens.
     greet: Option<greet_view::Greet>,
+    /// The window's width at the last render: Home's hero or the stacked band (greet_view).
+    view_w: f32,
     /// The written splash, on a cold open of the window.
     splash: Option<greet_view::SplashRun>,
     /// Open source licences: the libraries whose licence text is open.
@@ -272,6 +274,7 @@ impl Home {
             os_dark: crate::theme::os_is_dark(cx.window_appearance()),
             drawn_with: None,
             greet: None,
+            view_w: 0.0,
             splash: None,
             licence_open: Default::default(),
         };
@@ -1835,33 +1838,37 @@ impl Home {
         let mut out: Vec<AnyElement> = vec![self.greeting_header(!needs.is_empty(), cx)];
         out.extend(needs);
 
-        // The one thing Voxa does, front and centre.
-        out.push(
-            div()
-                .relative()
-                .child(self.mark("ready"))
-                .mt(px(16.))
-                .px(px(24.))
-                .py(px(22.))
-                .rounded(px(8.))
-                .bg(rgb(p().card))
-                .border_1()
-                .border_color(rgba(p().card_border_a))
-                .flex()
-                .items_center()
-                .gap(px(24.))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .child(div().text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::SEMIBOLD).child("Click where you want to type, press your shortcut, and talk."))
-                        .child(div().mt(px(6.)).text_size(px(13.)).text_color(rgb(p().muted)).child("Press it again to finish. Esc cancels. Works in every app.")),
-                )
-                .child(div().relative().child(self.mark("keys")).flex().gap(px(6.)).children(shortcut.split('+').map(|k| {
-                    div().h(px(48.)).min_w(px(48.)).px(px(14.)).flex().items_center().justify_center().rounded(px(6.)).bg(rgb(p().page)).border_1().border_b_4().border_color(rgba(p().key_line_a)).text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(k.to_string())
-                })))
-                .into_any_element(),
-        );
+        // The one thing Voxa does: on top while History is empty (or the tour points at it),
+        // otherwise first under Good to know, below the stats and Recent.
+        let on_top = shortcut_card_on_top(entries.is_empty(), self.tour_step().is_some());
+        let shortcut_card = div()
+            .relative()
+            .child(self.mark("ready"))
+            .mt(px(if on_top { 16. } else { 0. }))
+            .px(px(24.))
+            .py(px(22.))
+            .rounded(px(8.))
+            .bg(rgb(p().card))
+            .border_1()
+            .border_color(rgba(p().card_border_a))
+            .flex()
+            .items_center()
+            .gap(px(24.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .child(div().text_size(px(20.)).line_height(px(28.)).font_weight(FontWeight::SEMIBOLD).child("Click where you want to type, press your shortcut, and talk."))
+                    .child(div().mt(px(6.)).text_size(px(13.)).text_color(rgb(p().muted)).child("Press it again to finish. Esc cancels. Works in every app.")),
+            )
+            .child(div().relative().child(self.mark("keys")).flex().gap(px(6.)).children(shortcut.split('+').map(|k| {
+                div().h(px(48.)).min_w(px(48.)).px(px(14.)).flex().items_center().justify_center().rounded(px(6.)).bg(rgb(p().page)).border_1().border_b_4().border_color(rgba(p().key_line_a)).text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(k.to_string())
+            })))
+            .into_any_element();
+        let mut shortcut_card = Some(shortcut_card);
+        if on_top {
+            out.extend(shortcut_card.take());
+        }
 
         // The tour's practice box: a real paste target inside Voxa.
         if matches!(self.tour_step(), Some(tour::Step::Shortcut | tour::Step::Practice)) {
@@ -1915,6 +1922,9 @@ impl Home {
 
         // Things worth knowing.
         out.push(section("Good to know").into_any_element());
+        if let Some(c) = shortcut_card.take() {
+            out.push(div().mb(px(3.)).child(c).into_any_element());
+        }
         let tip = |glyph: char, title: &str, body: &str| {
             div()
                 .flex_1()
@@ -2547,6 +2557,7 @@ impl Render for Home {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_theme(window, cx);
         self.tour_check(cx);
+        self.view_w = f32::from(window.viewport_size().width);
         let root = div()
             .relative()
             .track_focus(&self.focus)
@@ -2731,6 +2742,16 @@ mod tests {
         assert!(!REVIEWED_ICONS.iter().any(|(c, _)| TEXT_GLYPHS.contains(c)), "no reviewed icon is a letter glyph");
     }
 
+    /// Home's order (the owner, 2026-11-28): hero, stats, Recent, then Good to know led by the
+    /// shortcut card; on a first run (empty History) or during the tour the card is on top.
+    #[test]
+    fn the_shortcut_card_leads_home_only_while_history_is_empty() {
+        assert!(shortcut_card_on_top(true, false));
+        assert!(shortcut_card_on_top(false, true));
+        assert!(shortcut_card_on_top(true, true));
+        assert!(!shortcut_card_on_top(false, false));
+    }
+
     #[test]
     fn shortcuts_need_ctrl_or_alt_and_a_real_key() {
         let m = |control, alt, shift| gpui::Modifiers { control, alt, shift, ..Default::default() };
@@ -2747,6 +2768,13 @@ mod tests {
         assert_eq!(fmt_thousands(999), "999");
         assert_eq!(fmt_thousands(1_000_000), "1,000,000");
     }
+}
+
+/// Where Home's shortcut card goes: on top while History is empty (the most useful thing on a first
+/// run) or while the tour points at it; otherwise first under Good to know, so the hero and the
+/// stats lead (the owner's order, 2026-11-28).
+fn shortcut_card_on_top(history_empty: bool, touring: bool) -> bool {
+    history_empty || touring
 }
 
 /// Plain tooltip.
