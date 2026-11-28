@@ -31,6 +31,12 @@ pub fn part_path(dir: &Path) -> PathBuf {
     dir.join(format!(".part-{}-{n}", std::process::id()))
 }
 
+/// The offer's file in `dir` when it is already there and still verifies (size and SHA-256).
+pub fn already_staged(dir: &Path, offer: &Offer) -> Option<PathBuf> {
+    let p = dir.join(file_name(offer));
+    (p.is_file() && verify_file(&p, offer).is_ok()).then_some(p)
+}
+
 /// Stream `body` into `dir`, verifying against `offer`. Returns the staged file's path.
 pub fn stage_from(body: impl Read, dir: &Path, offer: &Offer) -> Result<PathBuf, UpdateError> {
     stage_with(body, dir, offer, |p| File::create(p))

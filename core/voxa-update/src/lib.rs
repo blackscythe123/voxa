@@ -12,6 +12,7 @@
 pub mod feed;
 pub mod keys;
 pub mod policy;
+pub mod schedule;
 pub mod version;
 mod codec;
 #[cfg(feature = "net")]
@@ -21,6 +22,7 @@ pub mod stage;
 pub use codec::{b64_decode, b64_encode, hex_decode, hex_encode};
 pub use feed::{Asset, Envelope, Manifest, verify_feed};
 pub use policy::{Blocked, Flow, Inputs, Moment, Offer};
+pub use schedule::CheckState;
 pub use version::Version;
 
 /// The repo every feed, asset and release page lives under.

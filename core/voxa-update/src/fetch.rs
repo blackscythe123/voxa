@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::{Channel, MAX_FEED_BYTES, MAX_REDIRECTS, Manifest, Offer, Origin, UpdateError, stage, verify_feed};
+use crate::{Channel, CheckState, MAX_FEED_BYTES, MAX_REDIRECTS, Manifest, Offer, Origin, UpdateError, stage, verify_feed};
 
 pub struct Client {
     http: reqwest::blocking::Client,
@@ -43,15 +43,27 @@ impl Client {
     }
 
     fn get(&self, url: &str) -> Result<reqwest::blocking::Response, UpdateError> {
+        self.get_if(url, None, None)
+    }
+
+    /// A GET, conditional when validators are given: a 304 comes back as Ok with status 304.
+    fn get_if(&self, url: &str, etag: Option<&str>, last_modified: Option<&str>) -> Result<reqwest::blocking::Response, UpdateError> {
         if !self.origin.hop_allowed(url) {
             return Err(UpdateError::RefusedHost);
         }
-        let resp = self.http.get(url).send().map_err(map_err)?;
+        let mut req = self.http.get(url);
+        if let Some(e) = etag {
+            req = req.header(reqwest::header::IF_NONE_MATCH, e);
+        }
+        if let Some(l) = last_modified {
+            req = req.header(reqwest::header::IF_MODIFIED_SINCE, l);
+        }
+        let resp = req.send().map_err(map_err)?;
         if !self.origin.hop_allowed(resp.url().as_str()) {
             return Err(UpdateError::RefusedHost);
         }
         let status = resp.status().as_u16();
-        if !(200..300).contains(&status) {
+        if !(200..300).contains(&status) && !(status == 304 && (etag.is_some() || last_modified.is_some())) {
             return Err(UpdateError::Http(status));
         }
         Ok(resp)
@@ -60,12 +72,42 @@ impl Client {
     /// The raw feed bytes, at most MAX_FEED_BYTES.
     pub fn fetch_feed(&self) -> Result<Vec<u8>, UpdateError> {
         let resp = self.get(&self.origin.feed_url)?;
-        let mut out = Vec::new();
-        resp.take(MAX_FEED_BYTES + 1).read_to_end(&mut out).map_err(|_| UpdateError::Offline)?;
-        if out.len() as u64 > MAX_FEED_BYTES {
-            return Err(UpdateError::TooLarge);
+        read_feed(resp)
+    }
+
+    /// The feed through the cache in `state`: the stored ETag / Last-Modified go with the request,
+    /// and a 304 (no body) serves the stored copy. Returns the bytes and whether they were fresh.
+    /// GitHub's release asset host answers these with 304 (checked 2026-11-28).
+    pub fn fetch_feed_cached(&self, state: &mut CheckState) -> Result<(Vec<u8>, bool), UpdateError> {
+        let cached = state.cached_feed();
+        let (etag, lm) = if cached.is_some() { (state.etag.clone(), state.last_modified.clone()) } else { (None, None) };
+        let resp = self.get_if(&self.origin.feed_url, etag.as_deref(), lm.as_deref())?;
+        if resp.status().as_u16() == 304 {
+            return cached.map(|c| (c, false)).ok_or(UpdateError::Http(304));
         }
-        Ok(out)
+        let header = |n: reqwest::header::HeaderName| resp.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
+        let (new_etag, new_lm) = (header(reqwest::header::ETAG), header(reqwest::header::LAST_MODIFIED));
+        let body = read_feed(resp)?;
+        state.store_feed(&body, new_etag, new_lm);
+        Ok((body, true))
+    }
+
+    /// A scheduled or manual check through the cache, updating `state` (serial, schedule,
+    /// backoff). The caller decides first with `state.due()` / `state.manual_allowed()`.
+    pub fn check_with_state(&self, keys: &[(u8, [u8; 32])], channel: Channel, state: &mut CheckState, now_ms: u64, manual: bool) -> Result<Manifest, UpdateError> {
+        let result = self
+            .fetch_feed_cached(state)
+            .and_then(|(bytes, _)| verify_feed(&bytes, keys, channel, state.highest_serial, &self.origin));
+        // A refused feed is an answer (the check worked), not a reason to retry within the hour.
+        let ok = match &result {
+            Ok(_) => true,
+            Err(e) => e.is_refusal(),
+        };
+        if let Ok(m) = &result {
+            state.highest_serial = crate::policy::next_serial(state.highest_serial, m.serial);
+        }
+        state.record(now_ms, ok, manual);
+        result
     }
 
     /// Fetch and verify the feed: the verified manifest, or why not.
@@ -80,6 +122,10 @@ impl Client {
         if offer.size > crate::policy::cap_for(&offer.asset_key) {
             return Err(UpdateError::TooLarge);
         }
+        // Once per version: a file already staged and still verified is never fetched again.
+        if let Some(done) = stage::already_staged(dir, offer) {
+            return Ok(done);
+        }
         let v = crate::Version::parse(&offer.version).ok_or(UpdateError::BadManifest)?;
         if !crate::feed::asset_url_ok(&offer.url, &v, &self.origin) {
             return Err(UpdateError::BadManifest);
@@ -92,6 +138,15 @@ impl Client {
         }
         stage::stage_from(resp, dir, offer)
     }
+}
+
+fn read_feed(resp: reqwest::blocking::Response) -> Result<Vec<u8>, UpdateError> {
+    let mut out = Vec::new();
+    resp.take(MAX_FEED_BYTES + 1).read_to_end(&mut out).map_err(|_| UpdateError::Offline)?;
+    if out.len() as u64 > MAX_FEED_BYTES {
+        return Err(UpdateError::TooLarge);
+    }
+    Ok(out)
 }
 
 fn map_err(e: reqwest::Error) -> UpdateError {
@@ -164,6 +219,127 @@ mod tests {
         assert!(!e.is_refusal());
         let off = Client::new(Origin::test(&format!("{}://127.0.0.1:1/f/desktop.json", "http")).unwrap(), "1.0.0", "Test").unwrap();
         assert_eq!(off.fetch_feed(), Err(UpdateError::Offline));
+    }
+
+    /// A local server that answers the feed with an ETag (304 when it matches) and the installer,
+    /// counting the requests each path gets.
+    fn counting_server(feed: Vec<u8>, installer: Vec<u8>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("{}://{}", "http", l.local_addr().unwrap());
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = log.clone();
+        std::thread::spawn(move || {
+            for s in l.incoming().take(30) {
+                let Ok(mut s) = s else { continue };
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let conditional = req.contains("if-none-match: \"v1\"");
+                seen.lock().unwrap().push(format!("{path}{}", if conditional { " (if-none-match)" } else { "" }));
+                if path.ends_with("desktop.json") && conditional {
+                    let _ = write!(s, "HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n");
+                    continue;
+                }
+                let body = if path.ends_with("desktop.json") { feed.clone() } else { installer.clone() };
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            }
+        });
+        (base, log)
+    }
+
+    fn local_feed(base: &str, installer: &[u8]) -> Vec<u8> {
+        let mut p = desktop_payload("1.0.1", 7);
+        p["notes_url"] = format!("{base}/feed/notes").into();
+        p["assets"] = serde_json::json!({ "windows-x64": { "url": format!("{base}/feed/Voxa-Setup-1.0.1.exe"),
+            "sha256": crate::stage::sha256_hex(installer), "size": installer.len() } });
+        sign(TEST_SEED_K1, 1, &serde_json::to_vec(&p).unwrap())
+    }
+
+    #[test]
+    fn a_304_keeps_the_cached_feed() {
+        let feed = b"{\"key_id\":1,\"payload\":\"x\",\"sig\":\"y\"}".to_vec();
+        let (base, log) = counting_server(feed.clone(), Vec::new());
+        let c = Client::new(origin(&base), "1.0.0", "Test").unwrap();
+        let mut st = CheckState::default();
+        st.init(1_000, 0);
+        let (first, fresh) = c.fetch_feed_cached(&mut st).unwrap();
+        assert!(fresh);
+        assert_eq!(first, feed);
+        assert_eq!(st.etag.as_deref(), Some("\"v1\""));
+        let (second, fresh) = c.fetch_feed_cached(&mut st).unwrap();
+        assert!(!fresh, "a 304 served the stored copy");
+        assert_eq!(second, feed);
+        let reqs = log.lock().unwrap().clone();
+        assert_eq!(reqs, vec!["/feed/desktop.json".to_string(), "/feed/desktop.json (if-none-match)".to_string()]);
+        // Without a stored body, no validators are sent (a 304 could not be served).
+        let mut empty = CheckState::default();
+        empty.etag = Some("\"v1\"".into());
+        let (_, fresh) = c.fetch_feed_cached(&mut empty).unwrap();
+        assert!(fresh);
+    }
+
+    #[test]
+    fn a_verified_download_is_never_fetched_again() {
+        let installer = vec![9u8; 50_000];
+        let (base, log) = counting_server(Vec::new(), installer.clone());
+        let o = Offer {
+            version: "1.0.1".into(),
+            asset_key: crate::ASSET_WINDOWS.into(),
+            url: format!("{base}/feed/Voxa-Setup-1.0.1.exe"),
+            sha256: crate::stage::sha256_hex(&installer),
+            size: installer.len() as u64,
+            auto: true,
+            ..Offer::default()
+        };
+        let c = Client::new(origin(&base), "1.0.0", "Test").unwrap();
+        let dir = std::env::temp_dir().join(format!("voxa-update-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p1 = c.download(&o, &dir).unwrap();
+        let p2 = c.download(&o, &dir).unwrap();
+        let p3 = c.download(&o, &dir).unwrap();
+        assert_eq!(p1, p2);
+        assert_eq!(p2, p3);
+        assert_eq!(log.lock().unwrap().len(), 1, "one download for the version");
+        // A tampered staged file is not "verified": it is fetched again (and replaced).
+        std::fs::write(&p1, b"tampered").unwrap();
+        let p4 = c.download(&o, &dir).unwrap();
+        assert!(crate::stage::verify_file(&p4, &o).is_ok());
+        assert_eq!(log.lock().unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_check_with_state_records_backoff_and_serial() {
+        let installer = vec![3u8; 10];
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("{}://{}", "http", l.local_addr().unwrap());
+        let feed = local_feed(&base, &installer);
+        std::thread::spawn(move || {
+            for s in l.incoming().take(3) {
+                let Ok(mut s) = s else { continue };
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", feed.len());
+                let _ = s.write_all(&feed);
+            }
+        });
+        let c = Client::new(origin(&base), "1.0.0", "Test").unwrap();
+        let mut st = CheckState::default();
+        st.init(1_000, 0);
+        let m = c.check_with_state(&test_keys(), Channel::Desktop, &mut st, 5_000, false).unwrap();
+        assert_eq!(m.serial, 7);
+        assert_eq!(st.highest_serial, 7);
+        assert_eq!(st.failures, 0);
+        assert!(!st.due(5_000 + crate::schedule::HOUR_MS));
+        // Offline: a failure that backs off an hour.
+        let off = Client::new(Origin::test(&format!("{}://127.0.0.1:1/f/desktop.json", "http")).unwrap(), "1.0.0", "Test").unwrap();
+        let mut st2 = CheckState::default();
+        st2.init(1_000, 0);
+        assert!(off.check_with_state(&test_keys(), Channel::Desktop, &mut st2, 9_000, false).is_err());
+        assert_eq!(st2.failures, 1);
+        assert_eq!(st2.next_due_ms, 9_000 + crate::schedule::HOUR_MS);
     }
 
     #[test]
