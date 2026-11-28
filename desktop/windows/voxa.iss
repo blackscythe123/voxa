@@ -1,9 +1,18 @@
 ; Voxa for Windows installer (the GPUI rebuild). Works as an update over the old Voxa:
 ; closes it, removes its start-at-sign-in entry, optionally uninstalls it, and on first run the new
 ; app imports its history, recordings, shortcut and ChatGPT sign-in.
-; Build: ISCC.exe desktop\windows\voxa.iss  (after cargo build --release -p voxa-desktop -p voxa-signin)
+; Build: ISCC.exe /DAppVersion=<version> desktop\windows\voxa.iss  (after cargo build --release -p voxa-desktop -p voxa-signin)
+;
+; Automatic updates: the tray runs this installer with /VERYSILENT ... /VOXAUPDATE=<from version>
+; /MERGETASKS="!removeold" once its install gate holds (desktop/app/src/update.rs). Then Setup waits
+; for Voxa to exit by itself (it never kills a take), never asks for UAC, and starts Voxa again
+; with --background --updated, after a success and after a rollback alike.
 
+; The version comes from Cargo.toml (CI passes /DAppVersion). This default must equal the
+; workspace version; the lint release-version-sync checks it.
+#ifndef AppVersion
 #define AppVersion "0.4.7"
+#endif
 #define Bin "..\..\target\release"
 
 [Setup]
@@ -28,7 +37,10 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Voxa closes itself before an automatic update; never AppMutex (in silent mode it aborts on the
+; tray that launched Setup) and never RestartApplications.
 CloseApplications=no
+SetupLogging=yes
 
 [Files]
 Source: "{#Bin}\voxa-desktop.exe"; DestDir: "{app}"; DestName: "Voxa.exe"; Flags: ignoreversion
@@ -42,7 +54,7 @@ Name: "{autodesktop}\Voxa"; Filename: "{app}\Voxa.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
-Name: "removeold"; Description: "Remove the old Voxa after updating (Windows asks for permission)"; Check: OldVoxaInstalled
+Name: "removeold"; Description: "Remove the old Voxa after updating (Windows asks for permission)"; Check: OldVoxaInstalled and not WizardSilent
 
 [Registry]
 ; The old app's start-at-sign-in entry: the new Voxa replaces it.
@@ -78,6 +90,26 @@ begin
   Result := AutostartOn;
 end;
 
+// True when the tray started this Setup as an automatic update (/VOXAUPDATE=<from version>).
+function IsAutoUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:VOXAUPDATE|}') <> '';
+end;
+
+// An automatic update: Voxa quits by itself once its gate holds. Wait up to 20 s for both of its
+// mutexes to go before falling back to taskkill, so a take is never cut off.
+procedure WaitForVoxaToExit;
+var
+  I: Integer;
+begin
+  for I := 1 to 80 do
+  begin
+    if not CheckForMutexes('Local\VoxaNextSingleInstance,Local\VoxaNextWindow') then
+      Exit;
+    Sleep(250);
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
@@ -86,9 +118,14 @@ begin
   // Started at sign-in by either the old app or an earlier new one: keep that choice.
   AutostartOn := RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Voxa Next', V)
     or RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'com.Voxa.app', V);
-  // Close Voxa (old and new) so files can be replaced and the shortcut is free.
+  if IsAutoUpdate then
+    WaitForVoxaToExit;
+  // Close Voxa (old and new) so files can be replaced and the shortcut is free. After an
+  // automatic update's wait this finds nothing; it stays as the fallback.
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Voxa.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM voxa-desktop.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  // The sign-in helper is installed too; a running copy locks its file and fails a silent install.
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM voxa-signin.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Sleep(500);
   Result := '';
 end;
@@ -99,6 +136,24 @@ var
 begin
   // Remove the old app before the new one first runs. Its data folder stays, so the new
   // Voxa can import history, recordings and sign-in from it.
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('removeold') and OldVoxaInstalled then
+  // Never in silent mode: 'runas' raises a UAC prompt that steals focus.
+  if (CurStep = ssPostInstall) and (not WizardSilent) and WizardIsTaskSelected('removeold') and OldVoxaInstalled then
     ShellExec('runas', ExpandConstant(OldUninstaller), '/S', '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+// An automatic update starts Voxa again in the background (no window, no focus), whether the
+// install succeeded or rolled back, so the hotkey always comes back. [Run]'s postinstall entry is
+// skipped in silent mode.
+procedure DeinitializeSetup;
+var
+  Code: Integer;
+begin
+  if not IsAutoUpdate then
+    Exit;
+  try
+    if FileExists(ExpandConstant('{app}\Voxa.exe')) then
+      Exec(ExpandConstant('{app}\Voxa.exe'), '--background --updated', '', SW_HIDE, ewNoWait, Code);
+  except
+    // {app} is unknown if Setup stopped before it was set; nothing to start then.
+  end;
 end;
