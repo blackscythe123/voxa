@@ -172,7 +172,6 @@ base64 -w0 voxa-release.jks > voxa-release.jks.b64
 gh secret set ANDROID_RELEASE_KEYSTORE_B64 --env release --repo blackscythe123/voxa < voxa-release.jks.b64
 gh secret set ANDROID_RELEASE_STORE_PASSWORD --env release --repo blackscythe123/voxa   # prompts
 gh secret set ANDROID_RELEASE_KEY_PASSWORD --env release --repo blackscythe123/voxa     # prompts (same as the store password if keytool did not ask)
-gh secret set ANDROID_RELEASE_KEY_ALIAS --env release --repo blackscythe123/voxa       # prompts: voxa
 rm voxa-release.jks.b64
 ```
 
