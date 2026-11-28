@@ -77,9 +77,14 @@ fn trim_long(samples: &[i16]) -> voxa_core::trim::Trimmed {
     voxa_core::trim::trim(samples, RATE, &voxa_core::trim::TrimParams::default())
 }
 
+/// The most speech one upload carries: 10 minutes (19.2 MB of WAV), safely under ChatGPT's
+/// ~25 MB limit for one file. Longer takes are sent in parts and the text joined.
+pub const MAX_PART_SECS: usize = 600;
+
 pub struct Prepared {
-    /// The WAV to upload.
-    pub wav: Vec<u8>,
+    /// What is uploaded: the take with long silences cut. Turned into WAV one part at a time
+    /// (see [`Prepared::parts`]), so a long take is never held as several full copies at once.
+    pub samples: Vec<i16>,
     /// Peak RMS of the take, for [`take::is_silent`] and [`take::invented_for_silence`].
     pub peak: f32,
     pub secs: f32,
@@ -89,9 +94,51 @@ impl Prepared {
     pub fn is_silent(&self) -> bool {
         take::is_silent(self.peak)
     }
+
+    /// The pieces sent one request each: one for takes up to [`MAX_PART_SECS`].
+    pub fn parts(&self) -> Vec<std::ops::Range<usize>> {
+        upload_parts(&self.samples, MAX_PART_SECS * RATE as usize)
+    }
+
+    /// The WAV for one part.
+    pub fn wav(&self, part: std::ops::Range<usize>) -> Option<Vec<u8>> {
+        wav_bytes(self.samples.get(part)?)
+    }
+
+    /// Bytes of WAV all parts add up to.
+    pub fn upload_bytes(&self) -> usize {
+        self.parts().len() * 44 + self.samples.len() * 2
+    }
 }
 
-/// Measure a recording and build the WAV to upload, with long silences cut from long takes.
+/// Cut `samples` into parts of at most `max` samples. Each cut is made at the quietest half
+/// second in the last 30 s before the limit, so a word is rarely split.
+pub fn upload_parts(samples: &[i16], max: usize) -> Vec<std::ops::Range<usize>> {
+    let max = max.max(RATE as usize);
+    let window = RATE as usize / 2;
+    let look = (RATE as usize * 30).min(max / 2);
+    let mut parts = Vec::new();
+    let mut start = 0;
+    while samples.len() - start > max {
+        let limit = start + max;
+        let from = limit - look;
+        let mut best = (f32::MAX, limit);
+        let mut at = from;
+        while at + window <= limit {
+            let level = rms(&samples[at..at + window]);
+            if level < best.0 {
+                best = (level, at + window / 2);
+            }
+            at += window / 2;
+        }
+        parts.push(start..best.1);
+        start = best.1;
+    }
+    parts.push(start..samples.len());
+    parts
+}
+
+/// Measure a recording and keep what is uploaded, with long silences cut from long takes.
 pub fn prepare_samples(samples: Vec<i16>) -> Option<Prepared> {
     let secs = samples.len() as f32 / RATE as f32;
     let peak = peak_rms(&samples);
@@ -101,7 +148,7 @@ pub fn prepare_samples(samples: Vec<i16>) -> Option<Prepared> {
     } else {
         samples
     };
-    Some(Prepared { wav: wav_bytes(&kept)?, peak, secs })
+    Some(Prepared { samples: kept, peak, secs })
 }
 
 /// [`prepare_samples`] for a raw PCM file.
@@ -117,7 +164,8 @@ mod tests {
     fn short_takes_are_sent_whole_and_silence_is_seen() {
         let p = prepare_samples(vec![0i16; RATE as usize * 2]).unwrap();
         assert!(p.is_silent());
-        assert_eq!(p.wav.len(), 44 + RATE as usize * 4);
+        assert_eq!(p.parts().len(), 1);
+        assert_eq!(p.wav(p.parts()[0].clone()).unwrap().len(), 44 + RATE as usize * 4);
         assert!((p.secs - 2.0).abs() < 0.01);
     }
 
@@ -129,9 +177,37 @@ mod tests {
         s.extend(std::iter::repeat_n(0i16, RATE as usize * 40));
         s.extend(tone(RATE as usize * 10));
         let p = prepare_samples(s).unwrap();
-        let kept_secs = (p.wav.len() - 44) as f32 / 2.0 / RATE as f32;
+        let kept_secs = p.samples.len() as f32 / RATE as f32;
         assert!(kept_secs < 25.0, "kept {kept_secs} s");
         assert!(!p.is_silent());
+    }
+
+    /// ChatGPT takes about 25 MB per file: a long take is sent in parts under that, cut in a
+    /// pause, and every sample is sent exactly once.
+    #[test]
+    fn a_long_take_is_sent_in_parts_under_the_upload_limit() {
+        let tone = |n: usize| (0..n).map(|i| if i % 16 < 8 { 4000i16 } else { -4000 }).collect::<Vec<_>>();
+        // 25 minutes of talk with a 1 s pause every minute.
+        let mut s = Vec::new();
+        for _ in 0..25 {
+            s.extend(tone(RATE as usize * 59));
+            s.extend(std::iter::repeat_n(0i16, RATE as usize));
+        }
+        let max = MAX_PART_SECS * RATE as usize;
+        let parts = upload_parts(&s, max);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts.first().unwrap().start, 0);
+        assert_eq!(parts.last().unwrap().end, s.len());
+        for w in parts.windows(2) {
+            assert_eq!(w[0].end, w[1].start, "no gap and no overlap");
+        }
+        for p in &parts {
+            assert!(p.len() <= max);
+            assert!(44 + p.len() * 2 < 25_000_000, "each part is under ChatGPT's limit");
+        }
+        // The cut lands in a pause, not mid-word.
+        assert_eq!(s[parts[0].end], 0);
+        assert_eq!(upload_parts(&s[..RATE as usize * 60], max), vec![0..RATE as usize * 60]);
     }
 
     #[test]
