@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.voxa_ffi.SendOutcome
+import uniffi.voxa_ffi.SessionState
 
 /**
  * Voxa's background work, on the framework JobScheduler (no WorkManager):
@@ -28,10 +29,12 @@ import uniffi.voxa_ffi.SendOutcome
  *   ChatGPT session; a definite "signed out" after it was good is confirmed 2 minutes later in
  *   the same job before A1 is posted.
  * - [CONFIRM]: that 2 minute confirmation, for checks the app itself made.
- * - [SEND]: dictations recorded offline ("Sends when you're back online") are sent once there is
- *   a network, with exponential backoff, even when the keyboard is gone. Each entry gives up 24 h
- *   after it was recorded and posts A3 (never for Cloudflare blocking). One send runs at a time,
- *   and the core never uploads an entry that is already being sent.
+ * - [SEND]: dictations recorded offline ("Sends when you're back online"), and ones waiting for a
+ *   sign-in once signed in, are sent once there is a network, with exponential backoff, even when
+ *   the keyboard is gone. Long recordings wait for an unmetered network. Each entry gives up 24 h
+ *   after it was recorded, or after [MAX_ATTEMPTS] real tries, and posts A3 (never for Cloudflare
+ *   blocking). Being offline never gives up. One send runs at a time, and the core never uploads
+ *   an entry that is already being sent.
  *
  * Runs off the main thread (History and the vault are read here).
  */
@@ -65,9 +68,10 @@ class VoxaJobs : JobService() {
             }
             SEND -> scope.launch {
                 if (!sending.compareAndSet(false, true)) {
-                    // Another send loop is still finishing an upload: it picks this up after.
+                    // Another send loop is still finishing an upload: it does one more pass after
+                    // (a plain one: only the user's Retry makes a pass manual).
                     Diag.log("jobs", "send: one is already running")
-                    retryAsked.set(true)
+                    passAsked.set(true)
                     jobFinished(params, false)
                     return@launch
                 }
@@ -76,12 +80,13 @@ class VoxaJobs : JobService() {
                 try {
                     do {
                         retryAsked.set(false)
+                        passAsked.set(false)
                         again = runCatching { send(manual) }
                             .onFailure { if (it is CancellationException) throw it; Diag.log("jobs", "send failed: ${it.javaClass.simpleName}") }
                             .getOrDefault(true)
                         // The user tapped Retry while this loop was sending: one more pass, as a retry.
                         manual = retryAsked.get()
-                    } while (manual)
+                    } while (manual || passAsked.get())
                 } finally {
                     sending.set(false)
                 }
@@ -107,13 +112,14 @@ class VoxaJobs : JobService() {
         super.onDestroy()
     }
 
-    /** Send what waits for the network. Returns true to try again later (backoff). */
+    /** Send what waits for the network (or a sign-in, once signed in). Returns true to try again
+     *  later (backoff). */
     private suspend fun send(manual: Boolean): Boolean {
         val app = voxa
         app.awaitSession()
         val prefs = getSharedPreferences("notify", MODE_PRIVATE)
         val failedBefore = if (manual) ids(prefs.getString("bg_failed", "")) else emptyList()
-        val ids = app.core.waitingForNetwork() + failedBefore
+        val ids = waiting(app) + failedBefore
         // Tries per entry ("id:count,..."), so one entry's failures never cut another's short.
         val attempts = prefs.getString("send_attempts_by_entry", "").orEmpty().split(',').mapNotNull {
             val (id, n) = it.split(':').takeIf { p -> p.size == 2 } ?: return@mapNotNull null
@@ -133,16 +139,19 @@ class VoxaJobs : JobService() {
         val failed = mutableListOf<ULong>()
         var again = false
         var needsSignIn = false
+        var changed = false
         for (id in ids.distinct()) {
-            // A dictation the keyboard is still handling is the keyboard's to send.
+            // A dictation the keyboard is recording or writing out is the keyboard's: look again
+            // later (with backoff), never in a tight loop.
             if (app.keyboardOwns(id)) {
                 Diag.log("jobs", "send: $id belongs to the keyboard")
+                again = true
                 continue
             }
             val attempt = (attempts[id] ?: 0) + 1
-            attempts[id] = attempt
-            // The entry's id is when it was recorded: it gives up a day later (or on the user's Retry).
-            val giveUp = manual || now - id.toLong() > DAY_MS || attempt >= MAX_ATTEMPTS
+            // The entry's id is when it was recorded: it gives up a day later, after enough real
+            // tries, or when the user's Retry is for this one (a failed one, not a waiting one).
+            val giveUp = id in failedBefore || now - id.toLong() > DAY_MS || attempt >= MAX_ATTEMPTS
             val outcome = if (unreachable) SendOutcome.Unreachable(false) else withContext(Dispatchers.IO) { app.core.sendWaiting(id, giveUp, canned) }
             app.keepRefreshedCookies()
             Diag.log("jobs", "send: $id -> ${outcome.javaClass.simpleName} (attempt $attempt${if (giveUp) ", last try" else ""})")
@@ -151,17 +160,39 @@ class VoxaJobs : JobService() {
                     ready += id
                     readyApp = outcome.app
                     attempts.remove(id)
+                    changed = true
                 }
-                is SendOutcome.Offline, is SendOutcome.Busy -> again = true
+                // Only real tries count towards the cap; offline never gives up.
+                is SendOutcome.Offline -> {
+                    attempts[id] = attempt
+                    again = true
+                }
+                is SendOutcome.Busy -> again = true
                 // Cloudflare blocking never posts "couldn't send" (it stays in History).
-                is SendOutcome.Unreachable -> if (!giveUp) again = true else if (!outcome.blocked) failed += id
-                is SendOutcome.NeedsSignIn -> needsSignIn = true
-                else -> attempts.remove(id)
+                is SendOutcome.Unreachable -> {
+                    if (!giveUp) {
+                        attempts[id] = attempt
+                        again = true
+                    } else {
+                        attempts.remove(id)
+                        changed = true
+                        if (!outcome.blocked) failed += id
+                    }
+                }
+                is SendOutcome.NeedsSignIn -> {
+                    needsSignIn = true
+                    attempts.remove(id)
+                }
+                else -> {
+                    attempts.remove(id)
+                    changed = true
+                }
             }
-            if (giveUp && outcome !is SendOutcome.Busy) attempts.remove(id)
         }
         prefs.edit().putString("send_attempts_by_entry", attempts.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
-        app.historyChanged()
+        // Only when something changed: a History change schedules another send, and a pass that
+        // changed nothing must not start the next one at once.
+        if (changed) app.historyChanged()
         if (ready.isNotEmpty()) Notifier.ready(app, ready, readyApp)
         if (failed.isNotEmpty()) {
             addFailed(app, failed)
@@ -177,9 +208,12 @@ class VoxaJobs : JobService() {
         const val SESSION = 7101
         const val CONFIRM = 7102
         const val SEND = 7103
-        /** A safety cap per entry; with JobScheduler's backoff (30 s doubling, at most 5 h) the
-         *  24 h age usually comes first. */
+        /** A cap on real tries per entry (offline and unreachable answers); with JobScheduler's
+         *  backoff (30 s doubling, at most 5 h) the 24 h age usually comes first. */
         const val MAX_ATTEMPTS = 12
+        /** Waiting recordings above this many bytes (about 4 minutes of speech) are sent on an
+         *  unmetered network only, unless the user asked with Retry. */
+        const val UNMETERED_ABOVE_BYTES = 8_000_000L
         private const val DAY_MS = 24 * 60 * 60_000L
         private const val EXTRA_MANUAL = "manual"
 
@@ -187,6 +221,13 @@ class VoxaJobs : JobService() {
         private val sending = AtomicBoolean(false)
         /** The user tapped Retry while it ran: it does one more pass instead of a second loop. */
         private val retryAsked = AtomicBoolean(false)
+        /** Something new waits while it ran: one more plain pass. */
+        private val passAsked = AtomicBoolean(false)
+
+        /** Entries the background sends: waiting for the network, and waiting for a sign-in once
+         *  the session is good (dismissed ones and ones from earlier runs too). */
+        private fun waiting(app: com.voxa.android.VoxaApp): List<ULong> =
+            app.core.waitingForNetwork() + if (app.session.value == SessionState.VALID) app.core.waitingForSignInIds() else emptyList()
 
         private fun ids(s: String?): List<ULong> = s.orEmpty().split(',').mapNotNull { it.trim().toULongOrNull() }
 
@@ -241,25 +282,30 @@ class VoxaJobs : JobService() {
         fun scheduleSend(ctx: Context, manual: Boolean = false) {
             val js = scheduler(ctx)
             if (sending.get()) {
-                if (manual) retryAsked.set(true)
-                Diag.log("jobs", "background send already running${if (manual) ": retry after it" else ""}")
+                if (manual) retryAsked.set(true) else passAsked.set(true)
+                Diag.log("jobs", "background send already running${if (manual) ": retry after it" else ": one more pass after it"}")
                 return
             }
             if (!manual && js.getPendingJob(SEND) != null) return
+            // A long recording is not sent again and again over mobile data: it waits for Wi-Fi,
+            // unless the user asked (Retry).
+            val bytes = runCatching { ctx.voxa.core.audioBytesOf(waiting(ctx.voxa)).toLong() }.getOrDefault(0L)
+            val network = if (!manual && bytes > UNMETERED_ABOVE_BYTES) JobInfo.NETWORK_TYPE_UNMETERED else JobInfo.NETWORK_TYPE_ANY
             val r = js.schedule(
                 JobInfo.Builder(SEND, component(ctx))
-                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .setRequiredNetworkType(network)
+                    .setEstimatedNetworkBytes(0L, bytes)
                     .setBackoffCriteria(30_000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
                     .setPersisted(true)
                     .setExtras(PersistableBundle().apply { putBoolean(EXTRA_MANUAL, manual) })
                     .build(),
             )
-            Diag.log("jobs", "background send ${if (manual) "(retry) " else ""}${if (r == JobScheduler.RESULT_SUCCESS) "scheduled" else "not scheduled"}")
+            Diag.log("jobs", "background send ${if (manual) "(retry) " else ""}${if (network == JobInfo.NETWORK_TYPE_UNMETERED) "on Wi-Fi only " else ""}${if (r == JobScheduler.RESULT_SUCCESS) "scheduled" else "not scheduled"}")
         }
 
-        /** At start and whenever History changes: is anything waiting for the network? */
+        /** At start, whenever History changes and after signing in: is anything waiting? */
         fun scheduleSendIfWaiting(ctx: Context) {
-            if (ctx.voxa.core.waitingForNetwork().isNotEmpty()) scheduleSend(ctx)
+            if (waiting(ctx.voxa).isNotEmpty()) scheduleSend(ctx)
         }
     }
 }

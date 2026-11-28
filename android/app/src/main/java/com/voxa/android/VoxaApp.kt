@@ -110,8 +110,9 @@ class VoxaApp : Application() {
     /** The live keyboard's flow, so background work never sends a dictation the keyboard owns. */
     @Volatile var keyboardFlow: VoxaFlow? = null
 
-    /** The keyboard will send this entry itself (recording, being written out, or waiting for the
-     *  network in its live flow). A failed or ready take is not the keyboard's any more. */
+    /** The keyboard is recording or writing out this entry. Anything else (waiting, failed,
+     *  ready) may be sent by the background or History: the core's send claim keeps two senders
+     *  from uploading it at once. */
     fun keyboardOwns(entryId: ULong): Boolean = runCatching { keyboardFlow?.owns(entryId) == true }.getOrDefault(false)
 
     /** Wait until the saved session is in the core (background jobs on a cold start). */
@@ -132,8 +133,16 @@ class VoxaApp : Application() {
     fun readiness() = ReadinessInfo(
         session = session.value,
         network = if (online.value) NetworkState.UP else NetworkState.DOWN,
-        mic = if (micGranted()) MicState.GRANTED else MicState.DENIED,
+        mic = when {
+            !micGranted() -> MicState.DENIED
+            storageFull() -> MicState.CANT_SAVE
+            else -> MicState.GRANTED
+        },
     )
+
+    /** Too little room left to record (about a minute of speech): the keyboard says the storage
+     *  is full instead of starting a take it can't keep. */
+    fun storageFull(): Boolean = runCatching { filesDir.usableSpace < MIN_FREE_BYTES }.getOrDefault(false)
 
     /** Debug builds only: the session counts as good without asking ChatGPT (screenshots, tests). */
     val debugReady get() = BuildConfig.DEBUG && getSharedPreferences("debug", MODE_PRIVATE).getBoolean("ready", false)
@@ -188,6 +197,7 @@ class VoxaApp : Application() {
             return r.copy(session = SessionState.UNKNOWN, definite = false)
         }
         withContext(Dispatchers.Main) {
+            val signedInNow = r.session == SessionState.VALID && session.value != SessionState.VALID
             Log.i(TAG, "session check: ${r.session}, network ${r.network}, blocked ${r.blocked}")
             Diag.log("readiness", "session ${r.session}, network ${r.network}, blocked ${r.blocked}${if (fake != null) " (debug answer)" else ""}")
             session.value = r.session
@@ -195,6 +205,8 @@ class VoxaApp : Application() {
             if (r.network == NetworkState.DOWN) online.value = false
             if (r.account != null) account.value = r.account
             if (r.session == SessionState.EXPIRED) account.value = null
+            // Takes that waited for a sign-in (dismissed ones, ones from earlier runs) go now.
+            if (signedInNow) scope.launch(Dispatchers.IO) { VoxaJobs.scheduleSendIfWaiting(this@VoxaApp) }
         }
         return r
     }
@@ -223,10 +235,17 @@ class VoxaApp : Application() {
         // In memory now (this also drops cookies refreshed for an older session); saved off the
         // main thread, under the same lock as every refresh.
         core.useSession(cookieHeader, userAgent)
+        val generation = core.sessionGeneration()
         Log.i(TAG, "session captured (${cookieHeader.length} bytes of cookies)")
         Diag.log("signin", "success: session captured")
         scope.launch {
-            withContext(Dispatchers.IO) { vaultLock.withLock { vault.save(SessionVault.Saved(cookieHeader, userAgent)) } }
+            withContext(Dispatchers.IO) {
+                vaultLock.withLock {
+                    // Signed out (or in again) before this save ran: never write this session back.
+                    if (generation == core.sessionGeneration()) vault.save(SessionVault.Saved(cookieHeader, userAgent))
+                    else Diag.log("signin", "session not saved: signed out or in again meanwhile")
+                }
+            }
             checkSession(force = true)
         }
     }
@@ -294,6 +313,7 @@ class VoxaApp : Application() {
 
     companion object {
         const val TAG = "Voxa"
+        const val MIN_FREE_BYTES = 4L * 1024 * 1024
         lateinit var instance: VoxaApp
             private set
     }
