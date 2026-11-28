@@ -142,8 +142,11 @@ fun DetailScreen(activity: MainActivity, id: ULong) {
             "Delete this dictation?", "The text and the recording are removed from this phone.", "Delete",
             onConfirm = {
                 confirmDelete = false
-                app.core.deleteEntry(e.id)
-                app.historyChanged()
+                // Off the main thread: History is read and saved whole.
+                app.scope.launch(Dispatchers.IO) {
+                    app.core.deleteEntry(e.id)
+                    app.historyChanged()
+                }
                 activity.back()
             },
             onDismiss = { confirmDelete = false },
@@ -160,8 +163,11 @@ fun DetailScreen(activity: MainActivity, id: ULong) {
             confirmButton = {
                 TextButton({
                     editing = false
-                    app.core.setEntryText(e.id, text.trim())
-                    app.historyChanged()
+                    val edited = text.trim()
+                    app.scope.launch(Dispatchers.IO) {
+                        app.core.setEntryText(e.id, edited)
+                        app.historyChanged()
+                    }
                 }, enabled = text.isNotBlank()) { Text("Save", style = Type.MBold, color = c.accent) }
             },
             dismissButton = { TextButton({ editing = false }) { Text("Cancel", style = Type.MBold, color = c.text72) } },

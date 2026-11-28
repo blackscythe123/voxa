@@ -41,6 +41,7 @@ import com.voxa.android.Route
 import com.voxa.android.diag.Diag
 import com.voxa.android.voxa
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.voxa_ffi.SessionState
 
@@ -149,8 +150,11 @@ fun SettingsScreen(activity: MainActivity) {
         ConfirmDialog(
             "Delete all history?", "Every dictation and recording on this phone is removed. This can't be undone.", "Delete all",
             onConfirm = {
-                app.core.clearHistory()
-                app.historyChanged()
+                // Off the main thread: every recording is deleted.
+                app.scope.launch(Dispatchers.IO) {
+                    app.core.clearHistory()
+                    app.historyChanged()
+                }
                 confirmClear = false
             },
             onDismiss = { confirmClear = false },
