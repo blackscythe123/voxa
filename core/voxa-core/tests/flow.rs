@@ -504,3 +504,26 @@ fn focus_while_paused_is_ignored() {
     let fx = f.handle(Event::Transcribed { job, result: Ok("hi".into()) });
     assert!(has(&fx, &Effect::Paste { job, target: whatsapp(), text: "hi".into() }), "pastes where it started");
 }
+
+#[test]
+fn retry_while_the_old_upload_still_runs_never_uploads_twice() {
+    // Seen in a real log: a slow upload, the user cancels the retry, then retries again while
+    // the first upload is still running. One recording must never be in flight twice.
+    let mut f = Flow::new(ready());
+    let job = started(&mut f);
+    let fx = f.handle(Event::Stop);
+    assert!(has(&fx, &Effect::Transcribe { job }));
+    f.handle(Event::Transcribed { job, result: Err(TranscribeError::Timeout) });
+    assert!(!f.is_uploading(job));
+    let fx = f.handle(Event::Retry { job });
+    assert!(has(&fx, &Effect::Transcribe { job }), "the first retry uploads");
+    f.handle(Event::Cancel);
+    assert!(matches!(f.job(job).unwrap().state, JobState::Failed(TranscribeError::Timeout)), "cancelling the retry keeps the take");
+    let fx = f.handle(Event::Retry { job });
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Transcribe { .. })), "the upload still running answers this retry: {fx:?}");
+    assert_eq!(f.state(), &State::Transcribing { job });
+    // The running upload's answer settles the job; nothing else is in flight.
+    let fx = f.handle(Event::Transcribed { job, result: Ok("Hello".into()) });
+    assert!(has(&fx, &Effect::Paste { job, target: whatsapp(), text: "Hello".into() }));
+    assert!(!f.is_uploading(job));
+}

@@ -117,6 +117,10 @@ pub struct Flow {
     /// What a kept dictation (waiting or failed) was before a retry, so cancelling the retry
     /// keeps it instead of throwing the recording away.
     kept: BTreeMap<JobId, JobState>,
+    /// Jobs whose upload the shell is running now (a `Transcribe` effect without its
+    /// `Transcribed` answer yet). A Retry while one runs waits for that answer instead of
+    /// starting a second upload of the same recording.
+    uploading: std::collections::BTreeSet<JobId>,
 }
 
 impl Default for Flow {
@@ -127,7 +131,7 @@ impl Default for Flow {
 
 impl Flow {
     pub fn new(readiness: Readiness) -> Self {
-        Self { state: State::Idle, readiness, jobs: BTreeMap::new(), next_id: 1, kept: BTreeMap::new() }
+        Self { state: State::Idle, readiness, jobs: BTreeMap::new(), next_id: 1, kept: BTreeMap::new(), uploading: Default::default() }
     }
 
     pub fn state(&self) -> &State {
@@ -203,7 +207,7 @@ impl Flow {
         } else {
             self.set_job(job, JobState::Transcribing, fx);
             self.state = State::Transcribing { job };
-            fx.push(Effect::Transcribe { job });
+            self.transcribe(job, fx);
         }
     }
 
@@ -311,7 +315,21 @@ impl Flow {
         }
         self.set_job(job, JobState::Transcribing, fx);
         self.state = State::Transcribing { job };
-        fx.extend([Effect::ShowStrip, Effect::Transcribe { job }]);
+        fx.push(Effect::ShowStrip);
+        self.transcribe(job, fx);
+    }
+
+    /// Ask the shell to upload a job, unless an upload of it is still running: then its answer
+    /// (which the job now waits for again) settles it, and one recording is never sent twice.
+    fn transcribe(&mut self, job: JobId, fx: &mut Vec<Effect>) {
+        if self.uploading.insert(job) {
+            fx.push(Effect::Transcribe { job });
+        }
+    }
+
+    /// Whether the shell is still uploading this job.
+    pub fn is_uploading(&self, job: JobId) -> bool {
+        self.uploading.contains(&job)
     }
 
     fn ready_text(&self, job: JobId) -> Option<String> {
@@ -322,6 +340,7 @@ impl Flow {
     }
 
     fn on_transcribed(&mut self, job: JobId, result: Result<String, TranscribeError>, fx: &mut Vec<Effect>) {
+        self.uploading.remove(&job);
         // A cancelled job stays cancelled; a superseded one only updates its record.
         if !matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Transcribing)) {
             return;
@@ -413,7 +432,7 @@ impl Flow {
                     self.retry(job, fx);
                 } else {
                     self.set_job(job, JobState::Transcribing, fx);
-                    fx.push(Effect::Transcribe { job });
+                    self.transcribe(job, fx);
                 }
             }
         }
