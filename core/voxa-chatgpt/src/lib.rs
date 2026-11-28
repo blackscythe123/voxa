@@ -382,8 +382,10 @@ impl ChatGpt {
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(20))
             .build()
-            .expect("http client");
-        let session_id = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+            // Fails only if the TLS backend can't start; the plain client still works (every
+            // request sets its own time limit or keeps the default).
+            .unwrap_or_default();
+        let session_id = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default());
         Self { http, session_id , refreshed: std::sync::Mutex::new(None) }
     }
 
