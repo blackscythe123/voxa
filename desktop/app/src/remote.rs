@@ -18,6 +18,8 @@ pub(crate) struct Backend {
     pub(crate) mic_name: String,
     pub(crate) levels: VecDeque<f32>,
     pub(crate) signing_in: bool,
+    /// A setting couldn't be saved (settings.json unreadable): shown on the Settings page.
+    pub(crate) settings_error: Option<String>,
     live: Live,
     stamps: [Option<SystemTime>; 3],
     /// The setup's mic check: this process opens the mic itself, only while that step shows.
@@ -34,6 +36,7 @@ impl Backend {
             mic_name: live.mic_name.clone(),
             levels: VecDeque::new(),
             signing_in: live.signing_in,
+            settings_error: None,
             live,
             stamps: [None; 3],
             mic: None,
@@ -156,13 +159,20 @@ impl Backend {
         Err("Voxa didn't answer. Is it running in the tray?".into())
     }
 
+    /// Change a setting. If settings.json can't be read right now, nothing is saved (defaults
+    /// never replace the user's file, and the tray never prunes History by them): Settings says so.
     pub fn update_settings(&mut self, f: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
-        // If the file can't be read right now, change what's shown rather than the defaults.
-        let mut s = Settings::try_load(&data_dir()).ok().flatten().unwrap_or_else(|| self.settings.clone());
-        f(&mut s);
-        s.save(&data_dir());
-        self.settings = s;
-        link::send(&Command::ReloadSettings);
+        match Settings::update(&data_dir(), f) {
+            Ok(s) => {
+                self.settings = s;
+                self.settings_error = None;
+                link::send(&Command::ReloadSettings);
+            }
+            Err(e) => {
+                os::log(&format!("FAIL reading settings ({e}): nothing saved"));
+                self.settings_error = Some("Voxa can't read its settings file right now, so nothing was changed. Try again in a moment.".into());
+            }
+        }
         cx.notify();
     }
 
