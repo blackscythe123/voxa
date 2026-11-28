@@ -190,13 +190,22 @@ fun CheckMark(done: Boolean) {
     }
 }
 
-/** The user's initials on a slate circle (Voxa has no photo of them). */
+/** The user's ChatGPT profile picture; their initials on a slate circle until it's downloaded
+ *  (or if the account has none). */
 @Composable
-fun Avatar(name: String, size: Dp = 40.dp) {
+fun Avatar(name: String, size: Dp = 40.dp, image: String = "") {
     val c = vx
+    val context = LocalContext.current
+    var photo by remember(image) { mutableStateOf(AvatarCache.cached(context, image)) }
+    LaunchedEffect(image) {
+        if (photo == null && image.startsWith("https://")) photo = withContext(Dispatchers.IO) { AvatarCache.load(context, image) }
+    }
     val initials = name.split(' ', '.', '@').filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "" }
     Box(Modifier.size(size).clip(CircleShape).background(c.avatar), contentAlignment = Alignment.Center) {
-        if (initials.isEmpty()) {
+        val p = photo
+        if (p != null) {
+            Image(p, null, Modifier.size(size), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        } else if (initials.isEmpty()) {
             Icon(painterResource(R.drawable.ic_you), null, Modifier.size(size * 0.55f), tint = Color.White.copy(alpha = 0.85f))
         } else {
             Text(initials, style = if (size >= 56.dp) Type.L else Type.SBold, color = Color.White)

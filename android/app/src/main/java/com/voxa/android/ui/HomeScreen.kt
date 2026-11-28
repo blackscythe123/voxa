@@ -117,7 +117,7 @@ fun HomeScreen(activity: MainActivity) {
                 }
                 Spacer(Modifier.width(16.dp))
                 Box(Modifier.clip(CircleShape).clickable { activity.go(Route.Tabbed(Tab.Settings)) }) {
-                    Avatar(account?.name?.ifEmpty { account?.email } ?: "")
+                    Avatar(account?.name?.ifEmpty { account?.email } ?: "", image = account?.image ?: "")
                 }
             }
             Spacer(Modifier.height(24.dp))

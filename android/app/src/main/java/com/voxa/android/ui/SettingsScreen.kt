@@ -76,7 +76,7 @@ fun SettingsScreen(activity: MainActivity) {
             onClick = { if (signedOut) activity.go(Route.SignIn) else confirmSignOut = true },
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(account?.name?.ifEmpty { account?.email } ?: "", 56.dp)
+                Avatar(account?.name?.ifEmpty { account?.email } ?: "", 56.dp, image = account?.image ?: "")
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(

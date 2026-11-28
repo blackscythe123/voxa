@@ -137,6 +137,7 @@ class VoxaApp : Application() {
         CookieManager.getInstance().removeAllCookies(null)
         session.value = SessionState.EXPIRED
         account.value = null
+        com.voxa.android.ui.AvatarCache.clear(this)
     }
 
     override fun onTrimMemory(level: Int) {
