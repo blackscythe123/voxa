@@ -86,16 +86,19 @@ pub fn decide(kind: Kind, now_ms: u64, showing: bool, posted: &[u64], last_dicta
     if showing {
         return Decision::Update;
     }
-    if kind == Kind::Dictations && last_dictations > 0 && now_ms.saturating_sub(last_dictations) < DICTATIONS_EVERY_MS {
+    // A time after `now` comes from a clock that was ahead and has been corrected: it says nothing
+    // about what was posted recently, so it never holds a notification back.
+    if kind == Kind::Dictations && last_dictations > 0 && last_dictations <= now_ms && now_ms - last_dictations < DICTATIONS_EVERY_MS {
         return Decision::Skip;
     }
-    let recent = posted.iter().filter(|t| now_ms.saturating_sub(**t) < CAP_WINDOW_MS).count();
+    let recent = posted.iter().filter(|t| **t <= now_ms && now_ms - **t < CAP_WINDOW_MS).count();
     if recent >= CAP { Decision::Skip } else { Decision::Post }
 }
 
 /// The post times worth keeping (the last day), with `now_ms` added.
 pub fn record(posted: &[u64], now_ms: u64) -> Vec<u64> {
-    let mut v: Vec<u64> = posted.iter().copied().filter(|t| now_ms.saturating_sub(*t) < CAP_WINDOW_MS).collect();
+    // Times in the future (a clock that was ahead) are dropped, so they can't pile up.
+    let mut v: Vec<u64> = posted.iter().copied().filter(|t| *t <= now_ms && now_ms - *t < CAP_WINDOW_MS).collect();
     v.push(now_ms);
     v
 }
