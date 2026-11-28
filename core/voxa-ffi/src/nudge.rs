@@ -84,7 +84,8 @@ fn usage_from_history(dir: &std::path::Path, now_ms: u64, utc_offset_minutes: i3
     for e in written {
         usage.dictations_ms.push(e.id);
         if month(e.id) == this_month {
-            usage.saved_secs_month += voxa_store::typing_saved_secs(e.words(), e.secs);
+            let saved = voxa_store::typing_saved_secs(e.words(), e.secs);
+            usage.saved_secs_month = usage.saved_secs_month.saturating_add(saved);
         }
     }
     usage
@@ -200,6 +201,25 @@ mod tests {
         engine.record_outcome(ReminderOutcome::Opened);
         assert!(dir.join("nudge.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seconds_saved_this_month_stop_at_the_largest_number_instead_of_wrapping() {
+        let dir = std::env::temp_dir().join(format!("voxa-ffi-reminders-saved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let noon = 20_440 * DAY + 12 * 3_600_000;
+        // A damaged take length makes each entry worth u32::MAX seconds saved.
+        History::edit(&dir, |h| {
+            for i in 1..=2 {
+                h.upsert(Entry { secs: -1e12, ..entry(noon - i * 3_600_000, Status::Pasted) });
+            }
+            (true, ())
+        });
+        let usage = usage_from_history(&dir, noon, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(usage.dictations_ms.len(), 2);
+        assert_eq!(usage.saved_secs_month, u32::MAX);
     }
 
     #[test]

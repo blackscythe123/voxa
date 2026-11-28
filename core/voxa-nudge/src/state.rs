@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::bandit::Bandit;
-use crate::features::DAY_MS;
+use crate::features::{DAY_MS, HOUR_MS};
 use crate::messages::Style;
 
 /// What happened to a reminder.
@@ -61,6 +61,10 @@ pub const STATE_VERSION: u32 = 1;
 /// The most dictation times kept.
 pub const MAX_REMEMBERED: usize = 400;
 
+/// How far in the future a time may be and still be believed, as now: the phone clock was ahead
+/// when it was stamped. Anything later is not believed.
+pub const MAX_CLOCK_SKEW_MS: u64 = 12 * HOUR_MS;
+
 impl Default for NudgeState {
     fn default() -> Self {
         Self {
@@ -79,8 +83,9 @@ impl Default for NudgeState {
 
 impl NudgeState {
     /// Reads a saved state. A file that doesn't parse, or comes from a newer version, starts over
-    /// with reminders OFF, unless the file itself still clearly says `"enabled": true`. Bandit
-    /// counts are cleaned up ([`Bandit::sanitize`]).
+    /// with reminders OFF, unless the file itself still clearly says `"enabled": true`; then the
+    /// fields that keep reminders polite (`sent_ms`, `quiet_paused`, `ignored_streak`) are kept
+    /// when they can still be read. Bandit counts are cleaned up ([`Bandit::sanitize`]).
     pub fn from_json(json: &str) -> Self {
         match serde_json::from_str::<NudgeState>(json) {
             Ok(mut s) if s.version <= STATE_VERSION => {
@@ -89,19 +94,30 @@ impl NudgeState {
                 s
             }
             _ => {
-                let on = serde_json::from_str::<serde_json::Value>(json)
-                    .ok()
-                    .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
-                    .unwrap_or(false);
-                NudgeState { enabled: on, ..Default::default() }
+                let v = serde_json::from_str::<serde_json::Value>(json).unwrap_or_default();
+                fn field<T: serde::de::DeserializeOwned>(v: &serde_json::Value, k: &str) -> Option<T> {
+                    serde_json::from_value(v.get(k)?.clone()).ok()
+                }
+                if !field(&v, "enabled").unwrap_or(false) {
+                    return NudgeState { enabled: false, ..Default::default() };
+                }
+                NudgeState {
+                    sent_ms: field(&v, "sent_ms").unwrap_or_default(),
+                    quiet_paused: field(&v, "quiet_paused").unwrap_or(false),
+                    ignored_streak: field(&v, "ignored_streak").unwrap_or(0),
+                    ..Default::default()
+                }
             }
         }
     }
 
     /// Merges dictation times from History into the remembered ones (last 28 days, newest kept).
+    /// A time slightly in the future (within [`MAX_CLOCK_SKEW_MS`]) counts as now.
     pub fn remember(&mut self, dictations_ms: &[u64], now_ms: u64) {
         let since = now_ms.saturating_sub(crate::features::LOOKBACK_DAYS * DAY_MS);
-        self.dictations_ms.extend(dictations_ms.iter().copied().filter(|&t| t >= since && t <= now_ms));
+        let latest = now_ms.saturating_add(MAX_CLOCK_SKEW_MS);
+        let fresh = dictations_ms.iter().copied().filter(|&t| t >= since && t <= latest);
+        self.dictations_ms.extend(fresh.map(|t| t.min(now_ms)));
         self.dictations_ms.retain(|&t| t >= since);
         self.dictations_ms.sort_unstable();
         self.dictations_ms.dedup();
@@ -123,10 +139,22 @@ impl NudgeState {
 
     /// Brings the state up to date before a decision: a dictation after the latest reminder ends a
     /// pause and an ignored streak, and a reminder with no tap after 24 hours is settled (opened if
-    /// the user dictated within the window, ignored otherwise).
+    /// any dictation fell within the window, ignored otherwise). Reminder times in the future (the
+    /// clock was ahead) count as now, or are forgotten when beyond [`MAX_CLOCK_SKEW_MS`].
     pub fn observe(&mut self, now_ms: u64, last_dictation_ms: Option<u64>) {
+        let latest = now_ms.saturating_add(MAX_CLOCK_SKEW_MS);
+        self.sent_ms.retain(|&t| t <= latest);
+        self.sent_ms.iter_mut().for_each(|t| *t = (*t).min(now_ms));
+        if self.pending.as_ref().is_some_and(|p| p.sent_ms > latest) {
+            self.pending = None;
+        }
+        if let Some(p) = &mut self.pending {
+            p.sent_ms = p.sent_ms.min(now_ms);
+        }
         if let Some(p) = self.pending.clone() {
-            let came_back = last_dictation_ms.is_some_and(|d| d > p.sent_ms && d <= p.sent_ms + OUTCOME_WINDOW_MS);
+            let in_window = |d: u64| d > p.sent_ms && d <= p.sent_ms + OUTCOME_WINDOW_MS;
+            let mut seen = last_dictation_ms.into_iter().chain(self.dictations_ms.iter().copied());
+            let came_back = seen.any(in_window);
             if came_back {
                 self.record_outcome(Outcome::Opened);
             } else if now_ms >= p.sent_ms + OUTCOME_WINDOW_MS {
@@ -160,7 +188,7 @@ impl NudgeState {
         if outcome.success() {
             self.ignored_streak = 0;
         } else {
-            self.ignored_streak += 1;
+            self.ignored_streak = self.ignored_streak.saturating_add(1);
         }
     }
 }

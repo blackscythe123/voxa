@@ -36,11 +36,16 @@ pub fn hour_gap(a: f32, b: f32) -> f32 {
     d.min(24.0 - d)
 }
 
+/// The hour the default policy aims at: the usual hour ([`DEFAULT_HOUR`] with no history), kept
+/// inside 09:30 to 20:30 so a night owl or an early bird is reminded in the daytime.
+pub fn target_hour(usual_hour: Option<f32>) -> f32 {
+    usual_hour.unwrap_or(DEFAULT_HOUR).clamp(9.5, 20.5)
+}
+
 /// The default policy's decision: the wording to send now, or None to wait. The tip wording,
 /// or plain if the tip is not allowed. Never the quiet wording.
 pub fn usual_hour(ctx: &Context, allowed: &[bool; K_STYLES]) -> Option<Style> {
-    let target = ctx.usual_hour.unwrap_or(DEFAULT_HOUR);
-    if hour_gap(ctx.hour, target) > USUAL_HOUR_WINDOW {
+    if hour_gap(ctx.hour, target_hour(ctx.usual_hour)) > USUAL_HOUR_WINDOW {
         return None;
     }
     [Style::Tip, Style::Plain].into_iter().find(|s| allowed[s.index()])
@@ -110,6 +115,9 @@ pub enum Skip {
     Rule(Block),
     /// The rules allowed it but the model chose to wait.
     ModelWaits,
+    /// A reminder was due but `nudge.json` could not be saved, so the 3 day gap could not be
+    /// kept: nothing is sent.
+    NotSaved,
 }
 
 pub const STATE_FILE: &str = "nudge.json";
@@ -120,48 +128,54 @@ pub struct Engine {
     pub net: Net,
     pub state: NudgeState,
     path: Option<PathBuf>,
+    /// False when `nudge.json` exists but could not be read: the good file on disk is never
+    /// overwritten with the stand in state.
+    read_ok: bool,
 }
 
 impl Engine {
     /// An engine with the shipped model, not saved anywhere.
     pub fn in_memory(state: NudgeState) -> Self {
-        Self { policy: Policy::default(), net: bundled(), state, path: None }
+        Self { policy: Policy::default(), net: bundled(), state, path: None, read_ok: true }
     }
 
     /// Loads (or starts) the state in `dir`/nudge.json. No file: a fresh start (reminders on).
-    /// A file that can't be read or understood keeps reminders off unless it still says "on"
-    /// ([`NudgeState::from_json`]): a broken file must never turn reminders back on.
+    /// A file that can't be understood keeps reminders off unless it still says "on"
+    /// ([`NudgeState::from_json`]): a broken file must never turn reminders back on. A file that
+    /// can't be read at all (another app holds it) also keeps reminders off, and this engine then
+    /// never saves over it.
     pub fn open(dir: &Path) -> Self {
         let path = dir.join(STATE_FILE);
-        let state = match std::fs::read_to_string(&path) {
-            Ok(s) => NudgeState::from_json(&s),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => NudgeState::default(),
-            Err(_) => NudgeState { enabled: false, ..Default::default() },
+        let (state, read_ok) = match std::fs::read_to_string(&path) {
+            Ok(s) => (NudgeState::from_json(&s), true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (NudgeState::default(), true),
+            Err(_) => (NudgeState { enabled: false, ..Default::default() }, false),
         };
-        Self { policy: Policy::default(), net: bundled(), state, path: Some(path) }
+        Self { policy: Policy::default(), net: bundled(), state, path: Some(path), read_ok }
     }
 
-    pub fn save(&self) {
-        let Some(path) = &self.path else { return };
-        if let Ok(json) = serde_json::to_vec(&self.state) {
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
-            }
+    /// Writes the state to `nudge.json`: a temp file with a unique name, flushed to disk, then
+    /// renamed over the old one. Refuses when the file could not be read at open.
+    pub fn save(&self) -> std::io::Result<()> {
+        let Some(path) = &self.path else { return Ok(()) };
+        if !self.read_ok {
+            return Err(std::io::Error::other("nudge.json could not be read, so it is not overwritten"));
         }
+        write_atomic(path, &serde_json::to_vec(&self.state)?)
     }
 
     pub fn set_enabled(&mut self, on: bool) {
         self.state.enabled = on;
-        self.save();
+        let _ = self.save();
     }
 
-    /// Asked by the app's background job. Sends at most what the rules
-    /// allow; a sent reminder is remembered and waits for its outcome.
+    /// Asked by the app's background job. Sends at most what the rules allow; a sent reminder is
+    /// remembered and waits for its outcome. A reminder whose sending can't be saved is not sent.
     pub fn decide(&mut self, now_ms: u64, utc_offset_minutes: i32, usage: &Usage, rng: &mut Rng) -> Result<Nudge, Skip> {
         self.state.remember(&usage.dictations_ms, now_ms);
         let dictations = self.state.dictations_ms.clone();
-        let last = dictations.iter().copied().filter(|&t| t <= now_ms).max();
+        // Remembered times are never after now (see NudgeState::remember).
+        let last = dictations.iter().copied().max();
         self.state.observe(now_ms, last);
         let here = local(now_ms, utc_offset_minutes);
         let verdict = rules::check(now_ms, here.hour, last, &self.state);
@@ -177,14 +191,23 @@ impl Engine {
                 match picked {
                     None => Err(Skip::ModelWaits),
                     Some((style, slot)) => {
+                        let before = self.state.clone();
                         self.state.record_send(now_ms, style, slot);
+                        if self.save().is_err() {
+                            // Unsaved, the next check would not know it went out and could send
+                            // again the next day.
+                            self.state = before;
+                            return Err(Skip::NotSaved);
+                        }
                         let (title, body) = message(style, usage.saved_secs_month, here.day);
                         Ok(Nudge { style, title, body })
                     }
                 }
             }
         };
-        self.save();
+        if result.is_err() {
+            let _ = self.save();
+        }
         result
     }
 
@@ -195,7 +218,7 @@ impl Engine {
     pub fn next_check_ms(&mut self, now_ms: u64, utc_offset_minutes: i32, usage: &Usage) -> u64 {
         self.state.remember(&usage.dictations_ms, now_ms);
         let ctx = context(now_ms, utc_offset_minutes, &self.state.dictations_ms, &self.state);
-        let target = ctx.usual_hour.unwrap_or(DEFAULT_HOUR).clamp(9.5, 20.5);
+        let target = target_hour(ctx.usual_hour);
         let day = DAY_MS as i64;
         let in_day = (now_ms as i64 + utc_offset_minutes as i64 * 60_000).rem_euclid(day);
         // Whole minutes, so the time is exact.
@@ -210,8 +233,28 @@ impl Engine {
     /// The user tapped (Opened) or swiped away (Dismissed) the reminder.
     pub fn record_outcome(&mut self, outcome: Outcome) {
         self.state.record_outcome(outcome);
-        self.save();
+        let _ = self.save();
     }
+}
+
+/// Writes `bytes` to `path` safely: a temp file with a name no other writer uses, flushed to
+/// disk, then renamed over `path`. The temp file is removed when anything fails.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]
