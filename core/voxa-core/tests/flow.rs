@@ -300,7 +300,7 @@ fn cancelling_a_fresh_take_while_writing_drops_it() {
 }
 
 #[test]
-fn a_late_result_after_cancelling_a_retry_changes_nothing() {
+fn a_late_result_after_cancelling_a_retry_is_kept_but_never_pasted() {
     let mut f = Flow::new(ready());
     let job = started(&mut f);
     f.handle(Event::Stop);
@@ -308,8 +308,12 @@ fn a_late_result_after_cancelling_a_retry_changes_nothing() {
     f.handle(Event::Retry { job });
     f.handle(Event::Cancel);
     let fx = f.handle(Event::Transcribed { job, result: Ok("late".into()) });
-    assert!(fx.is_empty());
-    assert_eq!(f.job(job).unwrap().state, JobState::Failed(TranscribeError::Timeout));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Paste { .. } | Effect::PasteHere { .. })), "never pasted after Cancel: {fx:?}");
+    assert_eq!(f.state(), &State::Idle);
+    // The words came back once; keeping them means the recording is never uploaded again.
+    assert_eq!(f.job(job).unwrap().state, JobState::Ready("late".into()));
+    let fx = f.handle(Event::Transcribed { job, result: Err(TranscribeError::Timeout) });
+    assert!(fx.is_empty(), "a late failure changes nothing");
 }
 
 #[test]

@@ -81,6 +81,11 @@ pub enum Event {
     Retry { job: JobId },
     /// The app in front changed while the strip asks where to paste.
     Focus { target: Target },
+    /// The shell did not run, or gave up on, an upload it was asked for (`Effect::Transcribe`)
+    /// and has no answer for it: someone else is sending that recording, or it can't be read.
+    /// The job goes back to what it was before (a fresh take becomes failed), and only this job
+    /// is touched: never the take on screen. Every `Transcribe` must end in `Transcribed` or this.
+    UploadSkipped { job: JobId },
 }
 
 /// Work for the shell to do.
@@ -165,6 +170,7 @@ impl Flow {
             Event::Readiness(r) => self.on_readiness(r, &mut fx),
             Event::Retry { job } => self.on_retry(job, &mut fx),
             Event::Focus { target } => self.on_focus(target, &mut fx),
+            Event::UploadSkipped { job } => self.on_upload_skipped(job, &mut fx),
         }
         fx
     }
@@ -332,6 +338,37 @@ impl Flow {
         self.uploading.contains(&job)
     }
 
+    /// Whether a job is still being worked on: recording, being written out or uploaded, or the
+    /// one the strip shows. Anything else (no speech, a dismissed ready or failed take, a
+    /// finished one) waits for the user and may be deleted from History.
+    pub fn is_in_progress(&self, job: JobId) -> bool {
+        let on_screen = match &self.state {
+            State::Recording { job: j, .. } | State::Transcribing { job: j } | State::Delivering { job: j } | State::Delivered { job: j } => *j == job,
+            State::NeedsYou(p) => p.job() == job,
+            State::Idle | State::Blocked(_) => false,
+        };
+        on_screen
+            || self.uploading.contains(&job)
+            || matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Recording | JobState::Transcribing))
+    }
+
+    fn on_upload_skipped(&mut self, job: JobId, fx: &mut Vec<Effect>) {
+        self.uploading.remove(&job);
+        if !matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Transcribing)) {
+            return;
+        }
+        let back = self.kept.remove(&job).unwrap_or(JobState::Failed(TranscribeError::Server(0)));
+        let problem = match &back {
+            JobState::WaitingForNetwork => Problem::WaitingForNetwork { job },
+            JobState::Failed(e) if e.needs_sign_in() => Problem::SignInToSend { job },
+            _ => Problem::Unreachable { job },
+        };
+        self.set_job(job, back, fx);
+        if matches!(self.state, State::Transcribing { job: j } if j == job) {
+            self.state = State::NeedsYou(problem);
+        }
+    }
+
     fn ready_text(&self, job: JobId) -> Option<String> {
         match &self.jobs.get(&job)?.state {
             JobState::Ready(t) | JobState::Delivered(t) => Some(t.clone()),
@@ -341,9 +378,20 @@ impl Flow {
 
     fn on_transcribed(&mut self, job: JobId, result: Result<String, TranscribeError>, fx: &mut Vec<Effect>) {
         self.uploading.remove(&job);
-        // A cancelled job stays cancelled; a superseded one only updates its record.
-        if !matches!(self.jobs.get(&job).map(|j| &j.state), Some(JobState::Transcribing)) {
-            return;
+        // A cancelled job stays cancelled; a superseded one only updates its record. A cancelled
+        // retry of a kept take is the exception: text that came back is kept (as ready, never
+        // pasted), so the recording is never uploaded again for words already written out.
+        match self.jobs.get(&job).map(|j| &j.state) {
+            Some(JobState::Transcribing) => {}
+            Some(JobState::Failed(_) | JobState::WaitingForNetwork) => {
+                if let Ok(text) = result {
+                    if !text.trim().is_empty() {
+                        self.set_job(job, JobState::Ready(text), fx);
+                    }
+                }
+                return;
+            }
+            _ => return,
         }
         self.kept.remove(&job);
         let current = matches!(self.state, State::Transcribing { job: j } if j == job);
@@ -391,6 +439,11 @@ impl Flow {
     }
 
     fn on_delivered(&mut self, job: JobId, result: Delivery, fx: &mut Vec<Effect>) {
+        // Only the paste being waited for counts: a late or repeated answer for an older one
+        // never takes over the strip (and never orphans a take being recorded now).
+        if self.state != (State::Delivering { job }) {
+            return;
+        }
         let Some(text) = self.ready_text(job) else { return };
         match result {
             Delivery::Pasted => {
@@ -407,24 +460,38 @@ impl Flow {
         let was = self.readiness;
         self.readiness = r;
 
-        // Signed back in: resend the dictation that was waiting for it, into the original app.
+        // Signed back in: resend every dictation that was waiting for it. The one on screen goes
+        // back into the original app; the others are written out in the background. Then carry
+        // on: the same check may also say the network is back.
         if was.session != Session::Valid && r.session == Session::Valid {
             match self.state.clone() {
-                State::NeedsYou(Problem::SignInToSend { job }) => return self.retry(job, fx),
+                State::NeedsYou(Problem::SignInToSend { job }) => self.retry(job, fx),
                 State::Blocked(Blocker::SignedOut) => {
                     self.state = State::Idle;
                     fx.push(Effect::HideStrip { after_ms: 0 });
                 }
                 _ => {}
             }
-        }
-
-        // Back online: send everything that was waiting. The one on screen goes first.
-        if was.network == Network::Down && r.network == Network::Up {
             let waiting: Vec<JobId> = self
                 .jobs
                 .values()
-                .filter(|j| j.state == JobState::WaitingForNetwork)
+                .filter(|j| matches!(&j.state, JobState::Failed(e) if e.needs_sign_in()) && !self.uploading.contains(&j.id))
+                .map(|j| j.id)
+                .collect();
+            for job in waiting {
+                self.set_job(job, JobState::Transcribing, fx);
+                self.transcribe(job, fx);
+            }
+        }
+
+        // Online (and not signed out): send everything waiting for the network that isn't being
+        // uploaded already. Not only on the way from Down to Up: a take can be left waiting while
+        // the network is up (a cancelled "Retry now"), and nothing else would ever send it.
+        if r.network == Network::Up && r.session != Session::Expired {
+            let waiting: Vec<JobId> = self
+                .jobs
+                .values()
+                .filter(|j| j.state == JobState::WaitingForNetwork && !self.uploading.contains(&j.id))
                 .map(|j| j.id)
                 .collect();
             for job in waiting {
