@@ -23,6 +23,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import com.voxa.android.R
+import uniffi.voxa_ffi.pauseKeyLabel
 
 /**
  * The keyboard's views (docs/ui-mocks/v6-app-redesign.html, "Keyboard, listening" and "done"),
@@ -32,7 +33,7 @@ import com.voxa.android.R
  *   (•) Listening ................................. 0:04 [x]
  *   detail line (when the core has one) ............ [action]
  *   ▮▮▮▮▮▮▮▮   ( big mic / stop )   ▮▮▮▮▮▮▮▮        <- or the green check, "That's 6 seconds of typing saved"
- *   [switch] [   space / Tap to stop   ] [backspace] [enter]
+ *   [switch] [   space / Pause / Resume   ] [backspace] [enter]
  *
  * Drawn in [colors] (the keyboard look); the app's Keyboard look screen shows this same panel as
  * its preview, so there is one drawing path.
@@ -190,11 +191,27 @@ class KeyboardPanel(context: Context, val colors: KbColors) : LinearLayout(conte
             invalidate()
         }
 
-    /** The decoded photo (any size: drawn centre-cropped, scaled up with bilinear filtering). */
-    fun setPhoto(b: Bitmap?) {
+    /** The bitmap was already cropped at [photoPosition] (the keyboard's decode): only centre it. */
+    private var photoCropped = false
+
+    /**
+     * The decoded photo (any size: drawn centre-cropped, scaled up with bilinear filtering).
+     * [cropped]: [KeyboardLook.decodePhoto] with crop already placed it at the position, so the
+     * position is not applied a second time (it would shift it when the panel isn't 320 dp tall).
+     */
+    fun setPhoto(b: Bitmap?, cropped: Boolean = false) {
         photo = b
+        photoCropped = cropped
         invalidate()
     }
+
+    /** The wash's opacity; the app's preview changes it while Photo strength is dragged. */
+    var washAlpha = colors.washAlpha
+        set(v) {
+            if (field == v) return
+            field = v
+            invalidate()
+        }
 
     val hasPhoto get() = photo != null
 
@@ -221,10 +238,10 @@ class KeyboardPanel(context: Context, val colors: KbColors) : LinearLayout(conte
             canvas.clipRect(0f, 0f, w, h)
             val s = maxOf(w / b.width, h / b.height)
             photoMatrix.setScale(s, s)
-            photoMatrix.postTranslate((w - b.width * s) / 2f, (h - b.height * s) * photoPosition)
+            photoMatrix.postTranslate((w - b.width * s) / 2f, (h - b.height * s) * if (photoCropped) 0.5f else photoPosition)
             canvas.drawBitmap(b, photoMatrix, photoPaint)
             canvas.restore()
-            fillPaint.color = colors.alpha(colors.surface, colors.washAlpha)
+            fillPaint.color = colors.alpha(colors.surface, washAlpha)
             canvas.drawRect(0f, 0f, w, h, fillPaint)
         }
         super.onDraw(canvas)
@@ -277,15 +294,16 @@ class KeyboardPanel(context: Context, val colors: KbColors) : LinearLayout(conte
         mic.contentDescription = if (s.recording) "Stop" else "Talk"
         mic.alpha = if (s.micOff) 0.4f else 1f
         mic.isEnabled = !s.micOff
-        spaceKey.text = if (s.recording) s.wideKey ?: "Tap to stop" else "space"
-        spaceKey.contentDescription = if (s.recording) s.wideKey ?: "Stop" else "Space"
+        val wide = if (s.recording) s.wideKey ?: pauseKeyLabel(s.paused) else null
+        spaceKey.text = wide ?: "space"
+        spaceKey.contentDescription = wide ?: "Space"
     }
 
     /** The app's preview: 0 ready, 1 listening, 2 done, with sample words. */
     fun demo(which: Int) {
         when (which) {
             1 -> {
-                show(State("Listening", closable = true, recording = true, right = "0:04"))
+                show(State("Listening", closable = true, recording = true, right = "0:04", wideKey = pauseKeyLabel(false)))
                 bars.reset()
                 for (i in 0 until LevelBarsView.BARS_PER_SIDE) bars.level(0.3f + 0.6f * kotlin.math.abs(kotlin.math.sin(i * 0.9f)))
             }
