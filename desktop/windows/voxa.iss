@@ -64,6 +64,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; tray that launched Setup) and never RestartApplications.
 CloseApplications=no
 SetupLogging=yes
+; A new icon shows at once, the pinned taskbar shortcut too (1.0.0 kept the old one from Windows'
+; icon cache): Setup ends with SHChangeNotify(SHCNE_ASSOCCHANGED), and RefreshIcons below names
+; Voxa.exe and its shortcuts. Silent too, no window, no focus. The lint release-icon-refresh holds it.
+ChangesAssociations=yes
 
 [Files]
 Source: "{#Bin}\voxa-desktop.exe"; DestDir: "{app}"; DestName: "Voxa.exe"; Flags: ignoreversion
@@ -158,10 +162,33 @@ begin
   Result := '';
 end;
 
+// Win32 SHChangeNotify: tells Explorer an item changed, so it drops the cached icon.
+procedure SHChangeNotify(EventId: Integer; Flags: Cardinal; Item1: String; Item2: String);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
+// Explorer and the taskbar keep icons by path: name the exe and every shortcut to it as updated
+// (SHCNE_UPDATEITEM with SHCNF_PATHW), after an install and an automatic update alike.
+procedure RefreshIcons;
+var
+  Paths: array of String;
+  I: Integer;
+begin
+  SetArrayLength(Paths, 4);
+  Paths[0] := ExpandConstant('{app}\Voxa.exe');
+  Paths[1] := ExpandConstant('{autoprograms}\Voxa.lnk');
+  Paths[2] := ExpandConstant('{autodesktop}\Voxa.lnk');
+  Paths[3] := ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Voxa.lnk');
+  for I := 0 to GetArrayLength(Paths) - 1 do
+    if FileExists(Paths[I]) then
+      SHChangeNotify($00002000, $0005, Paths[I], '');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
 begin
+  if CurStep = ssPostInstall then
+    RefreshIcons;
   // Remove the old app before the new one first runs. Its data folder stays, so the new
   // Voxa can import history, recordings and sign-in from it.
   // Never in silent mode: 'runas' raises a UAC prompt that steals focus.

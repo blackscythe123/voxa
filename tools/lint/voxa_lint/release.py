@@ -12,6 +12,10 @@
                   major*10000 + minor*100 + patch, and desktop.yml passes /DAppVersion to ISCC and
                   checks the tag against the Cargo version before publishing. A mismatch would make
                   the updater reinstall forever or downgrade.
+  release-icon-refresh
+                  voxa.iss refreshes Windows' icon cache after an install or update: ChangesAssociations=yes
+                  in [Setup] (SHChangeNotify SHCNE_ASSOCCHANGED) and a SHChangeNotify call on Voxa.exe and its
+                  shortcuts at ssPostInstall. 1.0.0's pinned taskbar shortcut kept the old icon without it.
 """
 
 from __future__ import annotations
@@ -41,7 +45,27 @@ def _command(text: str, start: int) -> tuple[str, int]:
 
 
 def check(ctx: Ctx) -> list[Violation]:
-    return check_latest(ctx) + check_version_sync(ctx)
+    return check_latest(ctx) + check_version_sync(ctx) + check_icon_refresh(ctx)
+
+
+def check_icon_refresh(ctx: Ctx) -> list[Violation]:
+    iss = _read(ctx, "desktop/windows/voxa.iss")
+    if iss is None:
+        return []
+    out = []
+    # Comments out: a commented-out setting does not count.
+    code = "\n".join(line.split(";")[0] if not line.lstrip().startswith("//") else "" for line in iss.splitlines())
+    setup = re.search(r"^\[Setup\][^\[]*", code, re.M)
+    if not (setup and re.search(r"^\s*ChangesAssociations\s*=\s*yes\s*$", setup.group(0), re.M | re.I)):
+        out.append(Violation("release-icon-refresh", "desktop/windows/voxa.iss", 1, "voxa.iss lacks ChangesAssociations=yes in [Setup]. "
+                             "Rule: an install or update refreshes the icon cache, or a pinned taskbar shortcut keeps the old icon "
+                             "(docs/guardrails.md#7-release)", key="iss: ChangesAssociations"))
+    if not (re.search(r"external\s+'SHChangeNotify@shell32\.dll", iss) and re.search(r"ssPostInstall\s+then\s+RefreshIcons", iss)
+            and re.search(r"SHChangeNotify\(\$00002000", iss)):
+        out.append(Violation("release-icon-refresh", "desktop/windows/voxa.iss", 1, "voxa.iss does not call SHChangeNotify(SHCNE_UPDATEITEM) "
+                             "on Voxa.exe and its shortcuts at ssPostInstall (RefreshIcons). Rule: an install or update refreshes the "
+                             "icon cache (docs/guardrails.md#7-release)", key="iss: RefreshIcons"))
+    return out
 
 
 def _read(ctx: Ctx, rel: str) -> str | None:

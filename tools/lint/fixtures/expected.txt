@@ -49,6 +49,7 @@
 1 release-latest .github/workflows/desktop.yml        # tagged desktop release not a prerelease
 1 release-latest .github/workflows/android-release.yml    # tagged Android release not a prerelease
 1 release-version-sync desktop/windows/voxa.iss
+2 release-icon-refresh desktop/windows/voxa.iss                    # no ChangesAssociations=yes, no SHChangeNotify at ssPostInstall
 2 release-version-sync .github/workflows/desktop.yml                # no /DAppVersion, no tag check
 1 release-version-sync android/app/build.gradle.kts                # versionCode off the scheme
 
