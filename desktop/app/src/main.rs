@@ -402,9 +402,10 @@ impl Voxa {
                 .update(cx, |v, cx| {
                     // A take whose mic delivers nothing 0.7 s in: restart the stream once (no UI).
                     // Never while paused; after a resume it judges the time since the resume.
-                    if v.mic_on && !v.paused() && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
+                    let (mic_on, paused, revived, live_for) = (v.mic_on, v.paused(), v.mic_revived, v.rec_started.elapsed());
+                    if mic_on && !paused && !revived {
                         if let Some(m) = v.mic.as_mut() {
-                            if m.stalled() {
+                            if rules::revive_mic(mic_on, paused, revived, live_for, m.stalled()) {
                                 v.mic_revived = true;
                                 os::log("  mic delivered no sound: restarting the stream");
                                 if let Err(e) = m.revive() {
@@ -413,7 +414,7 @@ impl Voxa {
                             }
                         }
                     }
-                    if v.hotkey_paused && v.hotkey_paused_at.is_some_and(|t| t.elapsed() > Duration::from_secs(30)) {
+                    if rules::shortcut_pick_timed_out(v.hotkey_paused, v.hotkey_paused_at.map(|t| t.elapsed())) {
                         os::log("shortcut picking stopped answering: resuming the shortcut");
                         v.pause_hotkey(false);
                     }
@@ -1663,7 +1664,7 @@ impl Voxa {
     /// Esc is bound only while recording, so Voxa never steals Esc from other apps. Not while
     /// paused: the user is working elsewhere then, and Esc would throw the whole take away.
     fn sync_esc(&mut self) {
-        let want = matches!(self.flow.state(), State::Recording { paused: false, .. });
+        let want = rules::esc_wanted(self.flow.state());
         if want != self.esc_bound {
             let r = if want { self.hotkeys.register(self.esc_key) } else { self.hotkeys.unregister(self.esc_key) };
             self.esc_bound = want && r.is_ok();

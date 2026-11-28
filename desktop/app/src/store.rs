@@ -911,6 +911,8 @@ mod tests {
         let s = Settings::load(&dir);
         assert_eq!(s, Settings::default());
         assert!(!s.remove_fillers);
+        // The dictation no longer stayed on the clipboard after pasting: keeping it is the default.
+        assert!(s.keep_on_clipboard, "the dictation stays on the clipboard by default");
         let s2 = Settings { remove_fillers: true, keep_days: 7, ..s };
         s2.save(&dir);
         assert_eq!(Settings::load(&dir), s2);
