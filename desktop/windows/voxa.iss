@@ -148,7 +148,8 @@ procedure DeinitializeSetup;
 var
   Code: Integer;
 begin
-  if not IsAutoUpdate then
+  // /VOXANORELAUNCH=1: the user chose Quit Voxa, so it stays closed.
+  if (not IsAutoUpdate) or (ExpandConstant('{param:VOXANORELAUNCH|}') <> '') then
     Exit;
   try
     if FileExists(ExpandConstant('{app}\Voxa.exe')) then

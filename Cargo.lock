@@ -7954,6 +7954,7 @@ dependencies = [
  "unicode-segmentation",
  "voxa-chatgpt",
  "voxa-core",
+ "voxa-update",
  "voxa-vad",
  "windows 0.61.3",
  "windows-sys 0.59.0",

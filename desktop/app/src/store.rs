@@ -291,6 +291,9 @@ pub struct Settings {
     pub birthday_day: u8,
     /// "Wish me on my birthday": a notification at midnight on the day. On by default.
     pub birthday_wish: bool,
+    /// "Update automatically" (Windows) / "Check for updates automatically" (macOS). On by
+    /// default; an older settings.json without it reads as on.
+    pub auto_update: bool,
 }
 
 /// The "Appearance" choice in Settings. Stored as "system", "light" or "dark"; anything else
@@ -340,7 +343,7 @@ impl<'de> Deserialize<'de> for Appearance {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0, appearance: Appearance::System, birthday_month: 0, birthday_day: 0, birthday_wish: true }
+        Self { remove_fillers: false, keep_days: 30, hotkey: "Ctrl+Alt+Space".into(), onboarded: false, imported_old_voxa: false, hold_to_talk: false, mic_device: None, keep_on_clipboard: true, keep_audio_days: 0, appearance: Appearance::System, birthday_month: 0, birthday_day: 0, birthday_wish: true, auto_update: true }
     }
 }
 
@@ -832,6 +835,15 @@ mod tests {
     }
     fn entry(t: DateTime<Local>, app: &str, text: &str, secs: f32, status: Status) -> Entry {
         Entry { id: t.timestamp_millis() as u64, app: app.into(), text: text.into(), secs, status, audio: None, started_in: None, via: None }
+    }
+
+    #[test]
+    fn settings_without_auto_update_read_as_on() {
+        let old: Settings = serde_json::from_str(r#"{"remove_fillers":false,"keep_days":30,"hotkey":"Ctrl+Alt+Space","onboarded":true}"#).unwrap();
+        assert!(old.auto_update, "an older settings.json means Update automatically is on");
+        assert!(Settings::default().auto_update);
+        let off: Settings = serde_json::from_str(r#"{"auto_update":false}"#).unwrap();
+        assert!(!off.auto_update);
     }
 
     #[test]

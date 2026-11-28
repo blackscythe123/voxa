@@ -15,6 +15,43 @@ pub fn log_path() -> std::path::PathBuf {
     }
 }
 
+/// At start: keep the previous run's log as voxa-desktop.old.log instead of deleting it, so the
+/// evidence of a failed update or a crash survives the next start.
+pub fn rotate_log() {
+    rotate(&log_path());
+}
+
+pub(crate) fn rotate(path: &std::path::Path) {
+    if path.exists() {
+        let _ = replace_file(path, &path.with_extension("old.log"));
+    }
+}
+
+/// Move `from` over `to` (becomes voxa_core::fsx::replace_file at the merge).
+fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let _ = std::fs::remove_file(to);
+    std::fs::rename(from, to)
+}
+
+#[cfg(test)]
+mod log_tests {
+    #[test]
+    fn a_restart_keeps_the_previous_log() {
+        let dir = std::env::temp_dir().join(format!("voxa-log-rotate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("voxa-desktop.log");
+        std::fs::write(&log, "run 1: the update failed").unwrap();
+        super::rotate(&log);
+        assert_eq!(std::fs::read_to_string(dir.join("voxa-desktop.old.log")).unwrap(), "run 1: the update failed");
+        assert!(!log.exists());
+        std::fs::write(&log, "run 2").unwrap();
+        super::rotate(&log);
+        assert_eq!(std::fs::read_to_string(dir.join("voxa-desktop.old.log")).unwrap(), "run 2", "one previous run is kept");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// Append a line to the log and stdout. Never logs secrets: callers pass states and sizes only.
 pub fn log(msg: &str) {
     let t = START.get_or_init(Instant::now).elapsed().as_millis();

@@ -26,6 +26,35 @@ pub struct Live {
     pub hotkey_result: Option<(String, Option<String>)>,
     /// What the strip shows: idle, recording, paused, writing, pasted, needs, blocked.
     pub state: String,
+    /// The updater's state for Settings and the Home bars (crate::update).
+    pub update: UpdateView,
+}
+
+/// What the window shows about updates. Written by the tray process (the only one that updates).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateView {
+    /// The status line under "Voxa 1.0.0" in Settings (copy deck, docs/updates.md).
+    pub status: String,
+    pub checking: bool,
+    /// The last check was asked for by the user (only then is a refusal or failure announced).
+    pub manual: bool,
+    /// Auto off and an update is ready: Settings offers "Restart and update".
+    pub can_restart: bool,
+    /// Auto install gave up (2 failed attempts): Settings offers "Download".
+    pub gave_up: bool,
+    /// The newest version on offer, if any.
+    pub version: Option<String>,
+    /// The versioned installer or dmg, for "Download".
+    pub download_url: Option<String>,
+    /// The release page, for "What's new".
+    pub notes_url: Option<String>,
+    /// Windows: "Voxa was updated to X" on Home until dismissed.
+    pub updated_to: Option<String>,
+    /// macOS: "Voxa X is out" on Home until dismissed.
+    pub mac_available: Option<String>,
+    /// macOS: the Accessibility grant must be given again (the app's signature changed).
+    pub mac_accessibility_again: bool,
 }
 
 impl Live {
@@ -80,6 +109,14 @@ pub enum Command {
     DeleteAll,
     /// Delete recordings older than this many days, keeping their text.
     DeleteOldAudio(u32),
+    /// Settings, Help: "Check for updates".
+    CheckForUpdates,
+    /// Auto off and an update is ready: the user pressed "Restart and update".
+    InstallUpdateNow,
+    /// "What's new": the release page of the update (or of this version).
+    OpenReleaseNotes,
+    /// The Home bar after an update (or the macOS "is out" bar) was closed.
+    DismissUpdateNote,
 }
 
 fn dir() -> PathBuf {
@@ -174,6 +211,29 @@ mod tests {
         let reads = (1..=250u32).filter(|t| due(false, *t)).count();
         assert!(reads <= 42, "{reads} folder reads in 10 s with nothing to do");
         assert!(due(true, 1), "a signalled command is read at once");
+    }
+
+    #[test]
+    fn check_for_updates_command_survives_the_file_trip() {
+        for c in [Command::CheckForUpdates, Command::InstallUpdateNow, Command::OpenReleaseNotes, Command::DismissUpdateNote] {
+            let b = serde_json::to_vec(&c).unwrap();
+            assert_eq!(serde_json::from_slice::<Command>(&b).unwrap(), c);
+        }
+    }
+
+    #[test]
+    fn old_live_json_without_update_still_reads() {
+        let old = br#"{"session":"valid","online":true,"mic":"granted","mic_name":"Mic","signing_in":false,"live_ids":[3],"hotkey_result":null,"state":"idle"}"#;
+        let live: Live = serde_json::from_slice(old).unwrap();
+        assert_eq!(live.session, "valid");
+        assert_eq!(live.live_ids, vec![3]);
+        assert_eq!(live.update, UpdateView::default());
+        // And a newer view round trips.
+        let mut l = live.clone();
+        l.update.updated_to = Some("1.0.1".into());
+        l.update.status = "You have the latest version.".into();
+        let b = serde_json::to_vec(&l).unwrap();
+        assert_eq!(serde_json::from_slice::<Live>(&b).unwrap(), l);
     }
 
     #[test]

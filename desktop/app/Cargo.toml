@@ -11,6 +11,7 @@ log = "0.4"
 voxa-core = { path = "../../core/voxa-core" }
 voxa-chatgpt = { path = "../../core/voxa-chatgpt" }
 voxa-vad = { path = "../../core/voxa-vad" }
+voxa-update = { path = "../../core/voxa-update" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -44,6 +45,10 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Power",
   "Win32_UI_HiDpi",
   "Win32_Security",
+  # The update gate: is the session locked (OpenInputDesktop).
+  "Win32_System_StationsAndDesktops",
+  # The update gate: time since the last input (GetTickCount with GetLastInputInfo).
+  "Win32_System_SystemInformation",
 ] }
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Variant", "Win32_UI_Accessibility", "Win32_System_Diagnostics_ToolHelp", "Foundation", "UI_Notifications", "Data_Xml_Dom"] }
 winreg = "0.55"

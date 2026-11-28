@@ -557,6 +557,56 @@ pub fn open(target: &std::ffi::OsStr) {
     let _ = std::process::Command::new("/usr/bin/open").arg(target).spawn();
 }
 
+// ── updates (crate::update): macOS only notifies, it never installs ──────
+
+pub fn idle_ms() -> u64 {
+    0
+}
+
+pub fn strip_shown() -> bool {
+    false
+}
+
+pub fn session_locked() -> bool {
+    false
+}
+
+pub fn window_process_running() -> bool {
+    false
+}
+
+pub fn process_running(_exe: &str) -> bool {
+    false
+}
+
+pub fn spawn_detached(_program: &std::path::Path, _args: &[String]) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "macOS updates are installed by the user"))
+}
+
+/// Whether Voxa has the Accessibility grant, without asking for it.
+pub fn accessibility_trusted() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
+/// The running app's designated requirement ("designated => ..."), read with codesign. None
+/// when not running from a signed bundle.
+pub fn designated_requirement() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    // .../Voxa.app/Contents/MacOS/Voxa -> .../Voxa.app
+    let app = exe.parent()?.parent()?.parent()?.to_path_buf();
+    let out = std::process::Command::new("/usr/bin/codesign").arg("-d").arg("-r-").arg(&app).output().ok()?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    text.lines().find(|l| l.starts_with("designated =>")).map(|l| l.trim().to_string())
+}
+
+pub fn open_accessibility_settings() {
+    open(std::ffi::OsStr::new("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"));
+}
+
 pub fn open_mic_privacy() {
     open(std::ffi::OsStr::new("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"));
 }

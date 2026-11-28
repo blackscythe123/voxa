@@ -573,6 +573,12 @@ fn instance_suffix() -> String {
     std::env::var("VOXA_DATA").map(|d| format!("-{:x}", d.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)))).unwrap_or_default()
 }
 
+/// The strip is on screen now (the update gate waits while it is).
+pub fn strip_shown() -> bool {
+    let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    !h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) } != 0
+}
+
 pub fn strip_visible(show: bool) {
     let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
     if h.is_null() { return; }
@@ -872,4 +878,83 @@ pub fn show_in_dock() {}
 /// Windows can always paste with SendInput; nothing to ask for.
 pub fn can_paste() -> bool {
     true
+}
+
+// ── the update gate (crate::update) ──────────────────────────────────────
+
+/// Milliseconds since the last keyboard or mouse input in this session.
+pub fn idle_ms() -> u64 {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if unsafe { GetLastInputInfo(&mut info) } == 0 {
+        return 0;
+    }
+    u64::from(unsafe { GetTickCount() }.wrapping_sub(info.dwTime))
+}
+
+/// The session is locked (the lock screen owns the input desktop).
+pub fn session_locked() -> bool {
+    use windows_sys::Win32::System::StationsAndDesktops::{CloseDesktop, DESKTOP_SWITCHDESKTOP, OpenInputDesktop, SwitchDesktop};
+    unsafe {
+        let d = OpenInputDesktop(0, 0, DESKTOP_SWITCHDESKTOP);
+        if d.is_null() {
+            return true;
+        }
+        let switched = SwitchDesktop(d) != 0;
+        CloseDesktop(d);
+        !switched
+    }
+}
+
+/// The window process (`--window`) is running: its mutex exists.
+pub fn window_process_running() -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::OpenMutexW;
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    let test = if std::env::var_os("VOXA_DATA").is_some() { "Test" } else { "" };
+    unsafe {
+        let h = OpenMutexW(SYNCHRONIZE, 0, wide(&format!(r"Local\VoxaNextWindow{test}")).as_ptr());
+        if h.is_null() {
+            return false;
+        }
+        CloseHandle(h);
+        true
+    }
+}
+
+/// A process with this exe name (case-insensitive) is running, e.g. "voxa-signin.exe".
+pub fn process_running(exe: &str) -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
+        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = false;
+        let mut ok = Process32FirstW(snap, &mut e).is_ok();
+        while ok {
+            let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+            if String::from_utf16_lossy(&e.szExeFile[..len]).eq_ignore_ascii_case(exe) {
+                found = true;
+                break;
+            }
+            ok = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+        found
+    }
+}
+
+/// Start a program detached from Voxa, with no window, passing `args` exactly as written (the
+/// installer's own quoting, e.g. /LOG="C:\a b\install.log").
+pub fn spawn_detached(program: &std::path::Path, args: &[String]) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut c = std::process::Command::new(program);
+    for a in args {
+        c.raw_arg(a);
+    }
+    c.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW).spawn().map(|_| ())
 }

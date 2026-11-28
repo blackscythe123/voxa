@@ -63,6 +63,11 @@ pub struct Uploads {
 }
 
 impl Uploads {
+    /// Nothing queued or uploading (the update gate needs this).
+    pub fn is_empty(&self) -> bool {
+        self.line.is_empty() && self.running.is_empty()
+    }
+
     pub fn contains(&self, key: Key) -> bool {
         self.line.contains(&key) || self.running.contains(&key)
     }

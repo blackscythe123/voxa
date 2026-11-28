@@ -17,6 +17,7 @@ mod store;
 mod recover;
 mod rules;
 mod uploads;
+mod update;
 mod audio;
 mod stand_in;
 mod common;
@@ -256,6 +257,9 @@ pub(crate) struct Voxa {
     holding: Option<Instant>,
     menu_open: MenuId,
     menu_quit: MenuId,
+    menu_check: MenuId,
+    /// Automatic updates (update.rs).
+    updater: update::Updater,
     /// When the mic last went live in this take (start or resume), for the stalled-mic watchdog.
     rec_started: Instant,
     /// Talking time in this take; paused time is left out, also when stopped while paused.
@@ -381,7 +385,9 @@ impl Voxa {
         let menu = Menu::new();
         let open_item = MenuItem::new("Open Voxa", true, None);
         let quit_item = MenuItem::new("Quit Voxa", true, None);
-        let _ = menu.append_items(&[&open_item, &PredefinedMenuItem::separator(), &quit_item]);
+        // Still reachable if the window ever breaks.
+        let check_item = MenuItem::new("Check for updates", true, None);
+        let _ = menu.append_items(&[&open_item, &check_item, &PredefinedMenuItem::separator(), &quit_item]);
         let tray = TrayIconBuilder::new()
             .with_tooltip("Voxa")
             .with_icon(tray_icon(None))
@@ -423,7 +429,11 @@ impl Voxa {
                             os::log("quit from tray");
                             v.mic_test(false, cx);
                             v.keep_unfinished_takes(cx);
+                            // A ready update installs now, without starting Voxa again.
+                            v.update_on_quit(cx);
                             cx.quit();
+                        } else if ev.id == v.menu_check {
+                            v.check_for_updates(true, cx);
                         }
                     }
                     while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
@@ -440,6 +450,10 @@ impl Voxa {
                     v.pump_uploads(cx);
                     for click in notify::take_clicks() {
                         v.on_notification(click, cx);
+                    }
+                    // About once a second: the update check and the install gate (update.rs).
+                    if v.command_tick % 25 == 0 {
+                        v.update_tick(cx);
                     }
                     // About every 10 s: the birthday wish at midnight.
                     if v.command_tick % 250 == 0 {
@@ -477,6 +491,7 @@ impl Voxa {
                                 continue;
                             }
                             v.holding = Some(Instant::now());
+                            v.updater.hotkey_used();
                             if v.mic_testing {
                                 v.mic_test(false, cx);
                             }
@@ -602,6 +617,8 @@ impl Voxa {
             holding: None,
             menu_open: open_item.id().clone(),
             menu_quit: quit_item.id().clone(),
+            menu_check: check_item.id().clone(),
+            updater: update::Updater::new(),
             rec_started: Instant::now(),
             talk: talk::TalkClock::default(),
             uploads: uploads::Uploads::default(),
@@ -1347,7 +1364,7 @@ impl Voxa {
             State::Idle => "idle",
         }
         .to_string();
-        let live = link::Live { session, online, mic, mic_name: self.mic_name.clone(), signing_in: self.signing_in, live_ids, hotkey_result: self.hotkey_result.clone(), state };
+        let live = link::Live { session, online, mic, mic_name: self.mic_name.clone(), signing_in: self.signing_in, live_ids, hotkey_result: self.hotkey_result.clone(), state, update: self.update_view() };
         if self.published.as_ref() != Some(&live) {
             link::write_live(&live);
             self.published = Some(live);
@@ -1429,6 +1446,7 @@ impl Voxa {
                 }
             }
             DeleteAll => self.delete_history(cx),
+            c @ (CheckForUpdates | InstallUpdateNow | OpenReleaseNotes | DismissUpdateNote) => self.on_update_command(&c, cx),
             DeleteOldAudio(days) => {
                 let freed = self.history.prune_audio(days.max(1), now_ms());
                 self.history.save();
@@ -2314,8 +2332,15 @@ fn main() {
     }
     let background = std::env::args().any(|a| a == "--background");
     let _ = std::fs::create_dir_all(data_dir());
-    let _ = std::fs::remove_file(os::log_path());
-    os::log("voxa-desktop starting");
+    // Never delete the log at start: the previous run's (a failed update, a crash) is kept aside.
+    os::rotate_log();
+    os::log(&format!("voxa-desktop {} starting{}", env!("CARGO_PKG_VERSION"), if std::env::args().any(|a| a == "--updated") { " after an update" } else { "" }));
+    // At Windows sign-in, before the shortcut exists or anything shows: a verified, staged update
+    // installs now if its gate holds, and Setup starts Voxa again in the background.
+    if background && update::apply_at_background_start() {
+        os::log("handing over to the update installer");
+        return;
+    }
     Application::new().run(move |cx: &mut App| {
         let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(FRAUNCES)]);
         os::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
@@ -2338,7 +2363,7 @@ fn main() {
         if let Ok(h) = &opened {
             if let Ok(voxa) = h.entity(cx) {
                 let onboarded = voxa.read(cx).settings.onboarded;
-                if !background || !onboarded {
+                if update::opens_window_at_start(background, onboarded) {
                     voxa.update(cx, |v, cx| v.open_home(None, cx));
                 }
             }
