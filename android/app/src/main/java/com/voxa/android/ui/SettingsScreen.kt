@@ -1,210 +1,192 @@
 package com.voxa.android.ui
 
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
-import android.view.inputmethod.InputMethodManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import com.voxa.android.VoxaApp
-import com.voxa.android.ui.icons.VoxaIcons
-import com.voxa.android.ui.theme.MonoFamily
-import com.voxa.android.ui.theme.VoxaColors
+import com.voxa.android.BuildConfig
+import com.voxa.android.MainActivity
+import com.voxa.android.R
+import com.voxa.android.Route
+import com.voxa.android.diag.Diag
+import com.voxa.android.voxa
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import uniffi.voxa_ffi.SessionState
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenGestureLibrary: () -> Unit = {}) {
-    val context = LocalContext.current
-    val prefs = VoxaApp.prefs
-
-    var maxDuration by remember { mutableIntStateOf(prefs.getMaxDuration()) }
-    var holdToTalk by remember { mutableStateOf(prefs.getHoldToTalk()) }
-    var trimSilence by remember { mutableStateOf(prefs.getTrimSilence()) }
-    var haptics by remember { mutableStateOf(prefs.getHaptics()) }
-    var showDurationDialog by remember { mutableStateOf(false) }
-
-    val imeEnabled = remember { mutableStateOf(false) }
-    fun checkImeEnabled() {
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imeEnabled.value = imm.enabledInputMethodList.any { it.packageName == context.packageName }
+fun SettingsScreen(activity: MainActivity) {
+    val c = vx
+    val app = activity.voxa
+    val tick = activity.tick.intValue
+    val session by app.session.collectAsState()
+    val account by app.account.collectAsState()
+    val version by app.historyVersion.collectAsState()
+    var settings by remember { mutableStateOf(app.core.settings()) }
+    val save = { s: uniffi.voxa_ffi.Settings ->
+        settings = s
+        app.core.setSettings(s)
+        app.historyChanged()
     }
-    LaunchedEffect(Unit) { checkImeEnabled() }
+    val enabled = remember(tick) { app.keyboardEnabled() }
+    val selected = remember(tick) { app.keyboardSelected() }
+    var count by remember { mutableIntStateOf(0) }
+    LaunchedEffect(version) { count = withContext(Dispatchers.IO) { app.core.history("").size } }
+    var confirmClear by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+    var pickKeep by remember { mutableStateOf(false) }
+    val signedOut = session == SessionState.EXPIRED
 
-    SubpageScaffold(title = "Settings", onBack = onBack) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+        ScreenTitle("Settings")
 
-        SectionHeader("Keyboard")
-        Panel {
-            SettingsRow(
-                icon = VoxaIcons.Keyboard,
-                name = if (imeEnabled.value) "Voxa keyboard" else "Voxa keyboard not enabled",
-                sub = if (imeEnabled.value) "Enabled. Switch to it in any text field." else "Tap to enable in system settings.",
-                onClick = if (imeEnabled.value) null else { ->
-                    context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                },
-                trailing = {
-                    if (imeEnabled.value) {
-                        Switch(checked = true, onCheckedChange = null, colors = quietSwitchColors())
-                    } else {
-                        TextButton(onClick = {
-                            context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                        }) {
-                            Text("Enable", color = VoxaColors.Primary, fontSize = 13.sp)
-                        }
-                    }
-                },
-            )
-            HairDivider()
-            SettingsRow(
-                icon = VoxaIcons.Swap,
-                name = "Show keyboard picker",
-                sub = "Opens the system switcher.",
-                trailing = { Chevron() },
-                onClick = {
-                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    @Suppress("DEPRECATION")
-                    imm.showInputMethodPicker()
-                },
-            )
-            HairDivider()
-            SettingsRow(
-                icon = VoxaIcons.Settings,
-                name = "Keyboard preferences",
-                sub = "Layout, autocorrect, suggestions, themes, languages.",
-                trailing = { Chevron() },
-                onClick = {
-                    context.startActivity(
-                        Intent(context, Class.forName("helium314.keyboard.settings.SettingsActivity"))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                },
-            )
-            HairDivider()
-            SettingsRow(
-                icon = VoxaIcons.Finger,
-                name = "Swipe typing",
-                sub = "Install the optional library to type by sliding across keys.",
-                trailing = { Chevron() },
-                onClick = onOpenGestureLibrary,
-            )
-        }
-
-        SectionHeader("Recording")
-        Panel {
-            SettingsRow(
-                icon = VoxaIcons.Infinity,
-                name = "Max length",
-                sub = formatDurationLabel(maxDuration) + ". Tap to choose Unlimited.",
-                trailing = {
+        // Profile
+        VCard(
+            Modifier.padding(bottom = 24.dp), padding = PaddingValues(16.dp),
+            onClick = { if (signedOut) activity.go(Route.SignIn) else confirmSignOut = true },
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(account?.name?.ifEmpty { account?.email } ?: "", 56.dp, image = account?.image ?: "")
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
                     Text(
-                        text = formatDurationShort(maxDuration),
-                        fontFamily = MonoFamily,
-                        fontSize = 11.sp,
-                        color = VoxaColors.Muted,
+                        if (signedOut) "Not signed in" else account?.name?.ifEmpty { null } ?: account?.email?.ifEmpty { null } ?: "ChatGPT",
+                        style = Type.MBold, color = c.text,
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Chevron()
-                },
-                onClick = { showDurationDialog = true },
-            )
-            HairDivider()
-            SettingsRow(
-                icon = VoxaIcons.Pulse,
-                name = "Trim silence",
-                sub = "Auto-stop on sustained quiet.",
-                trailing = {
-                    Switch(
-                        checked = trimSilence,
-                        onCheckedChange = { trimSilence = it; prefs.setTrimSilence(it) },
-                        colors = quietSwitchColors(),
-                    )
-                },
-            )
-            HairDivider()
-            SettingsRow(
-                icon = VoxaIcons.Finger,
-                name = "Hold to talk",
-                sub = "Long-press the mic to record.",
-                trailing = {
-                    Switch(
-                        checked = holdToTalk,
-                        onCheckedChange = { holdToTalk = it; prefs.setHoldToTalk(it) },
-                        colors = quietSwitchColors(),
-                    )
-                },
-            )
+                    Text(if (signedOut) "Tap to sign in to ChatGPT" else "ChatGPT account", style = Type.S, color = c.text56)
+                }
+                val plan = account?.planLabel?.removePrefix("ChatGPT ")?.trim().orEmpty()
+                if (!signedOut && plan.isNotEmpty()) Pill(plan, PillKind.Good)
+            }
         }
 
-        SectionHeader("Feedback")
-        Panel {
-            SettingsRow(
-                icon = VoxaIcons.Pulse,
-                name = "Haptic feedback",
-                sub = "Vibrate on tap, send, and error.",
-                trailing = {
-                    Switch(
-                        checked = haptics,
-                        onCheckedChange = { haptics = it; prefs.setHaptics(it) },
-                        colors = quietSwitchColors(),
-                    )
-                },
-            )
+        VCard(Modifier.padding(bottom = 16.dp), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            OptionRow(R.drawable.ic_keyboard, "Voxa keyboard", onClick = { if (!enabled) activity.openKeyboardSettings() else activity.showKeyboardPicker() }) {
+                OptionValue(
+                    when {
+                        selected -> "On"
+                        enabled -> "On, not chosen"
+                        else -> "Off"
+                    },
+                )
+            }
+            OptionRow(R.drawable.ic_hand, "Hold to talk", onClick = { save(settings.copy(holdToTalk = !settings.holdToTalk)) }) {
+                VSwitch(settings.holdToTalk) { save(settings.copy(holdToTalk = it)) }
+            }
+            OptionRow(R.drawable.ic_words, "Remove filler words", onClick = { save(settings.copy(removeFillers = !settings.removeFillers)) }) {
+                VSwitch(settings.removeFillers) { save(settings.copy(removeFillers = it)) }
+            }
+            OptionRow(R.drawable.ic_vibrate, "Vibrate on tap", onClick = { save(settings.copy(haptics = !settings.haptics)) }) {
+                VSwitch(settings.haptics) { save(settings.copy(haptics = it)) }
+            }
+            val theme = ThemePref.current.value
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            OptionRow(R.drawable.ic_theme, "Appearance", last = true, onClick = { ThemePref.set(ctx, ThemePref.next(theme)) }) {
+                OptionValue(ThemePref.label(theme))
+            }
         }
 
-        Spacer(Modifier.height(28.dp))
+        VCard(Modifier.padding(bottom = 16.dp), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            OptionRow(R.drawable.ic_lock, "Keep history", onClick = { pickKeep = true }) { OptionValue(keepLabel(settings.keepDays)) }
+            OptionRow(R.drawable.ic_delete, "Delete history", last = true, danger = true, onClick = { if (count > 0) confirmClear = true }) {
+                OptionValue(if (count == 1) "1 dictation" else "$count dictations")
+            }
+        }
+
+        VCard(Modifier.padding(bottom = 16.dp), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            OptionRow(R.drawable.ic_flag, "Take the tour again", onClick = { activity.restartSetup() }) {
+                Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(20.dp), tint = c.text40)
+            }
+            if (Diag.enabled && BuildConfig.DEBUG) {
+                OptionRow(R.drawable.ic_pulse, "Share diagnostics", onClick = { activity.shareDiagnostics() }) {
+                    Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(20.dp), tint = c.text40)
+                }
+            }
+            OptionRow(R.drawable.ic_info, "Version", last = true) { OptionValue(BuildConfig.VERSION_NAME) }
+        }
     }
 
-    if (showDurationDialog) {
+    if (confirmClear) {
+        ConfirmDialog(
+            "Delete all history?", "Every dictation and recording on this phone is removed. This can't be undone.", "Delete all",
+            onConfirm = {
+                app.core.clearHistory()
+                app.historyChanged()
+                confirmClear = false
+            },
+            onDismiss = { confirmClear = false },
+        )
+    }
+    if (confirmSignOut) {
+        ConfirmDialog(
+            "Sign out of ChatGPT?", "Voxa can't dictate until you sign in again. Your history stays on this phone.", "Sign out",
+            onConfirm = {
+                app.signOut()
+                confirmSignOut = false
+            },
+            onDismiss = { confirmSignOut = false },
+        )
+    }
+    if (pickKeep) {
         AlertDialog(
-            onDismissRequest = { showDurationDialog = false },
-            containerColor = VoxaColors.Surface,
-            title = { Text("Max length", color = VoxaColors.Ink) },
+            onDismissRequest = { pickKeep = false },
+            containerColor = c.card,
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Keep history", style = Type.L, color = c.text) },
             text = {
                 Column {
-                    listOf(60, 120, 180, 300, 0).forEach { sec ->
-                        val label = if (sec == 0) "Unlimited (as needed)" else "${sec}s"
-                        TextButton(
-                            onClick = {
-                                maxDuration = sec
-                                prefs.setMaxDuration(sec)
-                                showDurationDialog = false
-                            },
-                            modifier = Modifier.fillMaxWidth(),
+                    Text("Dictations not sent yet are always kept.", Modifier.padding(bottom = 8.dp), style = Type.S, color = c.text56)
+                    for (d in listOf(7u, 30u, 90u, 0u)) {
+                        val on = settings.keepDays == d
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                                save(settings.copy(keepDays = d))
+                                pickKeep = false
+                            }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                label,
-                                color = VoxaColors.Primary,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Start,
-                            )
+                            Box(Modifier.size(20.dp).clip(CircleShape).background(if (on) c.accent else c.text16), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(if (on) 8.dp else 16.dp).clip(CircleShape).background(if (on) c.onAccent else c.card))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(keepLabel(d), style = Type.M, color = c.text)
                         }
                     }
                 }
             },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showDurationDialog = false }) {
-                    Text("Cancel", color = VoxaColors.Muted)
-                }
-            },
+            confirmButton = { TextButton({ pickKeep = false }) { Text("Done", style = Type.MBold, color = c.accent) } },
         )
     }
 }
 
-private fun formatDurationLabel(sec: Int): String =
-    if (sec == 0) "Unlimited"
-    else "${sec / 60}:${(sec % 60).toString().padStart(2, '0')}"
-
-private fun formatDurationShort(sec: Int): String =
-    if (sec == 0) "∞" else formatDurationLabel(sec)
+private fun keepLabel(days: UInt) = if (days == 0u) "Forever" else "$days days"

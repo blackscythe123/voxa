@@ -1,318 +1,253 @@
 package com.voxa.android.ui
 
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
-import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.voxa.android.network.TranscriptionApi
-import com.voxa.android.ui.icons.VoxaIcons
-import com.voxa.android.ui.theme.DisplayFamily
-import com.voxa.android.ui.theme.MonoFamily
-import com.voxa.android.ui.theme.VoxaColors
+import com.voxa.android.MainActivity
+import com.voxa.android.R
+import com.voxa.android.Route
+import com.voxa.android.voxa
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import uniffi.voxa_ffi.HistoryEntry
+import uniffi.voxa_ffi.SessionState
+import uniffi.voxa_ffi.WeekStats
+import java.time.LocalTime
+import java.time.ZoneId
+
+/** What stands between the user and dictating, most important first; null when ready. */
+enum class Problem(val text: String) {
+    SignedOut("Sign in to ChatGPT to dictate"),
+    MicDenied("Allow the microphone"),
+    KeyboardOff("Turn on the Voxa keyboard"),
+    Offline("You're offline. Dictations send when you're back"),
+    Blocked("Couldn't reach ChatGPT"),
+}
 
 @Composable
-fun HomeScreen(
-    onOpenTutorial: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenAccount: () -> Unit,
-    onOpenAbout: () -> Unit,
-) {
-    val context = LocalContext.current
-
-    var sessionValid by remember { mutableStateOf(true) }
-    val imeEnabled = remember { mutableStateOf(false) }
-    fun checkImeEnabled() {
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imeEnabled.value = imm.enabledInputMethodList.any { it.packageName == context.packageName }
+fun rememberProblem(activity: MainActivity): Pair<Problem?, Boolean> {
+    val app = activity.voxa
+    val tick = activity.tick.intValue
+    val session by app.session.collectAsState()
+    val online by app.online.collectAsState()
+    val blocked by app.blocked.collectAsState()
+    val mic = remember(tick) { app.micGranted() }
+    val enabled = remember(tick) { app.keyboardEnabled() }
+    val problem = when {
+        session == SessionState.EXPIRED -> Problem.SignedOut
+        !mic -> Problem.MicDenied
+        !enabled -> Problem.KeyboardOff
+        !online -> Problem.Offline
+        blocked -> Problem.Blocked
+        else -> null
     }
+    return problem to (session == SessionState.UNKNOWN)
+}
 
-    LaunchedEffect(Unit) {
-        // Unreachable (offline, DNS) is not the same as expired; only flag a real rejection.
-        sessionValid = TranscriptionApi.checkSession() != TranscriptionApi.SessionStatus.INVALID
-        checkImeEnabled()
+fun fix(activity: MainActivity, p: Problem) {
+    when (p) {
+        Problem.SignedOut -> activity.go(Route.SignIn)
+        Problem.MicDenied -> activity.requestMic()
+        Problem.KeyboardOff -> activity.openKeyboardSettings()
+        Problem.Offline -> Unit
+        Problem.Blocked -> activity.voxa.checkSession(force = true)
     }
+}
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(VoxaColors.Bg)
-            .systemBarsPadding()
-            .verticalScroll(rememberScrollState()),
+@Composable
+fun HomeScreen(activity: MainActivity) {
+    val c = vx
+    val app = activity.voxa
+    val account by app.account.collectAsState()
+    val version by app.historyVersion.collectAsState()
+    val (problem, checking) = rememberProblem(activity)
+    var recent by remember { mutableStateOf(emptyList<HistoryEntry>()) }
+    var week by remember { mutableStateOf<WeekStats?>(null) }
+    LaunchedEffect(version) {
+        withContext(Dispatchers.IO) {
+            val offset = ZoneId.systemDefault().rules.getOffset(java.time.Instant.now()).totalSeconds / 60
+            week = app.core.weekStats(offset)
+            recent = app.core.history("").take(3)
+        }
+    }
+    val first = account?.name?.trim()?.split(' ')?.firstOrNull()?.takeIf { it.isNotEmpty() }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 104.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(greeting() + (first?.let { ", $it" } ?: ""), style = Type.S, color = c.text56)
+                    Spacer(Modifier.height(4.dp))
+                    Readiness(problem, checking) { problem?.let { fix(activity, it) } }
+                }
+                Spacer(Modifier.width(16.dp))
+                Box(Modifier.clip(CircleShape).clickable { activity.go(Route.Tabbed(Tab.Settings)) }) {
+                    Avatar(account?.name?.ifEmpty { account?.email } ?: "", image = account?.image ?: "")
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            StatsCard(week)
+            Spacer(Modifier.height(24.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Recent", Modifier.weight(1f), style = Type.MBold, color = c.text)
+                if (recent.isNotEmpty()) TextAction("See all") { activity.go(Route.Tabbed(Tab.History)) }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (recent.isEmpty()) {
+                Text("Nothing yet. Tap Try Voxa, then talk: your words show up here, and stay on this phone.", Modifier.padding(vertical = 12.dp), style = Type.M, color = c.text56)
+            }
+            recent.forEach { e -> HistoryItem(e) { activity.go(Route.Detail(e.id)) } }
+        }
+        Fab("Try Voxa", R.drawable.ic_mic, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)) {
+            activity.showSheet { PracticeSheet(activity) }
+        }
+    }
+}
+
+private fun greeting(): String = when (LocalTime.now().hour) {
+    in 5..11 -> "Good morning"
+    in 12..17 -> "Good afternoon"
+    else -> "Good evening"
+}
+
+/** "Ready to dictate" in green, or the real problem in amber (tap to fix it). */
+@Composable
+fun Readiness(problem: Problem?, checking: Boolean, onFix: () -> Unit) {
+    val c = vx
+    val (color, text) = when {
+        problem != null -> c.warn to problem.text
+        checking -> c.text56 to "Checking your sign-in"
+        else -> c.good to "Ready to dictate"
+    }
+    Row(
+        Modifier.clip(RoundedCornerShape(8.dp)).then(if (problem != null) Modifier.clickable(onClick = onFix) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 22.dp, end = 22.dp, top = 14.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "voxa",
-                fontFamily = DisplayFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 28.sp,
-                letterSpacing = (-0.9).sp,
-                color = VoxaColors.Ink,
-            )
-            Spacer(Modifier.weight(1f))
-            StatusPill(connected = sessionValid)
-        }
-
-        Text(
-            text = "Dictate anywhere on your phone. Tap a text field, switch to Voxa, hold to talk.",
-            fontSize = 13.sp,
-            color = VoxaColors.Muted,
-            lineHeight = 18.sp,
-            modifier = Modifier
-                .padding(horizontal = 22.dp)
-                .widthIn(max = 320.dp),
-        )
-
-        SetupHero(
-            sessionValid = sessionValid,
-            imeEnabled = imeEnabled.value,
-            onEnableKeyboard = {
-                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+        Box(
+            Modifier.size(16.dp).drawBehind {
+                drawCircle(color.copy(alpha = 0.15f), radius = 8.dp.toPx())
+                drawCircle(color, radius = 4.dp.toPx())
             },
-            onOpenTutorial = onOpenTutorial,
         )
-
-        // Nav tiles
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            NavTile(
-                modifier = Modifier.weight(1f),
-                icon = VoxaIcons.Book,
-                title = "How to use",
-                sub = "Step-by-step setup and dictation tour",
-                onClick = onOpenTutorial,
-            )
-            NavTile(
-                modifier = Modifier.weight(1f),
-                icon = VoxaIcons.Settings,
-                title = "Settings",
-                sub = "Length, hold, trim, haptics",
-                onClick = onOpenSettings,
-            )
+        Spacer(Modifier.width(4.dp))
+        Text(text, style = Type.SBold, color = color)
+        if (problem != null && problem != Problem.Offline) {
+            Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(16.dp), tint = color)
         }
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            NavTile(
-                modifier = Modifier.weight(1f),
-                icon = VoxaIcons.User,
-                title = "Account",
-                sub = "ChatGPT session, Sign out",
-                onClick = onOpenAccount,
-            )
-            NavTile(
-                modifier = Modifier.weight(1f),
-                icon = VoxaIcons.Info,
-                title = "About",
-                sub = "Version, Privacy",
-                onClick = onOpenAbout,
-            )
-        }
+    }
+}
 
+/** Time saved first and big, the week as bars, then words and speed. */
+@Composable
+private fun StatsCard(week: WeekStats?) {
+    val c = vx
+    VCard {
+        Text(savedLabel(week?.savedSecs ?: 0u), style = Type.Big, color = c.text)
+        Spacer(Modifier.height(8.dp))
+        Text("saved this week versus typing", style = Type.S, color = c.text56)
+        Spacer(Modifier.height(16.dp))
+        val days = week?.perDay ?: List(7) { 0u }
+        val max = (days.maxOrNull() ?: 0u).coerceAtLeast(1u).toFloat()
+        val today = week?.today?.toInt() ?: -1
+        Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+            days.forEachIndexed { i, n ->
+                val f = (n.toFloat() / max).coerceIn(0.06f, 1f)
+                Box(Modifier.weight(1f).fillMaxHeight(f).clip(RoundedCornerShape(6.dp)).background(if (i == today) c.accent else c.accent12))
+            }
+        }
         Spacer(Modifier.height(24.dp))
-        Text(
-            text = "voxa · dictate anywhere",
-            fontFamily = MonoFamily,
-            fontSize = 10.sp,
-            color = VoxaColors.MutedSoft,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 30.dp),
-            textAlign = TextAlign.Center,
-        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.hair))
+        Spacer(Modifier.height(16.dp))
+        Row {
+            Column(Modifier.weight(1f)) {
+                Text("%,d".format((week?.words ?: 0uL).toLong()), style = Type.L.copy(fontFeatureSettings = "tnum"), color = c.text)
+                Text("words", style = Type.S, color = c.text56)
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("${week?.wpm ?: 0u}", style = Type.L.copy(fontFeatureSettings = "tnum"), color = c.text)
+                Text("words a minute", style = Type.S, color = c.text56)
+            }
+        }
     }
 }
 
-@Composable
-private fun SetupHero(
-    sessionValid: Boolean,
-    imeEnabled: Boolean,
-    onEnableKeyboard: () -> Unit,
-    onOpenTutorial: () -> Unit,
-) {
-    val accountDone = sessionValid
-    val keyboardDone = imeEnabled
-    val done = (if (accountDone) 1 else 0) + (if (keyboardDone) 1 else 0)
-    val allDone = done == 2
+/** 1h 24m, 12m, 45s. */
+fun savedLabel(secs: UInt): String {
+    val s = secs.toInt()
+    return when {
+        s < 60 -> "${s}s"
+        s < 3600 -> "${s / 60}m"
+        else -> "${s / 3600}h ${(s % 3600) / 60}m"
+    }
+}
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Brush.verticalGradient(listOf(VoxaColors.Surface, VoxaColors.Bg)))
-            .border(1.dp, VoxaColors.Hair, RoundedCornerShape(16.dp))
-            .padding(18.dp),
-    ) {
+/** The Try Voxa sheet: a field to dictate into, with what to do. */
+@Composable
+fun PracticeSheet(activity: MainActivity) {
+    val c = vx
+    val app = activity.voxa
+    val tick = activity.tick.intValue
+    val selected = remember(tick) { app.keyboardSelected() }
+    val enabled = remember(tick) { app.keyboardEnabled() }
+    var text by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(300)
+        runCatching { focus.requestFocus() }
+    }
+    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp).navigationBarsPadding()) {
+        Text("Try Voxa", style = Type.L, color = c.text)
+        Spacer(Modifier.height(8.dp))
         Text(
-            text = if (allDone) "All set" else "Setup · $done of 2",
-            fontFamily = MonoFamily,
-            fontSize = 10.sp,
-            color = VoxaColors.Muted,
-            letterSpacing = 0.6.sp,
-        )
-        Text(
-            text = if (allDone) "Voxa is ready" else "Almost ready",
-            fontFamily = DisplayFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 18.sp,
-            letterSpacing = (-0.3).sp,
-            color = VoxaColors.Ink,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        Text(
-            text = if (allDone) {
-                "Tap a text field in any app, switch to Voxa, and hold to talk."
-            } else {
-                "${2 - done} step left before you can dictate in other apps."
+            when {
+                !enabled -> "Turn on the Voxa keyboard first, then come back here."
+                !selected -> "Switch to the Voxa keyboard, then tap the mic and say a sentence."
+                else -> "Tap the mic below and say a sentence. Tap it again when you're done."
             },
-            fontSize = 13.sp,
-            color = VoxaColors.Muted,
-            lineHeight = 18.sp,
-            modifier = Modifier.padding(top = 6.dp),
+            style = Type.M, color = c.text72,
         )
-
-        Spacer(Modifier.height(14.dp))
-        ChecklistItem(done = accountDone, label = "ChatGPT account linked")
-        Spacer(Modifier.height(10.dp))
-        ChecklistItem(done = keyboardDone, label = "Enable Voxa keyboard in system settings")
-
-        Spacer(Modifier.height(14.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!keyboardDone) {
-                PrimaryButton(text = "Enable keyboard", onClick = onEnableKeyboard)
-                Spacer(Modifier.width(10.dp))
-                GhostButton(text = "How to use →", onClick = onOpenTutorial)
-            } else {
-                GhostButton(text = "How to use →", onClick = onOpenTutorial)
-            }
+        Spacer(Modifier.height(16.dp))
+        VTextField(text, { text = it }, "Your words land here", Modifier.focusRequester(focus), singleLine = false, minHeight = 120.dp)
+        Spacer(Modifier.height(16.dp))
+        when {
+            !enabled -> PrimaryButton("Open keyboard settings") { activity.openKeyboardSettings() }
+            !selected -> PrimaryButton("Switch keyboard", icon = R.drawable.ic_keyboard) { activity.showKeyboardPicker() }
         }
-    }
-}
-
-@Composable
-private fun ChecklistItem(done: Boolean, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(18.dp)
-                .clip(CircleShape)
-                .background(if (done) VoxaColors.Success else VoxaColors.Surface)
-                .then(if (!done) Modifier.border(1.4.dp, Color(0xFFD9D6CF), CircleShape) else Modifier),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (done) {
-                Text("✓", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = label,
-            fontSize = 12.5.sp,
-            color = if (done) VoxaColors.Muted else VoxaColors.InkSoft,
-        )
-    }
-}
-
-@Composable
-private fun PrimaryButton(text: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(VoxaColors.Primary)
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 9.dp),
-    ) {
-        Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun GhostButton(text: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-    ) {
-        Text(text, color = VoxaColors.Primary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun NavTile(
-    modifier: Modifier = Modifier,
-    icon: ImageVector,
-    title: String,
-    sub: String,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(VoxaColors.Surface)
-            .border(1.dp, VoxaColors.Hair, RoundedCornerShape(14.dp))
-            .clickable { onClick() }
-            .padding(16.dp, 16.dp, 14.dp, 14.dp)
-            .heightIn(min = 108.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(VoxaColors.IconChip),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = VoxaColors.Ink,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = title,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 14.5.sp,
-            color = VoxaColors.Ink,
-            letterSpacing = (-0.1).sp,
-        )
-        Text(
-            text = sub,
-            fontSize = 11.5.sp,
-            color = VoxaColors.Muted,
-            lineHeight = 15.sp,
-            modifier = Modifier.padding(top = 2.dp),
-        )
     }
 }

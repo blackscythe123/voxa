@@ -1,0 +1,5 @@
+--------- beginning of main
+11-25 01:25:42.112  4368  4382 I VoxaTest: SPIKE rust/rustls session check: session=EXPIRED network=UP blocked=false
+11-25 01:25:42.435  4368  4382 I VoxaTest: SPIKE android/platform same request: status=200 content-type=application/json; charset=utf-8 cf-mitigated=null
+11-25 01:25:42.456  4368  4382 I VoxaTest: FFI coreVersion() = 0.4.4
+11-25 01:25:42.478  4368  4382 I VoxaTest: FFI cleanText -> Ask Claude Code.\nMail sam@example.com.

@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxa for Android: v5 app redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F7F3EC;      /* app background */
+    --wash: #EFE6DA;       /* tinted surfaces, chips */
+    --card: #FFFDF9;       /* raised surfaces */
+    --ink: #8F4C2C;        /* brand: the ink line, primary actions */
+    --ink-soft: #E9D5C6;   /* selected states */
+    --night: #1E1A17;      /* text */
+    --graphite: #6B625A;   /* secondary text */
+    --hair: #E2D8CB;       /* separators */
+    --leaf: #3F7A55;       /* ready / pasted */
+    --amber: #A9701B;      /* waiting */
+    --display: "Fraunces", Georgia, serif;
+    --body: "Figtree", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #DCD3C6; font-family: var(--body); color: var(--night); }
+  .sheet { max-width: 1500px; margin: 0 auto; padding: 48px 32px 80px; }
+  .intro { max-width: 720px; margin-bottom: 40px; }
+  .intro h1 { font-family: var(--display); font-weight: 600; font-size: 40px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .intro p { margin: 0 0 8px; color: #4A433D; line-height: 1.55; }
+  .row { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; margin-bottom: 56px; }
+  .shot { width: 360px; }
+  .shot h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .shot p.note { font-size: 13px; color: #5B534B; margin: 0 0 12px; line-height: 1.45; min-height: 38px; }
+
+  /* Phone */
+  .phone { width: 360px; height: 780px; border-radius: 36px; background: var(--paper); overflow: hidden; position: relative;
+           box-shadow: 0 0 0 10px #191512, 0 30px 60px rgba(40,25,10,.25); display: flex; flex-direction: column; }
+  .status { height: 32px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font-size: 13px; font-weight: 600; }
+  .status .dots { display: flex; gap: 5px; align-items: center; }
+  .status .dots i { width: 14px; height: 9px; border-radius: 2px; background: var(--night); opacity: .8; display: block; }
+  .screen { flex: 1; overflow: hidden; padding: 0 20px; display: flex; flex-direction: column; }
+  .nav { height: 72px; flex: none; display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card); border-top: 1px solid var(--hair); padding-bottom: 6px; }
+  .nav a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; color: var(--graphite); text-decoration: none; }
+  .nav a .pill { width: 56px; height: 30px; border-radius: 15px; display: grid; place-items: center; }
+  .nav a.on { color: var(--night); font-weight: 600; }
+  .nav a.on .pill { background: var(--ink-soft); color: var(--ink); }
+  svg.i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Shared pieces */
+  .appbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 6px; }
+  .wordmark { font-family: var(--display); font-weight: 600; font-size: 26px; letter-spacing: -0.02em; color: var(--night); }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #3B4A5A, #7C8A96); color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 14px; }
+  .title { font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: -0.015em; margin: 8px 0 14px; }
+  .sub { color: var(--graphite); font-size: 14px; line-height: 1.5; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 50px; padding: 0 22px; border-radius: 25px; font-weight: 600; font-size: 15px; border: 0; font-family: var(--body); }
+  .btn.primary { background: var(--ink); color: #fff; }
+  .btn.quiet { background: var(--wash); color: var(--night); }
+  .btn.block { width: 100%; }
+  .status-chip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; background: #E4EFE6; color: #24503A; font-size: 13px; font-weight: 600; }
+  .status-chip b { width: 8px; height: 8px; border-radius: 50%; background: var(--leaf); }
+
+  /* Ink line */
+  .ink { display: block; width: 100%; }
+  .ink path { fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Welcome */
+  .welcome { flex: 1; display: flex; flex-direction: column; justify-content: space-between; padding: 40px 4px 28px; }
+  .welcome .big { font-family: var(--display); font-weight: 600; font-size: 64px; letter-spacing: -0.035em; margin: 0; line-height: .95; }
+  .welcome h3 { font-family: var(--display); font-weight: 400; font-size: 28px; line-height: 1.2; margin: 26px 0 10px; letter-spacing: -0.01em; }
+
+  /* Setup */
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--hair); }
+  .step:last-child { border-bottom: 0; }
+  .num { width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--hair); display: grid; place-items: center; font-weight: 600; font-size: 14px; color: var(--graphite); }
+  .step.done .num { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+  .step.now .num { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .step h4 { margin: 4px 0 4px; font-size: 16px; font-weight: 600; }
+  .step p { margin: 0; font-size: 14px; color: var(--graphite); line-height: 1.45; }
+  .step .btn { margin-top: 12px; height: 42px; font-size: 14px; }
+
+  /* Home */
+  .pad { background: var(--night); color: #F3EADF; border-radius: 26px; padding: 18px 18px 16px; margin: 6px 0 18px; }
+  .pad .top { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #C9B9A8; }
+  .pad .field { margin: 14px 0 12px; font-family: var(--display); font-size: 21px; line-height: 1.3; color: #FBF5EC; min-height: 56px; }
+  .pad .field .caret { display: inline-block; width: 2px; height: 22px; background: #E2B48F; vertical-align: -4px; margin-left: 2px; }
+  .pad .ink path { stroke: #E2B48F; }
+  .pad .mic { width: 56px; height: 56px; border-radius: 50%; background: #E2B48F; color: var(--night); display: grid; place-items: center; flex: none; }
+  .pad .bottom { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+  .pad .hint { font-size: 13px; color: #C9B9A8; line-height: 1.4; }
+  .week { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 18px; }
+  .week .fig { font-family: var(--display); font-weight: 600; font-size: 34px; letter-spacing: -0.02em; line-height: 1; }
+  .week .lbl { font-size: 13px; color: var(--graphite); margin-top: 4px; }
+  .bars { flex: 1; display: flex; align-items: flex-end; gap: 6px; height: 46px; }
+  .bars i { flex: 1; border-radius: 3px 3px 1px 1px; background: var(--ink-soft); display: block; }
+  .bars i.t { background: var(--ink); }
+  .sec { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0 4px; }
+  .sec h5 { font-size: 15px; font-weight: 600; margin: 0; }
+  .sec a { font-size: 14px; color: var(--ink); font-weight: 600; text-decoration: none; }
+
+  /* Rows */
+  .rows { display: flex; flex-direction: column; }
+  .r { display: grid; grid-template-columns: 38px 1fr; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--hair); }
+  .r:last-child { border-bottom: 0; }
+  .app { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 15px; }
+  .wa { background: #25A85A; } .gm { background: #D44638; } .cg { background: #10A37F; } .sl { background: #4A154B; } .ch { background: #1A73E8; }
+  .r .meta { display: flex; justify-content: space-between; font-size: 13px; color: var(--graphite); margin-bottom: 3px; }
+  .r .meta b { color: var(--night); font-weight: 600; }
+  .r .txt { font-size: 14.5px; line-height: 1.42; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tag { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 10px; }
+  .tag.wait { background: #F6E7CC; color: #7A4F0E; }
+  .tag.not { background: var(--wash); color: #5B4636; }
+
+  /* History */
+  .search { height: 46px; border-radius: 23px; background: var(--wash); display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--graphite); font-size: 15px; margin-bottom: 12px; }
+  .chips { display: flex; gap: 8px; margin-bottom: 6px; overflow: hidden; }
+  .chip { height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--hair); display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 500; white-space: nowrap; background: var(--card); }
+  .chip.on { background: var(--night); color: #fff; border-color: var(--night); }
+  .day { font-size: 13px; font-weight: 600; color: var(--graphite); margin: 14px 0 0; }
+
+  /* Detail */
+  .back { display: flex; align-items: center; gap: 6px; color: var(--night); font-size: 15px; padding: 10px 0; }
+  .dhead { display: flex; gap: 12px; align-items: center; margin: 4px 0 16px; }
+  .dhead .app { width: 46px; height: 46px; border-radius: 14px; font-size: 18px; }
+  .dhead h4 { margin: 0; font-size: 18px; font-weight: 600; }
+  .dhead span { font-size: 13px; color: var(--graphite); }
+  .quote { font-family: var(--display); font-size: 22px; line-height: 1.38; letter-spacing: -0.005em; margin: 0 0 18px; }
+  .player { background: var(--card); border: 1px solid var(--hair); border-radius: 20px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .play { width: 42px; height: 42px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; flex: none; }
+  .player .t { font-size: 12px; color: var(--graphite); width: 34px; text-align: right; }
+  .acts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .act { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12.5px; color: var(--night); }
+  .act .c { width: 52px; height: 52px; border-radius: 18px; background: var(--wash); display: grid; place-items: center; }
+  .act.del { color: #9B2C1F; }
+  .act.del .c { background: #F6E1DC; }
+
+  /* Words */
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--wash); border-radius: 20px; padding: 4px; margin-bottom: 14px; }
+  .seg span { text-align: center; padding: 9px 0; font-size: 14px; font-weight: 600; color: var(--graphite); border-radius: 16px; }
+  .seg span.on { background: var(--card); color: var(--night); box-shadow: 0 1px 2px rgba(60,40,20,.12); }
+  .pair { display: grid; grid-template-columns: 1fr 22px 1fr; align-items: center; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--hair); font-size: 15px; }
+  .pair .from { color: var(--graphite); text-decoration: line-through; text-decoration-color: rgba(143,76,44,.45); }
+  .pair .to { font-weight: 600; }
+  .pair svg { color: var(--ink); }
+  .fab { position: absolute; right: 20px; bottom: 92px; height: 54px; padding: 0 20px; border-radius: 18px; background: var(--ink); color: #fff; display: flex; align-items: center; gap: 8px; font-weight: 600; box-shadow: 0 8px 20px rgba(143,76,44,.35); }
+  .hintbox { background: var(--wash); border-radius: 18px; padding: 14px; font-size: 13.5px; line-height: 1.5; color: #4A3D33; margin-top: 14px; }
+
+  /* You */
+  .acct { display: flex; gap: 14px; align-items: center; padding: 4px 0 16px; }
+  .acct .avatar { width: 54px; height: 54px; font-size: 20px; }
+  .acct h4 { margin: 0; font-size: 18px; } .acct span { font-size: 13.5px; color: var(--graphite); }
+  .plan { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; background: #E4EFE6; color: #24503A; padding: 3px 9px; border-radius: 10px; }
+  .group { margin-bottom: 14px; }
+  .group h6 { font-size: 13px; font-weight: 600; color: var(--graphite); margin: 6px 0 4px; }
+  .set { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--hair); }
+  .set:last-child { border-bottom: 0; }
+  .set b { display: block; font-weight: 600; font-size: 15px; }
+  .set span { font-size: 13px; color: var(--graphite); }
+  .sw { width: 46px; height: 28px; border-radius: 14px; background: #D6CCBF; position: relative; }
+  .sw::after { content: ""; position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+  .sw.on { background: var(--ink); } .sw.on::after { left: 22px; }
+  .val { font-size: 14px; color: var(--ink); font-weight: 600; }
+
+  /* Keyboard */
+  .chat { flex: 1; background: #EDE4D9; padding: 14px 14px 10px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; }
+  .bub { max-width: 78%; padding: 9px 12px; border-radius: 16px; font-size: 14px; line-height: 1.4; background: #fff; }
+  .bub.me { align-self: flex-end; background: #DCF3D2; }
+  .compose { background: #fff; border-radius: 22px; padding: 11px 14px; font-size: 14.5px; color: var(--night); margin-top: 4px; }
+  .compose .caret { display: inline-block; width: 2px; height: 17px; background: var(--ink); vertical-align: -3px; }
+  .kb { background: var(--paper); border-top: 1px solid var(--hair); padding: 12px 14px 10px; height: 300px; display: flex; flex-direction: column; }
+  .kb .line1 { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--graphite); }
+  .kb .line1 b { color: var(--night); font-size: 15px; font-weight: 600; }
+  .kb .stage { flex: 1; display: flex; align-items: center; gap: 12px; }
+  .kb .bigmic { width: 86px; height: 86px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; flex: none; box-shadow: 0 0 0 10px rgba(143,76,44,.13); }
+  .kb .bigmic svg.i { width: 32px; height: 32px; }
+  .kb .keys { display: grid; grid-template-columns: 52px 1fr 52px 52px; gap: 8px; }
+  .kb .k { height: 46px; border-radius: 14px; background: var(--card); border: 1px solid var(--hair); display: grid; place-items: center; color: var(--night); font-size: 13px; }
+  .kb.dark { background: #1C1815; border-color: #2C2621; color: #EFE6DA; }
+  .kb.dark .line1, .kb.dark .line1 b { color: #EFE6DA; }
+  .kb.dark .line1 span { color: #A99886; }
+  .kb.dark .k { background: #2A241F; border-color: #362F28; color: #EFE6DA; }
+  .kb.dark .ink path { stroke: #E2B48F; }
+  .kb.dark .bigmic { background: #E2B48F; color: #1C1815; box-shadow: 0 0 0 10px rgba(226,180,143,.15); }
+
+  /* Launch: the ink line draws itself, the wordmark settles above it, then Home takes over.
+     Loops here for the preview; in the app it plays once (about 0.9 s) and is skipped when the
+     phone's animations are off. */
+  .launch { position: relative; flex: 1; display: grid; place-items: center; }
+  .launch .mark { position: absolute; top: 300px; left: 0; right: 0; text-align: center;
+                  font-family: var(--display); font-weight: 600; font-size: 56px; letter-spacing: -0.035em; color: var(--night);
+                  opacity: 0; transform: translateY(10px); animation: mark 4s ease-out infinite; }
+  .launch svg { position: absolute; top: 380px; left: 30px; width: 300px; }
+  .launch svg path { fill: none; stroke: var(--ink); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
+                     stroke-dasharray: 640; stroke-dashoffset: 640; animation: draw 4s cubic-bezier(.6,.05,.3,1) infinite; }
+  .launch .home-peek { position: absolute; inset: 0; background: var(--paper); opacity: 0; animation: handoff 4s ease-in infinite; }
+  @keyframes draw { 0% { stroke-dashoffset: 640; } 22% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 0; } }
+  @keyframes mark { 0%, 14% { opacity: 0; transform: translateY(10px); } 30% { opacity: 1; transform: none; } 100% { opacity: 1; transform: none; } }
+  @keyframes handoff { 0%, 62% { opacity: 0; } 78%, 100% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .launch svg path { animation: none; stroke-dashoffset: 0; }
+    .launch .mark { animation: none; opacity: 1; transform: none; }
+    .launch .home-peek { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="intro">
+    <h1>Voxa for Android, redesigned</h1>
+    <p>Same brand as the desktop app (paper, sepia ink, the Fraunces wordmark), rebuilt as a real phone app: four tabs at the bottom, one clear job per screen, and the ink line Voxa draws while you talk as the one signature element.</p>
+    <p>Everything the current app does is here: setup, sign-in, the keyboard, History with playback, copy, edit, send again and delete, Words, every setting, and a week of numbers. The keyboard itself gets the same look, in light and dark.</p>
+  </div>
+
+  <!-- Row 0: launch -->
+  <div class="row">
+    <div class="shot">
+      <h2>Opening the app</h2>
+      <p class="note">One moment, under a second: the ink line writes itself, the wordmark settles, Home takes over. Loops here so you can watch it.</p>
+      <div class="phone">
+        <div class="status"><span>9:40</span><span class="dots"><i></i><i></i></span></div>
+        <div class="launch">
+          <div class="mark">voxa</div>
+          <svg viewBox="0 0 300 80"><path d="M0 40 L46 40 L54 24 L62 58 L70 14 L78 66 L86 32 L94 48 L102 40 L150 40 L158 28 L166 54 L174 20 L182 60 L190 36 L198 44 L206 40 L300 40"/></svg>
+          <div class="home-peek"></div>
+        </div>
+      </div>
+    </div>
+    <div class="shot" style="width:420px">
+      <h2>How it's built</h2>
+      <p class="note" style="min-height:0">Android 12 and newer show the app icon first (the system splash screen). Voxa then draws its own line on the same paper colour, so the handover is seamless, and the line ends where Home's practice pad begins.</p>
+      <p class="note" style="min-height:0">It plays on a cold start only, never when you come back to an open app, and it's skipped when Android's "Remove animations" setting is on. It's a single vector path, so it adds nothing to the app's size or memory.</p>
+    </div>
+  </div>
+
+  <!-- Row 1: onboarding -->
+  <div class="row">
+    <div class="shot">
+      <h2>Welcome</h2>
+      <p class="note">First launch. The ink line draws itself once, then rests.</p>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="welcome">
+            <div>
+              <p class="big">voxa</p>
+              <svg class="ink" viewBox="0 0 320 90" style="margin-top:28px"><path d="M0 45 L40 45 L48 30 L56 62 L64 20 L72 70 L80 38 L88 52 L96 45 L130 45 L136 34 L142 58 L148 26 L154 66 L160 40 L166 50 L172 45 L214 45 L220 28 L226 64 L232 18 L238 72 L244 36 L250 54 L256 45 L320 45"/></svg>
+              <h3>Talk instead of typing, in any app.</h3>
+              <p class="sub">Your words are written by your own ChatGPT account and put where you're typing: chats, email, notes.</p>
+            </div>
+            <div>
+              <button class="btn primary block">Get started</button>
+              <p class="sub" style="text-align:center;margin-top:12px;font-size:13px">Takes about a minute</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Setup</h2>
+      <p class="note">A real sequence, so numbered. Each step checks itself when you come back.</p>
+      <div class="phone">
+        <div class="status"><span>9:42</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="title" style="margin-top:22px">Set up Voxa</div>
+          <ol class="steps">
+            <li class="step done"><div class="num"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M5 12.5 10 17 19 7"/></svg></div><div><h4>Sign in to ChatGPT</h4><p>Signed in as Sam Samuel</p></div></li>
+            <li class="step done"><div class="num"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M5 12.5 10 17 19 7"/></svg></div><div><h4>Allow the microphone</h4><p>Voxa only listens while you hold or tap the mic.</p></div></li>
+            <li class="step now"><div class="num">3</div><div><h4>Turn on the Voxa keyboard</h4><p>Android will warn that keyboards can read what you type. Voxa only sends what you say.</p><button class="btn primary">Open keyboard settings</button></div></li>
+            <li class="step"><div class="num">4</div><div><h4>Try it once</h4><p>Switch to Voxa in a text box and say a sentence.</p></div></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Home</h2>
+      <p class="note">The practice pad is the hero: a real text box, so you can check the keyboard any time without leaving the app.</p>
+      <div class="phone">
+        <div class="status"><span>9:45</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="appbar"><span class="wordmark">voxa</span><span class="avatar">S</span></div>
+          <span class="status-chip"><b></b>Ready to dictate</span>
+          <div class="pad">
+            <div class="top"><span>Try it here</span><span>Voxa keyboard on</span></div>
+            <div class="field">Running ten minutes late, start without me<span class="caret"></span></div>
+            <div class="bottom">
+              <span class="mic"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+              <svg class="ink" viewBox="0 0 220 40"><path d="M0 20 L30 20 L36 10 L42 30 L48 6 L54 34 L60 16 L66 24 L72 20 L110 20 L116 12 L122 28 L128 9 L134 31 L140 18 L146 22 L152 20 L220 20"/></svg>
+            </div>
+          </div>
+          <div class="week">
+            <div><div class="fig">4,611</div><div class="lbl">words this week</div></div>
+            <div class="bars"><i style="height:30%"></i><i style="height:8%"></i><i style="height:34%"></i><i style="height:5%"></i><i style="height:82%"></i><i style="height:16%"></i><i class="t" style="height:96%"></i></div>
+          </div>
+          <div class="sec"><h5>Recent</h5><a>See all</a></div>
+          <div class="rows">
+            <div class="r"><span class="app wa">W</span><div><div class="meta"><b>WhatsApp</b><span>9:31</span></div><div class="txt">Hello, yeah. So this is actually from the Voxa application by the way.</div></div></div>
+            <div class="r"><span class="app gm">M</span><div><div class="meta"><b>Gmail</b><span>8:12</span></div><div class="txt">Thanks for sending the draft over, I'll read it tonight and come back with notes.</div></div></div>
+          </div>
+        </div>
+        <nav class="nav">
+          <a class="on"><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg></span>Home</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>History</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"/><path d="M9 10h6M9 14h6"/></svg></span>Words</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="9" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span>You</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: history -->
+  <div class="row">
+    <div class="shot">
+      <h2>History</h2>
+      <p class="note">Grouped by day, filters as chips, anything waiting stands out on its own.</p>
+      <div class="phone">
+        <div class="status"><span>9:46</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="title">History</div>
+          <div class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>Search what you said</div>
+          <div class="chips"><span class="chip on">All</span><span class="chip">Not pasted</span><span class="chip">Not sent</span><span class="chip">WhatsApp</span></div>
+          <div class="day">Today</div>
+          <div class="rows">
+            <div class="r"><span class="app wa">W</span><div><div class="meta"><b>WhatsApp</b><span>9:31</span></div><div class="txt">Hello, yeah. So this is actually from the Voxa application by the way.</div></div></div>
+            <div class="r"><span class="app cg">C</span><div><div class="meta"><b>ChatGPT</b><span>9:02</span></div><div class="txt">Summarise this article in three bullet points and keep the numbers exact.</div><span class="tag wait">Sends when you're back online</span></div></div>
+          </div>
+          <div class="day">Yesterday</div>
+          <div class="rows">
+            <div class="r"><span class="app sl">S</span><div><div class="meta"><b>Slack</b><span>18:40</span></div><div class="txt">Shipping the Android build tonight, the keyboard is about five megabytes now.</div><span class="tag not">Not pasted</span></div></div>
+            <div class="r"><span class="app gm">M</span><div><div class="meta"><b>Gmail</b><span>11:05</span></div><div class="txt">Hi Priya, attaching the invoice for November, let me know if anything looks off.</div></div></div>
+          </div>
+        </div>
+        <nav class="nav">
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg></span>Home</a>
+          <a class="on"><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>History</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"/><path d="M9 10h6M9 14h6"/></svg></span>Words</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="9" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span>You</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>A dictation</h2>
+      <p class="note">The text reads like writing, the recording plays along the ink line, and the actions are one tap.</p>
+      <div class="phone">
+        <div class="status"><span>9:47</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="back"><svg class="i" viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg>History</div>
+          <div class="dhead"><span class="app wa">W</span><div><h4>WhatsApp</h4><span>Today at 9:31, 12 seconds, pasted</span></div></div>
+          <p class="quote">Hello, yeah. So this is actually from the Voxa application by the way.</p>
+          <div class="player">
+            <span class="play"><svg class="i" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span>
+            <svg class="ink" viewBox="0 0 200 40"><path d="M0 20 L20 20 L26 8 L32 32 L38 12 L44 28 L50 20 L80 20 L86 6 L92 34 L98 14 L104 26 L110 20 L140 20 L146 11 L152 29 L158 16 L164 24 L170 20 L200 20" style="opacity:.35"/><path d="M0 20 L20 20 L26 8 L32 32 L38 12 L44 28 L50 20 L80 20 L86 6"/></svg>
+            <span class="t">0:05</span>
+          </div>
+          <div class="acts">
+            <div class="act"><span class="c"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg></span>Copy</div>
+            <div class="act"><span class="c"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></span>Edit</div>
+            <div class="act"><span class="c"><svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg></span>Write again</div>
+            <div class="act del"><span class="c"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M7 7l1 13h8l1-13M9 7V4h6v3"/></svg></span>Delete</div>
+          </div>
+          <div class="hintbox">Edited a name ChatGPT got wrong? Voxa offers to fix it every time from now on.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Words</h2>
+      <p class="note">Fixes, snippets and spoken formatting in one place, shown as what Voxa hears and what it writes.</p>
+      <div class="phone">
+        <div class="status"><span>9:48</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="title">Words</div>
+          <div class="seg"><span class="on">Fixes</span><span>Snippets</span><span>Formatting</span></div>
+          <p class="sub" style="margin:0 0 4px">When ChatGPT writes the left side, Voxa writes the right.</p>
+          <div class="pair"><span class="from">clawed code</span><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="to">Claude Code</span></div>
+          <div class="pair"><span class="from">Simian</span><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="to">Simiyon</span></div>
+          <div class="pair"><span class="from">vox a</span><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="to">Voxa</span></div>
+          <div class="hintbox">Say "new line" or "new paragraph" and Voxa breaks the line for you. Turn it off under Formatting.</div>
+        </div>
+        <span class="fab"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add a fix</span>
+        <nav class="nav">
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg></span>Home</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>History</a>
+          <a class="on"><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"/><path d="M9 10h6M9 14h6"/></svg></span>Words</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="9" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span>You</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 3: you + keyboard -->
+  <div class="row">
+    <div class="shot">
+      <h2>You</h2>
+      <p class="note">Account, keyboard health, how dictation behaves, and privacy. Every setting from today's app, grouped by what it's about.</p>
+      <div class="phone">
+        <div class="status"><span>9:49</span><span class="dots"><i></i><i></i></span></div>
+        <div class="screen">
+          <div class="acct" style="margin-top:14px"><span class="avatar">S</span><div><h4>Sam Samuel</h4><span>ChatGPT account</span><br><span class="plan">ChatGPT Go</span></div></div>
+          <div class="group"><h6>Keyboard</h6>
+            <div class="set"><div><b>Voxa keyboard</b><span>On, and your current keyboard</span></div><span class="val">Change</span></div>
+          </div>
+          <div class="group"><h6>Dictation</h6>
+            <div class="set"><div><b>Hold to talk</b><span>Hold the mic, let go to finish</span></div><span class="sw on"></span></div>
+            <div class="set"><div><b>Remove filler words</b><span>Takes out "um" and "uh"</span></div><span class="sw"></span></div>
+            <div class="set"><div><b>Vibrate on tap</b><span>A light tap on each key</span></div><span class="sw on"></span></div>
+          </div>
+          <div class="group"><h6>Privacy</h6>
+            <div class="set"><div><b>Keep history</b><span>Text and recordings stay on this phone</span></div><span class="val">30 days</span></div>
+            <div class="set"><div><b>Delete history</b><span>212 dictations, 18 MB</span></div><span class="val" style="color:#9B2C1F">Delete all</span></div>
+          </div>
+        </div>
+        <nav class="nav">
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg></span>Home</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>History</a>
+          <a><span class="pill"><svg class="i" viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"/><path d="M9 10h6M9 14h6"/></svg></span>Words</a>
+          <a class="on"><span class="pill"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="9" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span>You</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>The keyboard, listening</h2>
+      <p class="note">Inside WhatsApp. One big mic, the ink line moving with your voice, and only the keys you need.</p>
+      <div class="phone">
+        <div class="status"><span>9:50</span><span class="dots"><i></i><i></i></span></div>
+        <div class="chat">
+          <div class="bub">Are you coming tonight?</div>
+          <div class="bub me">Yes, leaving now</div>
+          <div class="bub">Can you pick up the cake on the way</div>
+          <div class="compose">Sure, I'll get it<span class="caret"></span></div>
+        </div>
+        <div class="kb">
+          <div class="line1"><b>Listening</b><span>0:04</span></div>
+          <div class="stage">
+            <svg class="ink" viewBox="0 0 160 70" style="flex:1"><path d="M0 35 L18 35 L24 18 L30 54 L36 10 L42 60 L48 26 L54 44 L60 35 L84 35 L90 22 L96 50 L102 14 L108 56 L114 30 L120 40 L126 35 L160 35"/></svg>
+            <span class="bigmic"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg></span>
+          </div>
+          <div class="keys">
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg></span>
+            <span class="k">Tap the square to stop, or let go if you're holding</span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11v12H9l-6-6z"/><path d="m12 10 4 4m0-4-4 4"/></svg></span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M19 6v6H6M10 8l-4 4 4 4"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>The keyboard, ready (dark)</h2>
+      <p class="note">Follows the phone's dark mode. When there's nowhere to listen (a call, a password box) it says so here.</p>
+      <div class="phone" style="background:#141110">
+        <div class="status" style="color:#EFE6DA"><span>21:14</span><span class="dots"><i style="background:#EFE6DA"></i><i style="background:#EFE6DA"></i></span></div>
+        <div class="chat" style="background:#0F0D0B">
+          <div class="bub" style="background:#24201C;color:#EFE6DA">Did the build go out?</div>
+          <div class="bub me" style="background:#1F3B2A;color:#E3F3E6">Yes, 0.2.1 is live</div>
+          <div class="compose" style="background:#24201C;color:#EFE6DA"><span class="caret" style="background:#E2B48F"></span></div>
+        </div>
+        <div class="kb dark">
+          <div class="line1"><b>Ready to dictate</b><span>Gmail</span></div>
+          <div class="stage">
+            <svg class="ink" viewBox="0 0 160 70" style="flex:1"><path d="M0 35 L160 35" style="opacity:.5"/></svg>
+            <span class="bigmic"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+          </div>
+          <div class="keys">
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg></span>
+            <span class="k">space</span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11v12H9l-6-6z"/><path d="m12 10 4 4m0-4-4 4"/></svg></span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M19 6v6H6M10 8l-4 4 4 4"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

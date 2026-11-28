@@ -1,36 +1,37 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <!-- Bluetooth headset mic routing -->
-    <uses-permission android:name="android.permission.BLUETOOTH"
-        android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <uses-feature
-        android:name="android.hardware.microphone"
-        android:required="true" />
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
+    <!-- History shows the real icon of the apps you dictate into: launchable apps only. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <!-- The session (cookies) must never leave the phone: no cloud backup, no device transfer. -->
     <application
         android:name=".VoxaApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Voxa"
-        android:networkSecurityConfig="@xml/network_security_config"
-        tools:replace="android:name,android:label,android:icon,android:roundIcon,android:theme,android:allowBackup,android:supportsRtl">
+        android:theme="@style/Theme.Voxa">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Voxa.Splash"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Voxa.Starting"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -38,33 +39,30 @@
             </intent-filter>
         </activity>
 
-        <!-- Voxa Voice IME — voice-only dictation keyboard -->
+        <!-- Shares the diagnostics zip (Settings, Share diagnostics). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- The Voxa voice keyboard. Same process as the app, so they share the core. -->
+
         <service
-            android:name=".service.VoxaInputMethod"
-            android:label="@string/ime_label_voice"
+            android:name=".ime.VoxaKeyboard"
             android:exported="true"
+            android:label="@string/ime_label"
             android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>
                 <action android:name="android.view.InputMethod" />
             </intent-filter>
             <meta-data
                 android:name="android.view.im"
-                android:resource="@xml/method_voice" />
+                android:resource="@xml/method" />
         </service>
-
-        <!-- Voxa QWERTY + mic IME removed in favour of the HeliBoard-derived IME
-             registered automatically by the :keyboard library
-             (`helium314.keyboard.latin.LatinIME`). See git tag `pre-heliboard-cleanup`
-             for the previous home-grown Compose keyboard. -->
-
-        <receiver
-            android:name=".receiver.BootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-
     </application>
-
 </manifest>

@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxa for Android: v6</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  /* 60 / 30 / 10: neutral base, near-black text, Voxa sepia only for the mic and primary actions. */
+  :root {
+    --base: #FFFFFF;
+    --surface: #F3F3F1;
+    --text: 20, 20, 20;          /* rgb, used at 100 / 72 / 56 % */
+    --accent: #8F4C2C;
+    --accent-5: rgba(143, 76, 44, .06);
+    --accent-12: rgba(143, 76, 44, .12);
+    --good: #1F9D55;
+    --warn: #B26B00;
+    --shadow: 0 8px 24px rgba(60, 40, 25, .08), 0 1px 2px rgba(60, 40, 25, .06);
+    /* 4 sizes, 2 weights */
+    --s-xl: 32px; --s-l: 20px; --s-m: 16px; --s-s: 13px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #E9E9E6; font-family: "Manrope", system-ui, sans-serif; color: rgb(var(--text)); -webkit-font-smoothing: antialiased; }
+  .sheet { max-width: 1520px; margin: 0 auto; padding: 48px 32px 96px; }
+  .intro { max-width: 680px; margin-bottom: 48px; }
+  .intro h1 { font-size: var(--s-xl); font-weight: 700; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .intro p { margin: 0 0 8px; font-size: var(--s-m); font-weight: 500; color: rgba(var(--text), .72); line-height: 1.55; }
+  .row { display: flex; flex-wrap: wrap; gap: 48px; margin-bottom: 64px; }
+  .shot { width: 375px; }
+  .shot h2 { font-size: var(--s-m); font-weight: 700; margin: 0 0 4px; }
+  .shot p { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); margin: 0 0 16px; line-height: 1.45; min-height: 38px; }
+
+  .phone { width: 375px; height: 812px; border-radius: 40px; background: var(--base); overflow: hidden; position: relative;
+           box-shadow: 0 0 0 10px #161616, 0 32px 64px rgba(0,0,0,.18); display: flex; flex-direction: column; }
+  .sb { height: 44px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 24px; font-size: var(--s-s); font-weight: 700; }
+  .sb i { display: inline-block; width: 16px; height: 10px; border-radius: 3px; background: rgb(var(--text)); margin-left: 4px; opacity: .85; }
+  .body { flex: 1; overflow: hidden; padding: 8px 24px 0; display: flex; flex-direction: column; }
+  .tabs { height: 80px; flex: none; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid rgba(var(--text), .06); background: var(--base); }
+  .tabs a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; font-weight: 500; color: rgba(var(--text), .56); }
+  .tabs a.on { color: rgb(var(--text)); font-weight: 700; }
+  .tabs a.on svg { color: var(--accent); }
+  svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  .h1 { font-size: var(--s-xl); font-weight: 700; letter-spacing: -0.025em; margin: 8px 0 24px; }
+  .muted { color: rgba(var(--text), .56); font-weight: 500; }
+  .row-between { display: flex; justify-content: space-between; align-items: center; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="%23384656"/><circle cx="20" cy="16" r="7" fill="%23d9c3b0"/><path d="M6 40c2-9 8-13 14-13s12 4 14 13z" fill="%23222b35"/></svg>') center/cover; flex: none; }
+  .btn { height: 56px; border-radius: 16px; border: 0; font-family: inherit; font-size: var(--s-m); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+  .btn.primary { background: var(--accent); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 8px 20px rgba(143,76,44,.25); }
+  .btn.secondary { background: var(--accent-5); color: var(--accent); border: 1px solid var(--accent-12); }
+  .card { background: var(--base); border-radius: 24px; box-shadow: var(--shadow); }
+
+  /* App badges: real brand colours with a simple glyph, consistent everywhere. */
+  .app { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; flex: none; }
+  .app svg { width: 22px; height: 22px; fill: #fff; stroke: none; }
+  .wa { background: #25D366; } .gm { background: #EA4335; } .gpt { background: #0F0F0F; } .sl { background: #4A154B; } .tg { background: #2AABEE; }
+
+  /* Launch */
+  .launch { flex: 1; display: grid; place-items: center; background: var(--base); position: relative; }
+  .launch .icon { width: 96px; height: 96px; border-radius: 28px; background: var(--accent); display: grid; place-items: center; box-shadow: 0 16px 40px rgba(143,76,44,.35); animation: pop 3.2s ease-out infinite; }
+  .launch .icon svg { width: 64px; height: 40px; }
+  .launch .icon path { fill: none; stroke: #fff; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 160; stroke-dashoffset: 160; animation: draw 3.2s ease-out infinite; }
+  .launch .name { position: absolute; top: 470px; font-size: var(--s-l); font-weight: 700; letter-spacing: -0.01em; opacity: 0; animation: name 3.2s ease-out infinite; }
+  @keyframes pop { 0% { transform: scale(.86); opacity: 0; } 12% { transform: scale(1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes draw { 0%, 10% { stroke-dashoffset: 160; } 32%, 100% { stroke-dashoffset: 0; } }
+  @keyframes name { 0%, 26% { opacity: 0; transform: translateY(8px); } 40%, 100% { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .launch .icon, .launch .icon path, .launch .name { animation: none; opacity: 1; stroke-dashoffset: 0; transform: none; } }
+
+  /* Setup */
+  .progress { height: 4px; border-radius: 2px; background: var(--surface); margin: 8px 0 32px; }
+  .progress b { display: block; height: 100%; width: 66%; border-radius: 2px; background: var(--accent); }
+  .perm { flex: 1; display: flex; flex-direction: column; }
+  .perm .art { height: 232px; border-radius: 24px; background: var(--surface); display: grid; place-items: center; margin-bottom: 32px; position: relative; overflow: hidden; }
+  .kbmini { width: 220px; background: var(--base); border-radius: 16px; box-shadow: var(--shadow); padding: 16px; }
+  .kbmini .w { height: 32px; display: flex; align-items: center; gap: 3px; justify-content: center; margin-bottom: 12px; }
+  .kbmini .w i { width: 3px; border-radius: 2px; background: var(--accent); display: block; }
+  .kbmini .m { width: 48px; height: 48px; border-radius: 50%; background: var(--accent); margin: 0 auto; display: grid; place-items: center; color: #fff; }
+  .perm h3 { font-size: var(--s-l); font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .perm p { font-size: var(--s-m); font-weight: 500; color: rgba(var(--text), .72); line-height: 1.5; margin: 0 0 16px; }
+  .checks { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+  .chk { display: flex; align-items: center; gap: 12px; font-size: var(--s-m); font-weight: 500; }
+  .chk b { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--good); color: #fff; flex: none; }
+  .chk b svg { width: 14px; height: 14px; stroke-width: 2.6; }
+  .chk.todo b { background: var(--surface); color: rgba(var(--text), .4); }
+  .cta { margin-top: auto; padding-bottom: 32px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* Home */
+  .hello { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); }
+  .ready { display: inline-flex; align-items: center; gap: 8px; font-size: var(--s-s); font-weight: 700; color: var(--good); }
+  .ready b { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(31,157,85,.15); }
+  .stats { padding: 24px; margin: 24px 0 16px; }
+  .stats .big { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stats .lbl { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); margin-top: 8px; }
+  .stats .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(var(--text), .06); }
+  .stats .pair b { display: block; font-size: var(--s-l); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stats .pair span { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); }
+  .spark { display: flex; align-items: flex-end; gap: 8px; height: 48px; margin-top: 16px; }
+  .spark i { flex: 1; border-radius: 6px; background: var(--accent-12); display: block; }
+  .spark i.t { background: var(--accent); }
+  .sect { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 8px; }
+  .sect b { font-size: var(--s-m); font-weight: 700; }
+  .sect a { font-size: var(--s-s); font-weight: 700; color: var(--accent); }
+  .item { display: flex; gap: 12px; padding: 12px 0; }
+  .item .t { flex: 1; min-width: 0; }
+  .item .top { display: flex; justify-content: space-between; font-size: var(--s-s); }
+  .item .top b { font-weight: 700; }
+  .item .top span { font-weight: 500; color: rgba(var(--text), .56); }
+  .item .x { font-size: var(--s-m); font-weight: 500; color: rgba(var(--text), .72); line-height: 1.4; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 8px; }
+  .pill.warn { background: rgba(178,107,0,.1); color: var(--warn); }
+  .pill.copy { background: var(--accent-5); color: var(--accent); }
+  .fabmic { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); height: 56px; padding: 0 24px; border-radius: 28px; background: var(--accent); color: #fff; display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--s-m); box-shadow: 0 12px 28px rgba(143,76,44,.35), inset 0 1px 0 rgba(255,255,255,.2); }
+
+  /* Search */
+  .search { height: 48px; border-radius: 16px; background: var(--surface); display: flex; align-items: center; gap: 8px; padding: 0 16px; font-size: var(--s-m); font-weight: 500; color: rgba(var(--text), .56); margin-bottom: 24px; }
+  .search.focus { background: var(--base); box-shadow: 0 0 0 2px var(--accent); color: rgb(var(--text)); }
+  .label { font-size: var(--s-s); font-weight: 700; margin: 0 0 12px; }
+  .recent { display: flex; flex-direction: column; margin-bottom: 24px; }
+  .recent div { display: flex; align-items: center; gap: 12px; padding: 12px 0; font-size: var(--s-m); font-weight: 500; }
+  .recent svg { color: rgba(var(--text), .4); }
+  .apps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .apps div { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; }
+  .apps .app { width: 56px; height: 56px; border-radius: 16px; }
+  .apps .app svg { width: 28px; height: 28px; }
+  .apps .n { color: rgba(var(--text), .56); }
+
+  /* Detail */
+  .back { display: flex; align-items: center; gap: 8px; height: 48px; font-size: var(--s-m); font-weight: 700; }
+  .dmeta { display: flex; align-items: center; gap: 12px; margin: 8px 0 24px; }
+  .dmeta b { font-size: var(--s-m); font-weight: 700; display: block; }
+  .dmeta span { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); }
+  .said { font-size: var(--s-l); font-weight: 500; line-height: 1.5; letter-spacing: -0.005em; margin: 0 0 24px; }
+  .player { padding: 16px; display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+  .play { width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; flex: none; }
+  .wave { flex: 1; display: flex; align-items: center; gap: 3px; height: 40px; }
+  .wave i { flex: 1; border-radius: 2px; background: rgba(var(--text), .16); display: block; }
+  .wave i.p { background: var(--accent); }
+  .player .time { font-size: var(--s-s); font-weight: 700; font-variant-numeric: tabular-nums; color: rgba(var(--text), .56); }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .act { height: 72px; border-radius: 16px; background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: var(--s-s); font-weight: 700; }
+  .bottombar { margin-top: auto; padding: 16px 0 32px; display: flex; gap: 12px; }
+  .bottombar .btn { flex: 1; }
+  .delete { width: 56px; flex: none; height: 56px; border-radius: 16px; background: rgba(200,40,30,.08); color: #C8281E; display: grid; place-items: center; }
+
+  /* Words */
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--surface); border-radius: 16px; padding: 4px; margin-bottom: 24px; }
+  .seg span { text-align: center; height: 40px; line-height: 40px; font-size: var(--s-s); font-weight: 700; color: rgba(var(--text), .56); border-radius: 12px; }
+  .seg span.on { background: var(--base); color: rgb(var(--text)); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .fix { padding: 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .fix .heard { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); }
+  .fix .heard s { text-decoration-color: rgba(200,40,30,.5); }
+  .fix .wrote { font-size: var(--s-m); font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .fix .wrote svg { color: var(--good); width: 18px; height: 18px; stroke-width: 2.4; }
+  .fix .used { font-size: 12px; font-weight: 500; color: rgba(var(--text), .56); }
+
+  /* Settings */
+  .profile { padding: 16px; display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+  .profile .avatar { width: 56px; height: 56px; }
+  .profile b { font-size: var(--s-m); font-weight: 700; display: block; }
+  .profile span { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); }
+  .plan { margin-left: auto; font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 8px; background: rgba(31,157,85,.1); color: var(--good); }
+  .group { margin-bottom: 16px; padding: 4px 16px; }
+  .opt { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(var(--text), .06); }
+  .opt:last-child { border-bottom: 0; }
+  .opt .ic { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-5); color: var(--accent); display: grid; place-items: center; flex: none; }
+  .opt .ic svg { width: 20px; height: 20px; }
+  .opt .t { flex: 1; font-size: var(--s-m); font-weight: 500; }
+  .opt .v { font-size: var(--s-s); font-weight: 700; color: rgba(var(--text), .56); }
+  .sw { width: 48px; height: 28px; border-radius: 14px; background: rgba(var(--text), .16); position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .sw.on { background: var(--accent); } .sw.on::after { left: 24px; }
+
+  /* Keyboard */
+  .chat { flex: 1; background: #ECE5DD; padding: 16px 12px 8px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; }
+  .msg { max-width: 78%; padding: 8px 12px; border-radius: 12px; font-size: 15px; font-weight: 500; line-height: 1.35; background: #fff; box-shadow: 0 1px 1px rgba(0,0,0,.06); }
+  .msg.me { align-self: flex-end; background: #D9FDD3; }
+  .input { background: #fff; border-radius: 24px; padding: 12px 16px; font-size: 15px; font-weight: 500; margin-top: 4px; }
+  .input .caret { display: inline-block; width: 2px; height: 18px; background: var(--accent); vertical-align: -4px; }
+  .ime { background: var(--surface); height: 296px; flex: none; padding: 16px 16px 24px; display: flex; flex-direction: column; }
+  .ime .top { display: flex; justify-content: space-between; align-items: center; height: 24px; }
+  .ime .top b { font-size: var(--s-m); font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .ime .top b i { width: 8px; height: 8px; border-radius: 50%; background: #E5484D; display: block; }
+  .ime .top span { font-size: var(--s-s); font-weight: 700; color: rgba(var(--text), .56); font-variant-numeric: tabular-nums; }
+  .ime .stage { flex: 1; display: grid; place-items: center; position: relative; }
+  .live { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 4px; height: 64px; padding: 0 8px; }
+  .live i { flex: 1; border-radius: 3px; background: var(--accent); opacity: .3; display: block; }
+  .bigmic { width: 88px; height: 88px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; position: relative; box-shadow: 0 0 0 12px rgba(143,76,44,.12), 0 12px 28px rgba(143,76,44,.35); }
+  .bigmic svg { width: 32px; height: 32px; }
+  .ime .keys { display: grid; grid-template-columns: 56px 1fr 56px 56px; gap: 8px; }
+  .k { height: 48px; border-radius: 12px; background: var(--base); display: grid; place-items: center; font-size: var(--s-s); font-weight: 700; color: rgba(var(--text), .72); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .done { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .done .ok { width: 72px; height: 72px; border-radius: 50%; background: var(--good); color: #fff; display: grid; place-items: center; box-shadow: 0 0 0 12px rgba(31,157,85,.12), 0 0 40px rgba(31,157,85,.35); }
+  .done .ok svg { width: 36px; height: 36px; stroke-width: 2.6; }
+  .done b { font-size: var(--s-l); font-weight: 700; }
+  .done span { font-size: var(--s-s); font-weight: 500; color: rgba(var(--text), .56); }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="intro">
+    <h1>Voxa for Android, v6</h1>
+    <p>Rebuilt with a mobile app design method: a neutral base with Voxa's sepia used only for the mic and the main actions, one typeface at four sizes, an 8 point spacing grid, numbers bigger than their labels, the main action within thumb reach, and one moment worth remembering: your words landing.</p>
+  </div>
+
+  <div class="row">
+    <div class="shot">
+      <h2>Opening the app</h2>
+      <p>The icon pops in, the voice line writes itself across it, the name follows. Under a second, on cold start only.</p>
+      <div class="phone">
+        <div class="sb"><span>9:41</span><span><i></i><i></i></span></div>
+        <div class="launch">
+          <div class="icon"><svg viewBox="0 0 64 40"><path d="M2 20 H14 L18 8 L24 34 L30 4 L36 36 L42 14 L46 24 L50 20 H62"/></svg></div>
+          <div class="name">Voxa</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Setup, one step at a time</h2>
+      <p>A progress bar instead of a wall of steps. Each screen shows exactly what it will do.</p>
+      <div class="phone">
+        <div class="sb"><span>9:42</span><span><i></i><i></i></span></div>
+        <div class="body perm">
+          <div class="progress"><b></b></div>
+          <div class="art">
+            <div class="kbmini">
+              <div class="w"><i style="height:10px"></i><i style="height:22px"></i><i style="height:14px"></i><i style="height:30px"></i><i style="height:18px"></i><i style="height:26px"></i><i style="height:12px"></i><i style="height:20px"></i><i style="height:8px"></i></div>
+              <div class="m"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+            </div>
+          </div>
+          <h3>Turn on the Voxa keyboard</h3>
+          <p>Android will show a warning that keyboards can read what you type. Voxa only sends what you say, and only while the mic is on.</p>
+          <div class="checks">
+            <div class="chk"><b><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></b>Signed in as Sam Samuel</div>
+            <div class="chk"><b><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></b>Microphone allowed</div>
+            <div class="chk todo"><b><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></b>Voxa keyboard turned on</div>
+          </div>
+          <div class="cta"><button class="btn primary">Open keyboard settings</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Home</h2>
+      <p>What you get from Voxa, as numbers first. Recent dictations below, and a test button where your thumb is.</p>
+      <div class="phone">
+        <div class="sb"><span>9:45</span><span><i></i><i></i></span></div>
+        <div class="body">
+          <div class="row-between"><div><div class="hello">Good morning, Sam</div><div class="ready"><b></b>Ready to dictate</div></div><div class="avatar"></div></div>
+          <div class="card stats">
+            <div class="big">1h 24m</div>
+            <div class="lbl">saved this week versus typing</div>
+            <div class="spark"><i style="height:30%"></i><i style="height:10%"></i><i style="height:36%"></i><i style="height:6%"></i><i style="height:80%"></i><i style="height:18%"></i><i class="t" style="height:100%"></i></div>
+            <div class="pair"><div><b>4,611</b><span>words</span></div><div><b>148</b><span>words a minute</span></div></div>
+          </div>
+          <div class="sect"><b>Recent</b><a>See all</a></div>
+          <div class="item"><span class="app wa"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/></svg></span><div class="t"><div class="top"><b>WhatsApp</b><span>9:31</span></div><div class="x">Hello, yeah. So this is actually from the Voxa application by the way.</div></div></div>
+          <div class="item"><span class="app gm"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3z M3 6l9 7 9-7" /></svg></span><div class="t"><div class="top"><b>Gmail</b><span>8:12</span></div><div class="x">Thanks for sending the draft over, I'll read it tonight.</div></div></div>
+        </div>
+        <span class="fabmic"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Try Voxa</span>
+        <nav class="tabs">
+          <a class="on"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg>Home</a>
+          <a><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>History</a>
+          <a><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>Words</a>
+          <a><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>Settings</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="shot">
+      <h2>History, search open</h2>
+      <p>Never a blank search: your recent searches and the apps you dictate into, one tap each.</p>
+      <div class="phone">
+        <div class="sb"><span>9:46</span><span><i></i><i></i></span></div>
+        <div class="body">
+          <div class="h1">History</div>
+          <div class="search focus"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>Search what you said</div>
+          <div class="label">Recent searches</div>
+          <div class="recent">
+            <div><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>invoice</div>
+            <div><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>flight to Chennai</div>
+          </div>
+          <div class="label">Your apps</div>
+          <div class="apps">
+            <div><span class="app wa"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/></svg></span>WhatsApp<span class="n">112</span></div>
+            <div><span class="app gpt"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg></span>ChatGPT<span class="n">64</span></div>
+            <div><span class="app gm"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3z"/></svg></span>Gmail<span class="n">31</span></div>
+            <div><span class="app tg"><svg viewBox="0 0 24 24"><path d="M3 11 21 4l-3 16-6-5-3 3z"/></svg></span>Telegram<span class="n">9</span></div>
+          </div>
+        </div>
+        <nav class="tabs">
+          <a><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg>Home</a>
+          <a class="on"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>History</a>
+          <a><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>Words</a>
+          <a><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>Settings</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>A dictation</h2>
+      <p>The words come first and large. Play, copy, edit and send again are one tap; delete is kept apart.</p>
+      <div class="phone">
+        <div class="sb"><span>9:47</span><span><i></i><i></i></span></div>
+        <div class="body">
+          <div class="back"><svg class="i" viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></svg>History</div>
+          <div class="dmeta"><span class="app wa"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/></svg></span><div><b>WhatsApp</b><span>Today at 9:31, pasted</span></div></div>
+          <p class="said">Hello, yeah. So this is actually from the Voxa application by the way.</p>
+          <div class="card player">
+            <span class="play"><svg class="i" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span>
+            <div class="wave"><i class="p" style="height:30%"></i><i class="p" style="height:60%"></i><i class="p" style="height:45%"></i><i class="p" style="height:85%"></i><i class="p" style="height:50%"></i><i class="p" style="height:70%"></i><i style="height:35%"></i><i style="height:90%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:75%"></i><i style="height:30%"></i><i style="height:60%"></i><i style="height:20%"></i><i style="height:45%"></i><i style="height:15%"></i></div>
+            <span class="time">0:12</span>
+          </div>
+          <div class="actions">
+            <div class="act"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>Copy</div>
+            <div class="act"><svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>Edit</div>
+            <div class="act"><svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>Write again</div>
+          </div>
+          <div class="bottombar"><span class="delete"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M7 7l1 13h8l1-13M9 7V4h6v3"/></svg></span><button class="btn secondary">Share</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Words</h2>
+      <p>Each fix is a card showing what was heard, what Voxa writes, and how often it has helped.</p>
+      <div class="phone">
+        <div class="sb"><span>9:48</span><span><i></i><i></i></span></div>
+        <div class="body">
+          <div class="h1">Words</div>
+          <div class="seg"><span class="on">Fixes</span><span>Snippets</span><span>Formatting</span></div>
+          <div class="card fix"><span class="heard">Heard <s>clawed code</s></span><span class="wrote"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg>Claude Code</span><span class="used">Fixed 23 times</span></div>
+          <div class="card fix"><span class="heard">Heard <s>Simian</s></span><span class="wrote"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg>Simiyon</span><span class="used">Fixed 8 times</span></div>
+          <div class="card fix"><span class="heard">Heard <s>vox a</s></span><span class="wrote"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg>Voxa</span><span class="used">Fixed 5 times</span></div>
+        </div>
+        <span class="fabmic" style="bottom:96px"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add a fix</span>
+        <nav class="tabs">
+          <a><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg>Home</a>
+          <a><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>History</a>
+          <a class="on"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>Words</a>
+          <a><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>Settings</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="shot">
+      <h2>Settings</h2>
+      <p>Grouped cards with icons, values on the right, switches where it's on or off.</p>
+      <div class="phone">
+        <div class="sb"><span>9:49</span><span><i></i><i></i></span></div>
+        <div class="body">
+          <div class="h1">Settings</div>
+          <div class="card profile"><div class="avatar"></div><div><b>Sam Samuel</b><span>ChatGPT account</span></div><span class="plan">Go</span></div>
+          <div class="card group">
+            <div class="opt"><span class="ic"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 14h8"/></svg></span><span class="t">Voxa keyboard</span><span class="v">On</span></div>
+            <div class="opt"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M8 13V5a2 2 0 0 1 4 0v6l5 1.5a2 2 0 0 1 1.4 2.4L17 20H10l-4-5"/></svg></span><span class="t">Hold to talk</span><span class="sw on"></span></div>
+            <div class="opt"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg></span><span class="t">Remove filler words</span><span class="sw"></span></div>
+            <div class="opt"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M7 4h10v16H7z M11 17h2"/></svg></span><span class="t">Vibrate on tap</span><span class="sw on"></span></div>
+          </div>
+          <div class="card group">
+            <div class="opt"><span class="ic"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="t">Keep history</span><span class="v">30 days</span></div>
+            <div class="opt"><span class="ic" style="background:rgba(200,40,30,.08);color:#C8281E"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M7 7l1 13h8l1-13M9 7V4h6v3"/></svg></span><span class="t">Delete history</span><span class="v">212 dictations</span></div>
+          </div>
+        </div>
+        <nav class="tabs">
+          <a><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z"/></svg>Home</a>
+          <a><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>History</a>
+          <a><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>Words</a>
+          <a class="on"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>Settings</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Keyboard, listening</h2>
+      <p>Your voice moves the bars behind the mic. One big target to stop; the rest stays out of the way.</p>
+      <div class="phone">
+        <div class="sb"><span>9:50</span><span><i></i><i></i></span></div>
+        <div class="chat">
+          <div class="msg">Are you coming tonight?</div>
+          <div class="msg me">Yes, leaving now</div>
+          <div class="msg">Can you pick up the cake on the way</div>
+          <div class="input">Sure, I'll get it<span class="caret"></span></div>
+        </div>
+        <div class="ime">
+          <div class="top"><b><i></i>Listening</b><span>0:04</span></div>
+          <div class="stage">
+            <div class="live"><i style="height:20%"></i><i style="height:45%"></i><i style="height:30%"></i><i style="height:70%"></i><i style="height:40%"></i><i style="height:90%"></i><i style="height:55%"></i><i style="height:25%"></i><i style="height:0"></i><i style="height:0"></i><i style="height:0"></i><i style="height:0"></i><i style="height:60%"></i><i style="height:35%"></i><i style="height:80%"></i><i style="height:50%"></i><i style="height:65%"></i><i style="height:30%"></i><i style="height:45%"></i><i style="height:20%"></i></div>
+            <span class="bigmic"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg></span>
+          </div>
+          <div class="keys">
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 14h8"/></svg></span>
+            <span class="k">Tap to stop</span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11v12H9l-6-6z"/><path d="m12 10 4 4m0-4-4 4"/></svg></span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M19 6v6H6M10 8l-4 4 4 4"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="shot">
+      <h2>Keyboard, done</h2>
+      <p>The moment you remember: your words are in the chat, Voxa says so and gets out of the way after a second.</p>
+      <div class="phone">
+        <div class="sb"><span>9:50</span><span><i></i><i></i></span></div>
+        <div class="chat">
+          <div class="msg">Are you coming tonight?</div>
+          <div class="msg me">Yes, leaving now</div>
+          <div class="msg">Can you pick up the cake on the way</div>
+          <div class="input">Sure, I'll get it on the way, see you at eight<span class="caret"></span></div>
+        </div>
+        <div class="ime">
+          <div class="top"><b style="color:var(--good)">Pasted in WhatsApp</b><span>11 words</span></div>
+          <div class="stage">
+            <div class="done"><span class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></span><span>That's 6 seconds of typing saved</span></div>
+          </div>
+          <div class="keys">
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 14h8"/></svg></span>
+            <span class="k">space</span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11v12H9l-6-6z"/><path d="m12 10 4 4m0-4-4 4"/></svg></span>
+            <span class="k"><svg class="i" viewBox="0 0 24 24"><path d="M19 6v6H6M10 8l-4 4 4 4"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

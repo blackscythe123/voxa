@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- docs/ui-mocks/v6-app-redesign.html, light. Dark values in values-night. -->
+    <color name="base">#FFFFFF</color>
+    <color name="accent">#8F4C2C</color>
+</resources>

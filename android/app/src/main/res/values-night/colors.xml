@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The v6 dark palette: neutral near-black base, sepia lightened for contrast. -->
+    <color name="base">#121212</color>
+    <color name="accent">#D9946D</color>
+</resources>

@@ -1,11 +1,7 @@
--keep class com.voxa.android.** { *; }
--dontwarn okhttp3.**
--dontwarn okio.**
-
-# HeliBoard's IME services + native bridge are loaded reflectively by Android
-# and JNI respectively. R8 must not strip or rename them.
--keep class helium314.keyboard.** { *; }
--keepclassmembers class * {
-    native <methods>;
-}
--dontwarn helium314.keyboard.**
+# UniFFI's Kotlin bindings call the Rust library through JNA, which binds native methods and
+# Structure fields (RustBuffer, ForeignBytes, callbacks) by reflection. Keep both intact.
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.** { public *; }
+-keep class uniffi.voxa_ffi.** { *; }
+-dontwarn java.awt.**
+-dontwarn com.sun.jna.**
