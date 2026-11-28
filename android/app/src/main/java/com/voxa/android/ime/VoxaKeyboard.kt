@@ -72,6 +72,10 @@ class VoxaKeyboard : InputMethodService() {
 
     /** The field in front now, or null when no field is bound. */
     private var target: FfiTarget? = null
+    /** Goes up every time a field gets focus (not when the same field restarts its input). Part
+     *  of the target's identity: every chat in a messaging app, every field in a web page and
+     *  every Compose field share one view id, so a field is only "the same" within one focus. */
+    private var inputSession = 0L
     private var field = FieldKind.NORMAL
     private var editorInfo: EditorInfo? = null
     /** A finished text that arrived while no field was bound; the next field decides. */
@@ -123,7 +127,12 @@ class VoxaKeyboard : InputMethodService() {
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
         app.keyboardFlow = flow
-        recorder = Recorder(this, onLevel = { if (!destroyed && !isPaused()) panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
+        recorder = Recorder(
+            this,
+            onLevel = { if (!destroyed && !isPaused()) panel?.bars?.level(if (debugLevels) syntheticLevel() else it) },
+            onInterrupted = { onMicInterrupted() },
+            onCantSave = { onCantSave() },
+        )
         app.historyChanged()
         scope.launch {
             combine(app.session, app.online) { _, _ -> }.collect { pushReadiness() }
@@ -191,10 +200,13 @@ class VoxaKeyboard : InputMethodService() {
         super.onStartInput(info, restarting)
         editorInfo = info
         field = fieldKind(info.inputType, info.imeOptions)
+        if (!restarting) inputSession++
         val t = targetOf(info)
         Diag.log("ime", "onStartInput ${info.packageName} field ${info.fieldId} inputType 0x${Integer.toHexString(info.inputType)} imeOptions 0x${Integer.toHexString(info.imeOptions)} -> $field, restarting $restarting")
         target = t
         dispatch(FlowEvent.Focus(t))
+        // A text finished while no field was bound: this is a new field, so the core asks
+        // "Insert in X?" instead of inserting into a field nobody confirmed.
         pendingPaste?.let {
             pendingPaste = null
             run(it)
@@ -271,15 +283,19 @@ class VoxaKeyboard : InputMethodService() {
         }
     }
 
-    /** App label plus an identity for the field: package and view id. Fields without an id
-     *  (WebView, Compose) count as one target per app. */
+    /** App label plus an identity for the field: package, view id and this focus of it. A view
+     *  id alone can't tell one chat from another (one compose box layout for every chat; no id at
+     *  all in WebView and Compose), so a text never goes into a field the user moved to and came
+     *  back to without confirming: the core asks "Insert in X?" instead. */
     private fun targetOf(info: EditorInfo): FfiTarget {
         val pkg = info.packageName ?: ""
         val label = runCatching {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         }.getOrDefault(pkg)
         val id = if (info.fieldId == View.NO_ID) 0 else info.fieldId
-        val window = (pkg.hashCode().toLong() shl 32) or (id.toLong() and 0xffffffffL)
+        var window = pkg.hashCode().toLong()
+        window = window * 1_000_003L + id
+        window = window * 1_000_003L + inputSession
         return FfiTarget(label, window.toULong())
     }
 
@@ -378,7 +394,11 @@ class VoxaKeyboard : InputMethodService() {
         val t = target
         main.post {
             dispatch(FlowEvent.Cancel)
-            val mic = if (err == Recorder.StartError.Missing) MicState.MISSING else MicState.DENIED
+            val mic = when (err) {
+                Recorder.StartError.Missing -> MicState.MISSING
+                Recorder.StartError.CantSave -> MicState.CANT_SAVE
+                else -> MicState.DENIED
+            }
             dispatch(FlowEvent.Readiness(flow.readiness().copy(mic = mic)))
             if (t != null) dispatch(FlowEvent.MicPressed(t, field == FieldKind.PRIVATE))
         }
@@ -386,21 +406,28 @@ class VoxaKeyboard : InputMethodService() {
 
     private fun transcribe(effect: FlowEffect.Transcribe) {
         val job = effect.job
-        scope.launch {
+        val flow = flow
+        // On the app's scope, not the keyboard's: switching keyboards mid-upload must not throw
+        // the paid-for result away. The core also writes it into History itself.
+        app.scope.launch {
             // A cold start reads the saved sign-in off the main thread: wait for it.
             app.awaitSession()
             val event = withContext(Dispatchers.IO) {
                 try {
+                    // Debug builds only: canned text; the rest of the flow (paste, History, the success state) runs for real.
                     val canned = app.debugTranscript
-                    if (canned != null) {
-                        // Debug builds only: the rest of the flow (paste, History, the success state) runs for real.
-                        Diag.log("debug", "canned transcript used instead of ChatGPT")
-                        FlowEvent.Transcribed(job, app.core.finishText(canned, effect.app))
-                    } else {
-                        FlowEvent.Transcribed(job, app.core.transcribeRecording(effect.pcmPath, effect.app))
-                    }
+                    if (canned != null) Diag.log("debug", "canned transcript used instead of ChatGPT")
+                    val text = app.core.transcribeTake(effect.entry, effect.pcmPath, effect.app, canned)
+                    // Empty only when the device found no speech.
+                    if (text.isBlank()) FlowEvent.NoSpeech(job) else FlowEvent.Transcribed(job, text)
                 } catch (e: TranscribeFailure) {
                     FlowEvent.TranscribeFailed(job, e)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    // Every upload the flow asked for gets an answer, or the take waits forever.
+                    Diag.log("transcribe", "failed: ${t.javaClass.simpleName}")
+                    FlowEvent.TranscribeFailed(job, TranscribeFailure.Server(0u))
                 }
             }
             if (event is FlowEvent.TranscribeFailed) {
@@ -410,8 +437,12 @@ class VoxaKeyboard : InputMethodService() {
                 }
                 if (event.error is TranscribeFailure.Blocked) app.blocked.value = true
             }
+            if (destroyed || this@VoxaKeyboard.flow !== flow) {
+                // The keyboard went away meanwhile: the core kept the result in History; say so.
+                if (event is FlowEvent.Transcribed && effect.entry != 0uL) Notifier.ready(app, listOf(effect.entry), effect.app)
+                return@launch
+            }
             // Not the dictation on screen (sent when the network came back): it finishes unseen.
-            if (destroyed) return@launch
             val current = (flow.state() as? FlowState.Transcribing)?.job == job
             dispatch(event)
             if (!current && !destroyed) notifyBackground(job, event)
@@ -449,10 +480,13 @@ class VoxaKeyboard : InputMethodService() {
             // field comes back soon, say it's ready in History.
             main.postDelayed({
                 if (!destroyed && pendingPaste === effect && !Notifier.keyboardShowing) {
+                    // No field came back: it waits in History (and the notification can copy it).
+                    // It is never inserted later into whatever field comes next.
+                    pendingPaste = null
                     val entry = flow.entryForJob(effect.job) ?: return@postDelayed
                     scope.launch {
                         val e = withContext(Dispatchers.IO) { app.core.entry(entry) } ?: return@launch
-                        if (e.status is EntryStatus.Ready && pendingPaste === effect) Notifier.ready(this@VoxaKeyboard, listOf(entry), e.app)
+                        if (e.status is EntryStatus.Ready) Notifier.ready(this@VoxaKeyboard, listOf(entry), e.app)
                     }
                 }
             }, PASTE_GRACE_MS)
@@ -465,6 +499,8 @@ class VoxaKeyboard : InputMethodService() {
         }
         Diag.log("insert", "paste: ${result.javaClass.simpleName} (${effect.text.length} chars)")
         dispatch(FlowEvent.Delivered(effect.job, result))
+        // Inserted after all: a "ready" notice for it would offer a second paste.
+        if (result is DeliveryResult.Inserted) Notifier.clearDictations(this)
     }
 
     /** Insert at the cursor, with a space before it when it follows a word (dictating in chunks). */
@@ -628,6 +664,9 @@ class VoxaKeyboard : InputMethodService() {
             return
         }
         notice = null
+        // The flow may think it is offline after one failed upload while the phone is online:
+        // tell it what is true now, so this take is sent at once (and waiting ones go too).
+        pushReadiness()
         dispatch(FlowEvent.MicPressed(t, field == FieldKind.PRIVATE))
     }
 
@@ -670,6 +709,18 @@ class VoxaKeyboard : InputMethodService() {
             else showNotice("Another app is using the microphone", "Nothing was recorded. Try again when it's free.")
         } else {
             stopIfRecording("interrupted")
+        }
+    }
+
+    /** The recording couldn't be written (storage full). What was saved is sent; the next press
+     *  says the storage is full and offers to free up space. */
+    private fun onCantSave() {
+        if (destroyed) return
+        Diag.log("mic", "can't save the recording: storage full")
+        if (flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop)
+        pushReadiness()
+        if (flow.state() !is FlowState.Recording && flow.state() !is FlowState.Transcribing) {
+            showNotice("Your phone's storage is full", "What was recorded is kept. Free up space to dictate again.")
         }
     }
 
