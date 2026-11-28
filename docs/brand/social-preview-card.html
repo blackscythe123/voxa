@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voxa social preview, alternative: the card</title>
+<!--
+  Alternative, not used: the first light version with a floating dictation card. The live page is
+  social-preview.html (the real strip over a Slack window).
+  ?t=<ms>  renders that frame, frozen.   ?still  renders the finished frame (the PNG).
+  ?guides  overlays GitHub's open graph template lines; data-safe elements must sit in x 80 to 1200, y 80 to 560.
+  window.render(t) draws any frame; the frame exporter steps it and screenshots each one.
+  prefers-reduced-motion: the finished frame, still.
+
+  Timeline, 8,000 ms loop (the splash beats are variant B from docs/ui-mocks/v7-home-greeting-and-splash.html):
+      0 to   450  nib drifts in and scales 0.9 to 1, fades in over 320      drift (0.3, 0, 0.15, 1)
+    450 to   570  pen down: a 1.6 unit press, the first drop of ink at 490     half a sine
+    570 to 1,870  the nib writes the wordmark, tip pinned to the stroke, 35 degree slant   (0.64, 0, 0.3, 1) on length
+  1,870 to 2,070  lift: up and right, turns 8 degrees, fades                  accelerate (0.3, 0, 0.8, 0.15)
+  1,870 to 2,270  ink settles, stroke weight 107 % to 100 %                     standard (0.4, 0, 0.2, 1)
+  2,020 to 2,420  tagline rises 12 px and fades in                              decelerate (0.05, 0.7, 0.1, 1)
+  2,250 to 2,850  dictation card rises 24 px, scales 0.97 to 1                  decelerate
+  2,700 to 5,300  listening: red dot breathes, timer counts, the voice line is written by a small nib,
+                  each spoken word appears 260 ms after its sound, blur 4 px to 0 over 240 ms
+  5,300 to 5,750  stop: the voice nib lifts, the line freezes, the dot becomes a sepia check,
+                  "Listening" rolls up and "Pasted in Slack" rolls in            standard / decelerate
+  5,600 to 6,000  "9 seconds of typing saved" rises                             decelerate
+  6,000 to 7,300  hold on the finished frame
+  7,300 to 7,900  outro: word, tagline and card fade and drift up 6 px          accelerate
+  7,900 to 8,000  empty paper, identical to frame 0, so the loop is seamless
+  Throughout: the three app screens drift on one full sine per loop, nearer ones further (parallax).
+-->
+<style>
+@font-face{font-family:Manrope;font-weight:500;src:url("../../android/app/src/main/res/font/manrope_medium.ttf") format("truetype")}
+@font-face{font-family:Manrope;font-weight:700;src:url("../../android/app/src/main/res/font/manrope_bold.ttf") format("truetype")}
+:root{--paper:#FBFAF8;--card:#FFFFFF;--ink:#1A1A1A;--muted:#555555;--sepia:#7A3F22;--rec:#C42B1C}
+*{box-sizing:border-box}
+html,body{margin:0;width:1280px;height:640px;overflow:hidden;background:var(--paper)}
+body{color:var(--ink);font-family:Manrope,"Segoe UI",system-ui,sans-serif;font-weight:500;position:relative;-webkit-font-smoothing:antialiased}
+
+/* background: real app screens, dimmed and softened */
+.scene{position:absolute;inset:0;perspective:1700px;perspective-origin:30% 45%;overflow:hidden}
+.dev{position:absolute;transform-style:preserve-3d;will-change:transform}
+.win{width:780px;height:558px;border-radius:12px;overflow:hidden;background:#F1EEEA;box-shadow:0 0 0 1px rgba(26,26,26,.10),0 30px 60px -20px rgba(60,40,25,.25)}
+.win img{display:block;width:796px;margin:-6px 0 0 -8px}
+.phone{width:236px;height:500px;border-radius:40px;background:#1C1C1C;padding:9px;box-shadow:0 0 0 1px rgba(0,0,0,.25),0 30px 60px -18px rgba(60,40,25,.35)}
+.phone .scr{width:100%;height:100%;border-radius:31px;overflow:hidden;background:#fff}
+.phone img{display:block;width:100%}
+.d1{left:560px;top:14px}
+.d2{left:1098px;top:92px}
+.d3{left:930px;top:408px}
+.soft{filter:blur(.7px) saturate(.85)}
+/* washes keep every foreground text on plain paper or on the white card */
+.wash{position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(90deg,var(--paper) 0,var(--paper) 556px,rgba(251,250,248,.70) 680px,rgba(251,250,248,.48) 860px,rgba(251,250,248,.42) 100%)}
+.wash2{position:absolute;left:0;top:420px;width:1080px;height:220px;pointer-events:none;background:linear-gradient(90deg,var(--paper) 0,var(--paper) 980px,rgba(251,250,248,0) 100%);-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 44px);mask-image:linear-gradient(180deg,transparent 0,#000 44px)}
+
+/* foreground */
+.tile{position:absolute;left:92px;top:92px;width:96px;height:96px;border-radius:24px;
+  box-shadow:0 1px 1px rgba(33,27,23,.10),0 6px 14px -4px rgba(33,27,23,.28),0 22px 40px -14px rgba(33,27,23,.32)}
+.tile img{position:absolute;width:119px;height:119px;left:-11.6px;top:-11.6px}
+.word{position:absolute;left:68px;top:166px;width:448px;height:224px;overflow:visible}
+.tag{position:absolute;left:94px;top:378px;font-size:40px;font-weight:700;letter-spacing:-0.02em;color:var(--ink)}
+.rule{position:absolute;left:92px;width:880px;top:462px;height:1px;background:#E4DFD9}
+.foot{position:absolute;left:94px;top:488px;font-size:21px;color:var(--muted);display:flex;gap:26px;white-space:nowrap}
+.foot b{color:var(--sepia);font-weight:700}
+
+.card{position:absolute;left:628px;top:118px;width:452px;border-radius:22px;background:var(--card);padding:22px 24px 24px;
+  box-shadow:0 0 0 1px rgba(26,26,26,.06),0 2px 4px rgba(60,40,25,.05),0 18px 36px -12px rgba(60,40,25,.20),0 40px 80px -30px rgba(60,40,25,.28)}
+.head{position:relative;height:52px}
+.st{position:absolute;inset:0;display:flex;align-items:center;gap:14px}
+.mark{position:relative;width:30px;height:30px;flex:none;display:grid;place-items:center}
+.rec{width:12px;height:12px;border-radius:50%;background:var(--rec);position:absolute;left:9px;top:9px}
+.halo{width:12px;height:12px;border-radius:50%;background:var(--rec);position:absolute;left:9px;top:9px}
+.ok{position:absolute;inset:1px;border-radius:50%;background:var(--sepia);display:grid;place-items:center}
+.t1{font-size:22px;font-weight:700;letter-spacing:-0.01em;line-height:1.15}
+.t2{font-size:16px;color:var(--muted);margin-top:3px}
+.time{position:absolute;right:0;top:14px;font-size:20px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.wave{display:block;margin-top:14px;overflow:visible}
+.out{margin-top:16px;border-top:1px solid #ECE8E3;padding-top:16px;font-size:20px;line-height:1.5;color:var(--ink);min-height:92px}
+.out span{display:inline-block;white-space:pre;position:relative}
+.out span.last::after{content:"";position:absolute;right:-5px;top:4px;width:2px;height:24px;background:var(--sepia);opacity:var(--caret,1)}
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="dev d1" id="d1"><div class="win soft"><img src="../verification/greeting/desktop-d-home-afternoon.png" alt=""></div></div>
+  <div class="dev d3" id="d3"><div class="phone soft"><div class="scr"><img src="../../android/docs/verification/kb-look/02-screen-voxa-light.png" alt=""></div></div></div>
+  <div class="dev d2" id="d2"><div class="phone soft"><div class="scr"><img src="../verification/greeting/android-a-weekend-sunday.png" alt=""></div></div></div>
+</div>
+<div class="wash"></div>
+
+<div class="tile" data-safe="icon"><img src="icon-1024.png" alt="Voxa"></div>
+<svg class="word" viewBox="0 0 280 140" aria-label="Voxa">
+  <path id="ink" data-safe="wordmark" d="" fill="none" stroke="#1A1A1A" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <g id="nib"><g transform="scale(.9)">
+    <path id="nibBody" fill="#7A3F22"/><circle cx="0" cy="-32" r="4.6" fill="#FBFAF8"/>
+    <path d="M0 -27 L-2.6 -20 L2.6 -14 L-1.8 -8 L0 -1" fill="none" stroke="#FBFAF8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="-16" y="-44" width="32" height="2.2" fill="#FBFAF8"/>
+  </g></g>
+</svg>
+<div class="tag" id="tag" data-safe="tagline">Talk instead of typing.</div>
+
+<div class="card" id="card" data-safe="card">
+  <div class="head">
+    <div class="st" id="stL">
+      <div class="mark"><span class="halo" id="halo"></span><span class="rec" id="rec"></span></div>
+      <div><div class="t1">Listening</div><div class="t2">Press your shortcut again to finish</div></div>
+    </div>
+    <div class="st" id="stD">
+      <div class="mark"><span class="ok" id="ok"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path id="tick" d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></div>
+      <div><div class="t1">Pasted in Slack</div><div class="t2" id="saved">9 seconds of typing saved</div></div>
+    </div>
+    <div class="time" id="time">0:00</div>
+  </div>
+  <svg class="wave" id="wave" width="404" height="56" viewBox="0 0 404 56">
+    <path id="wline" fill="none" stroke="#7A3F22" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>
+    <g id="wnib"><g transform="scale(.36)"><path id="wnibBody" fill="#7A3F22"/><circle cx="0" cy="-32" r="4.6" fill="#FFFFFF"/><rect x="-16" y="-44" width="32" height="2.6" fill="#FFFFFF"/></g></g>
+  </svg>
+  <div class="out" id="out"></div>
+</div>
+
+<div class="wash2"></div>
+<div class="rule" id="rule"></div>
+<div class="foot" data-safe="footer"><span>Voice dictation into any app</span><span><b>Windows</b></span><span><b>macOS</b></span><span><b>Android</b></span><span>Open source, Apache-2.0</span></div>
+
+<script src="tools/og-guides.js"></script>
+<script>
+const T = 8000; window.DURATION = T;
+const WORD = 'M16 38 C 18 28, 30 24, 36 34 C 42 50, 52 80, 58 100 C 64 82, 74 58, 84 46 C 88 41, 94 40, 95 45 C 96 50, 92 56, 98 60 C 104 64, 112 64, 121 64 C 130 64, 136 72, 136 82 C 136 92, 130 100, 121 100 C 112 100, 106 92, 106 82 C 106 72, 112 64, 121 64 C 130 64, 140 64, 148 64 C 156 66, 160 74, 164 82 C 168 90, 174 98, 182 100 C 188 100, 192 84, 198 74 C 202 68, 208 65, 214 65 C 218 65, 222 66, 223 68 C 216 63, 200 66, 198 82 C 197 94, 204 101, 211 100 C 218 99, 222 90, 223 80 C 223 74, 223 68, 223 66 C 223 78, 222 92, 226 98 C 229 102, 236 101, 242 96 C 250 90, 252 104, 236 110 C 214 116, 176 118, 160 110 C 154 106, 154 102, 156 98 C 164 86, 172 74, 184 64 C 186 62, 190 61, 193 62';
+const NIB = 'M-16,-53 H16 V-41 C16,-27 8,-15 0,0 C-8,-15 -16,-27 -16,-41 Z';
+const $ = id => document.getElementById(id);
+$('ink').setAttribute('d', WORD); $('nibBody').setAttribute('d', NIB); $('wnibBody').setAttribute('d', NIB);
+
+const ease = (x1, y1, x2, y2) => t => { if (t <= 0) return 0; if (t >= 1) return 1;
+  let lo = 0, hi = 1, u = t; for (let i = 0; i < 26; i++) { u = (lo + hi) / 2; const x = 3*(1-u)*(1-u)*u*x1 + 3*(1-u)*u*u*x2 + u*u*u; if (x < t) lo = u; else hi = u; }
+  return 3*(1-u)*(1-u)*u*y1 + 3*(1-u)*u*u*y2 + u*u*u; };
+const STD = ease(.4, 0, .2, 1), DECEL = ease(.05, .7, .1, 1), ACCEL = ease(.3, 0, .8, .15);
+const clamp = x => Math.max(0, Math.min(1, x));
+const span = (t, a, b) => clamp((t - a) / (b - a));
+
+/* splash variant B, unchanged timings */
+const V = { appear: [0, 450], hold: [450, 570], write: [570, 1870], lift: [1870, 2070], settle: [1870, 2270], moveEase: ease(.3, 0, .15, 1), fadeMs: 320, writeEase: ease(.64, 0, .3, 1) };
+const TAG = [2020, 2420], CARD = [2250, 2850], LISTEN = [2700, 5300], STOP = 5300, SAVED = [5600, 6000], OUT = [7300, 7900];
+
+/* the words, each with the moment it is spoken; a breath after the comma */
+const TEXT = 'Running ten minutes late, start without me and I will catch up on the notes.'.split(' ');
+const SPOKEN = []; { let s = 2900; TEXT.forEach((w, i) => { SPOKEN.push(s); s += 92 + w.replace(/[^a-z]/gi, '').length * 11 + (w.endsWith(',') ? 170 : 0); }); }
+const out = $('out');
+out.innerHTML = TEXT.map((w, i) => `<span>${w}${i < TEXT.length - 1 ? ' ' : ''}</span>`).join('');
+const spans = [...out.children];
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+/* speech envelope: one burst per word, syllables inside it, silence between */
+function env(t) {
+  if (t < LISTEN[0] + 150 || t > STOP - 60) return 0;
+  let a = 0;
+  SPOKEN.forEach((s, i) => { const len = 60 + TEXT[i].length * 10, c = s + len / 2, w = len / 2.1;
+    const g = Math.exp(-(((t - c) / w) ** 2)); a = Math.max(a, g * (0.55 + 0.45 * hash(i + 3)) * (0.75 + 0.25 * Math.sin(t / 23 + i))); });
+  return a;
+}
+const W = 404, H = 56, MID = 30, HEAD = 344, STEP = 3.1, SPEED = 0.125; // px per ms
+function drawWave(t) {
+  const te = Math.min(t, STOP);                       // the line freezes when Voxa stops listening
+  const k1 = Math.floor((te - 2500) / (STEP / SPEED)); // newest sample
+  const pts = [];
+  for (let k = k1; k >= 0; k--) {
+    const tk = 2500 + k * STEP / SPEED, x = HEAD - (te - tk) * SPEED;
+    if (x < -2) break;
+    const a = env(tk), amp = a * 22 * (0.45 + 0.55 * hash(k));
+    pts.push([x, MID + (k % 2 ? -amp : amp)]);
+  }
+  let x0 = pts.length ? pts[pts.length - 1][0] : HEAD;
+  if (x0 > 0) pts.push([0, MID]);
+  const d = pts.reverse().map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  $('wline').setAttribute('d', d || `M0 ${MID} L${HEAD} ${MID}`);
+  const tipY = pts.length ? pts[pts.length - 1][1] : MID, tipX = pts.length ? pts[pts.length - 1][0] : HEAD;
+  const lf = ACCEL(span(t, STOP, STOP + 260)), ap = DECEL(span(t, CARD[0] + 200, CARD[1] + 100));
+  $('wnib').setAttribute('transform', `translate(${(tipX + 6 * lf).toFixed(2)} ${(tipY - 10 * lf).toFixed(2)}) rotate(${(35 + 8 * lf).toFixed(2)})`);
+  $('wnib').style.opacity = (ap * (1 - lf)).toFixed(3);
+}
+
+const ink = $('ink'), nib = $('nib'); const L = ink.getTotalLength();
+function drawSplash(t) {
+  const p = V.writeEase(span(t, V.write[0], V.write[1]));
+  const h = span(t, V.hold[0], V.hold[1]), touched = t >= V.hold[0] + 40;
+  ink.style.strokeDasharray = `${L} ${L}`;
+  ink.style.strokeDashoffset = touched && p === 0 ? L - .3 : L * (1 - p) + (p > 0 && p < 1 ? .01 : 0);
+  ink.style.opacity = touched ? '' : 0;
+  const s = span(t, V.settle[0], V.settle[1]);
+  ink.setAttribute('stroke-width', (5.2 * (1 + .07 * (1 - STD(s)) * (touched ? 1 : 0))).toFixed(2));
+  const len = L * p, pt = ink.getPointAtLength(len);
+  const a = ink.getPointAtLength(Math.max(0, len - 4)), b = ink.getPointAtLength(Math.min(L, len + 4));
+  const dir = Math.atan2(b.y - a.y, b.x - a.x), sway = 7 * Math.cos(dir) - 3 * Math.sin(dir);
+  const ap = V.moveEase(span(t, V.appear[0], V.appear[1])), fade = clamp(t / V.fadeMs), lf = ACCEL(span(t, V.lift[0], V.lift[1]));
+  const st = ink.getPointAtLength(0), cx = 140, cy = 70;
+  let x = pt.x, y = pt.y;
+  if (t < V.write[0]) { x = cx + (st.x - cx) * ap; y = cy - 10 + (st.y - cy + 10) * ap; }
+  const press = Math.sin(Math.PI * h); y += 1.6 * press; x += 12 * lf; y -= 18 * lf;
+  nib.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${(35 + sway + 8 * lf - 2 * press).toFixed(2)}) scale(${(0.9 + .1 * ap - .02 * press).toFixed(3)})`);
+  nib.style.opacity = (DECEL(fade) * (1 - lf)).toFixed(3);
+}
+
+function render(t) {
+  t = ((t % T) + T) % T;
+  // background parallax: one full sine per loop, so frame 0 and frame 8,000 match
+  const ph = 2 * Math.PI * t / T;
+  $('d1').style.transform = `translate(${(-10 * Math.sin(ph)).toFixed(2)}px,${(4 * Math.cos(ph)).toFixed(2)}px) rotateY(-16deg) rotateX(5deg) rotateZ(-1deg)`;
+  $('d3').style.transform = `translate(${(-16 * Math.sin(ph + .5)).toFixed(2)}px,${(6 * Math.cos(ph + .5)).toFixed(2)}px) rotateY(14deg) rotateX(4deg) rotateZ(3deg) scale(.92)`;
+  $('d2').style.transform = `translate(${(-24 * Math.sin(ph + 1)).toFixed(2)}px,${(8 * Math.cos(ph + 1)).toFixed(2)}px) rotateY(-12deg) rotateX(4deg) rotateZ(4deg)`;
+  // outro
+  const o = ACCEL(span(t, OUT[0], OUT[1])), keep = 1 - o, lift = -6 * o;
+  drawSplash(t);
+  const word = document.querySelector('.word'); word.style.opacity = keep; word.style.transform = `translateY(${lift}px)`;
+  const tg = DECEL(span(t, TAG[0], TAG[1]));
+  $('tag').style.opacity = (tg * keep).toFixed(3); $('tag').style.transform = `translateY(${(12 * (1 - tg) + lift).toFixed(2)}px)`;
+  const c = DECEL(span(t, CARD[0], CARD[1]));
+  $('card').style.opacity = (Math.min(1, c * 1.4) * keep).toFixed(3);
+  $('card').style.transform = `translateY(${(24 * (1 - c) + lift).toFixed(2)}px) scale(${(0.97 + .03 * c).toFixed(4)})`;
+  // header: listening, then pasted
+  const sw = span(t, STOP, STOP + 450), outL = STD(span(t, STOP, STOP + 260)), inD = DECEL(span(t, STOP + 150, STOP + 450));
+  $('stL').style.opacity = (1 - outL).toFixed(3); $('stL').style.transform = `translateY(${(-14 * outL).toFixed(2)}px)`;
+  $('stD').style.opacity = inD.toFixed(3); $('stD').style.transform = `translateY(${(14 * (1 - inD)).toFixed(2)}px)`;
+  const breath = t < STOP ? (((t - LISTEN[0]) % 1100) + 1100) % 1100 / 1100 : 0;
+  const recOn = t >= LISTEN[0] ? 1 : DECEL(span(t, CARD[0] + 200, LISTEN[0]));
+  $('rec').style.opacity = recOn; $('rec').style.transform = `scale(${(0.6 + 0.4 * recOn).toFixed(3)})`;
+  $('halo').style.opacity = t >= LISTEN[0] && t < STOP ? (.32 * (1 - DECEL(breath))).toFixed(3) : 0;
+  $('halo').style.transform = `scale(${(1 + 1.3 * DECEL(breath)).toFixed(3)})`;
+  $('ok').style.transform = `scale(${(0.6 + 0.4 * inD).toFixed(3)})`;
+  const tick = $('tick'), tl = 22; tick.style.strokeDasharray = tl; tick.style.strokeDashoffset = (tl * (1 - STD(span(t, STOP + 220, STOP + 520)))).toFixed(2);
+  const sv = DECEL(span(t, SAVED[0], SAVED[1]));
+  $('saved').style.opacity = sv.toFixed(3); $('saved').style.transform = `translateY(${(6 * (1 - sv)).toFixed(2)}px)`;
+  // timer: seven seconds of speech, shown as a time lapse
+  const secs = Math.min(7, Math.floor(span(t, LISTEN[0], STOP) * 7.999));
+  $('time').textContent = `0:0${secs}`;
+  $('time').style.color = t >= STOP ? '#555555' : '#1A1A1A';
+  drawWave(t);
+  // words: each appears 260 ms after it is spoken, out of a 4 px blur
+  let last = -1;
+  spans.forEach((sEl, i) => { const k = STD(span(t, SPOKEN[i] + 260, SPOKEN[i] + 500));
+    sEl.style.opacity = k.toFixed(3); sEl.style.filter = k < 1 ? `blur(${(4 * (1 - k)).toFixed(2)}px)` : 'none';
+    sEl.style.transform = `translateY(${(3 * (1 - k)).toFixed(2)}px)`; if (k > 0) last = i; sEl.classList.remove('last'); });
+  if (last >= 0) { spans[last].classList.add('last'); out.style.setProperty('--caret', (1 - STD(span(t, STOP + 100, STOP + 400))).toFixed(3)); }
+}
+window.render = render; window.STILL_T = 7000;
+
+const q = new URLSearchParams(location.search);
+const STILL_T = window.STILL_T;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+document.fonts.ready.then(() => { window.READY = true;
+  if (q.has('still') || reduce) render(STILL_T);
+  else if (q.has('t')) render(+q.get('t'));
+  else { const t0 = performance.now(); const loop = now => { render(now - t0); requestAnimationFrame(loop); }; requestAnimationFrame(loop); }
+});
+render(q.has('t') ? +q.get('t') : (q.has('still') || reduce) ? STILL_T : 0);
+</script>
+</body>
+</html>

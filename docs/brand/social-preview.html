@@ -4,29 +4,15 @@
 <meta charset="utf-8">
 <title>Voxa social preview and hero</title>
 <!--
-  Voxa social preview (1280 by 640) and the animated hero, one source.
-  ?t=<ms>  renders that frame, frozen.   ?still  renders the finished frame (the PNG).
-  ?guides  overlays GitHub's open graph template lines; data-safe elements must sit in x 80 to 1200, y 80 to 560.
-  window.render(t) draws any frame; the frame exporter steps it and screenshots each one.
-  prefers-reduced-motion: the finished frame, still.
-
-  Timeline, 8,000 ms loop (the splash beats are variant B from docs/ui-mocks/v7-home-greeting-and-splash.html):
-      0 to   450  nib drifts in and scales 0.9 to 1, fades in over 320      drift (0.3, 0, 0.15, 1)
-    450 to   570  pen down: a 1.6 unit press, the first drop of ink at 490     half a sine
-    570 to 1,870  the nib writes the wordmark, tip pinned to the stroke, 35 degree slant   (0.64, 0, 0.3, 1) on length
-  1,870 to 2,070  lift: up and right, turns 8 degrees, fades                  accelerate (0.3, 0, 0.8, 0.15)
-  1,870 to 2,270  ink settles, stroke weight 107 % to 100 %                     standard (0.4, 0, 0.2, 1)
-  2,020 to 2,420  tagline rises 12 px and fades in                              decelerate (0.05, 0.7, 0.1, 1)
-  2,250 to 2,850  dictation card rises 24 px, scales 0.97 to 1                  decelerate
-  2,700 to 5,300  listening: red dot breathes, timer counts, the voice line is written by a small nib,
-                  each spoken word appears 260 ms after its sound, blur 4 px to 0 over 240 ms
-  5,300 to 5,750  stop: the voice nib lifts, the line freezes, the dot becomes a sepia check,
-                  "Listening" rolls up and "Pasted in Slack" rolls in            standard / decelerate
-  5,600 to 6,000  "9 seconds of typing saved" rises                             decelerate
-  6,000 to 7,300  hold on the finished frame
-  7,300 to 7,900  outro: word, tagline and card fade and drift up 6 px          accelerate
-  7,900 to 8,000  empty paper, identical to frame 0, so the loop is seamless
-  Throughout: the three app screens drift on one full sine per loop, nearer ones further (parallax).
+  Voxa social preview (1280 by 640) and the README hero, one source. Render with tools/render.py.
+  The real Voxa desktop strip (layout from docs/verification/pause/desktop-1-listening.png, the 1.0 brand
+  sepia #7A3F22, status copy from core/voxa-core/src/copy.rs) floats over a Slack window, and the text is
+  pasted in all at once, the way the app does it. Slack's logo is used as a demo backdrop only.
+  Strip muted text is #4A4A4A on #ECEAE8 (7.39 to 1, AAA). The card version is social-preview-card.html.
+  Same contract: render(t), DURATION, ?t, ?still, ?guides, data-safe, prefers-reduced-motion.
+  Timeline, 8,000 ms: splash B 0 to 2,420; tagline 2,020 to 2,420; chat window 2,200 to 2,800;
+  strip rises 2,650 to 3,150; listening 2,950 to 5,000 (Stop pressed 4,860 to 5,040);
+  "Writing it out" 5,150 to 5,850; paste and "Pasted in Slack" at 5,850; hold; outro 7,300 to 7,900.
 -->
 <style>
 @font-face{font-family:Manrope;font-weight:500;src:url("../../android/app/src/main/res/font/manrope_medium.ttf") format("truetype")}
@@ -64,21 +50,38 @@ body{color:var(--ink);font-family:Manrope,"Segoe UI",system-ui,sans-serif;font-w
 .foot{position:absolute;left:94px;top:488px;font-size:21px;color:var(--muted);display:flex;gap:26px;white-space:nowrap}
 .foot b{color:var(--sepia);font-weight:700}
 
-.card{position:absolute;left:628px;top:118px;width:452px;border-radius:22px;background:var(--card);padding:22px 24px 24px;
-  box-shadow:0 0 0 1px rgba(26,26,26,.06),0 2px 4px rgba(60,40,25,.05),0 18px 36px -12px rgba(60,40,25,.20),0 40px 80px -30px rgba(60,40,25,.28)}
-.head{position:relative;height:52px}
-.st{position:absolute;inset:0;display:flex;align-items:center;gap:14px}
-.mark{position:relative;width:30px;height:30px;flex:none;display:grid;place-items:center}
-.rec{width:12px;height:12px;border-radius:50%;background:var(--rec);position:absolute;left:9px;top:9px}
-.halo{width:12px;height:12px;border-radius:50%;background:var(--rec);position:absolute;left:9px;top:9px}
-.ok{position:absolute;inset:1px;border-radius:50%;background:var(--sepia);display:grid;place-items:center}
-.t1{font-size:22px;font-weight:700;letter-spacing:-0.01em;line-height:1.15}
-.t2{font-size:16px;color:var(--muted);margin-top:3px}
-.time{position:absolute;right:0;top:14px;font-size:20px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
-.wave{display:block;margin-top:14px;overflow:visible}
-.out{margin-top:16px;border-top:1px solid #ECE8E3;padding-top:16px;font-size:20px;line-height:1.5;color:var(--ink);min-height:92px}
-.out span{display:inline-block;white-space:pre;position:relative}
-.out span.last::after{content:"";position:absolute;right:-5px;top:4px;width:2px;height:24px;background:var(--sepia);opacity:var(--caret,1)}
+
+/* the target app: a plain chat window, Windows 11 frame */
+.chat{position:absolute;left:640px;top:96px;width:540px;height:300px;border-radius:8px;background:#FFFFFF;overflow:hidden;
+  box-shadow:0 0 0 1px rgba(26,26,26,.10),0 2px 6px rgba(40,30,20,.06),0 16px 34px -12px rgba(40,30,20,.24);font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
+.tb{height:34px;background:#F3F2F0;display:flex;align-items:center;gap:8px;padding:0 0 0 12px;font-size:12.5px;color:#1A1A1A}
+.tb .ap{width:16px;height:16px;flex:none}
+.tb .cap{margin-left:auto;display:flex}.tb .cap i{width:44px;height:34px;display:grid;place-items:center}
+.cb{padding:14px 22px 0}
+.ch{font-size:15px;font-weight:700;padding-bottom:10px;border-bottom:1px solid #ECE9E5}
+.msg{display:flex;gap:12px;margin-top:14px}
+.av{width:34px;height:34px;border-radius:8px;background:#24574A;color:#fff;font:700 15px/34px "Segoe UI",sans-serif;text-align:center;flex:none}
+.who{font-size:14px;font-weight:700}.who small{font-weight:400;color:#555555;font-size:12px;margin-left:8px}
+.txt{font-size:14.5px;line-height:1.45;margin-top:2px}
+.comp{position:absolute;left:22px;right:22px;bottom:18px;min-height:70px;border:1px solid #BDB7B0;border-radius:8px;padding:10px 12px;font-size:14.5px;line-height:1.45;color:#1A1A1A}
+.ph{position:absolute;left:12px;top:10px;color:#555555}
+.caret{display:inline-block;width:1.5px;height:19px;background:#1A1A1A;vertical-align:-4px;margin-left:1px}
+.pasted{position:relative;border-radius:2px}
+/* the real Voxa strip, as in docs/verification/pause/desktop-1-listening.png */
+.strip{position:absolute;left:672px;top:384px;width:476px;height:50px;border-radius:8px;background:#ECEAE8;display:flex;align-items:center;padding:0 9px;gap:12px;
+  box-shadow:0 0 0 1px rgba(26,26,26,.10),0 8px 20px -6px rgba(40,30,20,.28);font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:#1A1A1A}
+.vt{width:30px;height:30px;border-radius:6px;background:#7A3F22;color:#fff;font:600 15px/29px "Segoe UI",sans-serif;text-align:center;flex:none}
+.live{position:relative;flex:1;height:50px}
+.lane{position:absolute;inset:0;display:flex;align-items:center;gap:12px}
+.rd{width:11px;height:11px;border-radius:50%;background:#E5483D;flex:none}
+.an{font-size:13.5px;color:#4A4A4A}
+.sw{overflow:visible}
+.tm{margin-left:auto;font-size:14px;font-variant-numeric:tabular-nums}
+.btns{display:flex;gap:8px}
+.btn{height:30px;padding:0 11px;border-radius:4px;background:#FFFFFF;box-shadow:0 0 0 1px #D9D5D0;font-size:13.5px;display:grid;place-items:center;flex:none}
+.btn.stop{background:#7A3F22;color:#FFFFFF;box-shadow:none}
+.s1{font-size:14px;font-weight:600}.s2{font-size:12.5px;color:#4A4A4A;margin-top:1px}
+.okc{width:18px;height:18px;border-radius:50%;background:#7A3F22;display:grid;place-items:center;flex:none}
 </style>
 </head>
 <body>
@@ -100,23 +103,25 @@ body{color:var(--ink);font-family:Manrope,"Segoe UI",system-ui,sans-serif;font-w
 </svg>
 <div class="tag" id="tag" data-safe="tagline">Talk instead of typing.</div>
 
-<div class="card" id="card" data-safe="card">
-  <div class="head">
-    <div class="st" id="stL">
-      <div class="mark"><span class="halo" id="halo"></span><span class="rec" id="rec"></span></div>
-      <div><div class="t1">Listening</div><div class="t2">Press your shortcut again to finish</div></div>
-    </div>
-    <div class="st" id="stD">
-      <div class="mark"><span class="ok" id="ok"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path id="tick" d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></div>
-      <div><div class="t1">Pasted in Slack</div><div class="t2" id="saved">9 seconds of typing saved</div></div>
-    </div>
-    <div class="time" id="time">0:00</div>
+<div class="chat" id="chat" data-safe="chat window">
+  <div class="tb"><svg class="ap" viewBox="0 0 127 127" width="16" height="16" aria-label="Slack"><path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80zm6.6 0c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A"/><path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47zm0 6.7c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H13.9C6.6 60.1.7 54.2.7 46.9c0-7.3 5.9-13.2 13.2-13.2H47z" fill="#36C5F0"/><path d="M99.9 46.9c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.9V46.9zm-6.6 0c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V13.8C66.9 6.5 72.8.6 80.1.6c7.3 0 13.2 5.9 13.2 13.2v33.1z" fill="#2EB67D"/><path d="M80.1 99.8c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.8h13.2zm0-6.6c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33.1c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80.1z" fill="#ECB22E"/></svg><span>Slack</span><span class="cap"><i><svg width="10" height="10"><path d="M0 5h10" stroke="#555"/></svg></i><i><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="#555"/></svg></i><i><svg width="10" height="10"><path d="M0 0l10 10M10 0 0 10" stroke="#555"/></svg></i></span></div>
+  <div class="cb">
+    <div class="ch"># launch-notes</div>
+    <div class="msg"><div class="av">A</div><div><div class="who">Alexandria<small>10:02</small></div><div class="txt">Standup moved to 10:15. Notes are in the doc.</div></div></div>
   </div>
-  <svg class="wave" id="wave" width="404" height="56" viewBox="0 0 404 56">
-    <path id="wline" fill="none" stroke="#7A3F22" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>
-    <g id="wnib"><g transform="scale(.36)"><path id="wnibBody" fill="#7A3F22"/><circle cx="0" cy="-32" r="4.6" fill="#FFFFFF"/><rect x="-16" y="-44" width="32" height="2.6" fill="#FFFFFF"/></g></g>
-  </svg>
-  <div class="out" id="out"></div>
+  <div class="comp" id="comp"><span class="ph" id="ph">Message #launch-notes</span><span class="pasted" id="pasted">Running ten minutes late, start without me and I will catch up on the notes.</span><span class="caret" id="caret"></span></div>
+</div>
+<div class="strip" id="strip" data-safe="strip">
+  <div class="vt">v</div>
+  <div class="live">
+    <div class="lane" id="laneL"><span class="rd" id="rd"></span><span class="an">Slack</span>
+      <svg class="sw" width="110" height="30" viewBox="0 0 110 30"><path id="wline" fill="none" stroke="#7A3F22" stroke-width="1.4" stroke-linejoin="round"/>
+        <g id="wnib"><g transform="scale(.3)"><path id="wnibBody" fill="#2A2420"/><circle cx="0" cy="-32" r="4.6" fill="#ECEAE8"/></g></g></svg>
+      <span class="tm" id="time">0:00</span></div>
+    <div class="lane" id="laneW"><span class="s1">Writing it out</span></div>
+    <div class="lane" id="laneD"><span class="okc"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path id="tick" d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><div><div class="s1">Pasted in Slack</div><div class="s2">Your clipboard is back as it was</div></div></div>
+  </div>
+  <div class="btns" id="btns"><span class="btn">Cancel</span><span class="btn">Pause</span><span class="btn stop" id="stop">Stop</span></div>
 </div>
 
 <div class="wash2"></div>
@@ -140,44 +145,26 @@ const span = (t, a, b) => clamp((t - a) / (b - a));
 
 /* splash variant B, unchanged timings */
 const V = { appear: [0, 450], hold: [450, 570], write: [570, 1870], lift: [1870, 2070], settle: [1870, 2270], moveEase: ease(.3, 0, .15, 1), fadeMs: 320, writeEase: ease(.64, 0, .3, 1) };
-const TAG = [2020, 2420], CARD = [2250, 2850], LISTEN = [2700, 5300], STOP = 5300, SAVED = [5600, 6000], OUT = [7300, 7900];
 
-/* the words, each with the moment it is spoken; a breath after the comma */
-const TEXT = 'Running ten minutes late, start without me and I will catch up on the notes.'.split(' ');
-const SPOKEN = []; { let s = 2900; TEXT.forEach((w, i) => { SPOKEN.push(s); s += 92 + w.replace(/[^a-z]/gi, '').length * 11 + (w.endsWith(',') ? 170 : 0); }); }
-const out = $('out');
-out.innerHTML = TEXT.map((w, i) => `<span>${w}${i < TEXT.length - 1 ? ' ' : ''}</span>`).join('');
-const spans = [...out.children];
+/* the strip's voice line: it grows from the left with the nib at its head, then scrolls, as in the app */
+const LISTEN = [2950, 5000], STOP = 5000, WRITE = [5150, 5850], PASTE = 5850;
+const CHAT = [2200, 2800], STRIP = [2650, 3150], OUT = [7300, 7900], TAG = [2020, 2420];
 const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
-/* speech envelope: one burst per word, syllables inside it, silence between */
-function env(t) {
-  if (t < LISTEN[0] + 150 || t > STOP - 60) return 0;
-  let a = 0;
-  SPOKEN.forEach((s, i) => { const len = 60 + TEXT[i].length * 10, c = s + len / 2, w = len / 2.1;
-    const g = Math.exp(-(((t - c) / w) ** 2)); a = Math.max(a, g * (0.55 + 0.45 * hash(i + 3)) * (0.75 + 0.25 * Math.sin(t / 23 + i))); });
-  return a;
-}
-const W = 404, H = 56, MID = 30, HEAD = 344, STEP = 3.1, SPEED = 0.125; // px per ms
+const SYL = []; { let s = LISTEN[0] + 120; for (let i = 0; i < 26; i++) { SYL.push([s, 60 + 80 * hash(i + 9)]); s += 70 + 60 * hash(i + 2) + (i === 7 || i === 17 ? 170 : 0); } }
+function env(t) { if (t < LISTEN[0] + 80 || t > STOP - 40) return 0; let a = 0;
+  SYL.forEach(([s, w], i) => { a = Math.max(a, Math.exp(-(((t - s - w / 2) / (w / 2)) ** 2)) * (0.5 + 0.5 * hash(i))); }); return a; }
+const MID = 16, X0 = 2, XMAX = 100, STEP = 2.2, SPEED = 0.05;
 function drawWave(t) {
-  const te = Math.min(t, STOP);                       // the line freezes when Voxa stops listening
-  const k1 = Math.floor((te - 2500) / (STEP / SPEED)); // newest sample
-  const pts = [];
-  for (let k = k1; k >= 0; k--) {
-    const tk = 2500 + k * STEP / SPEED, x = HEAD - (te - tk) * SPEED;
-    if (x < -2) break;
-    const a = env(tk), amp = a * 22 * (0.45 + 0.55 * hash(k));
-    pts.push([x, MID + (k % 2 ? -amp : amp)]);
-  }
-  let x0 = pts.length ? pts[pts.length - 1][0] : HEAD;
-  if (x0 > 0) pts.push([0, MID]);
-  const d = pts.reverse().map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-  $('wline').setAttribute('d', d || `M0 ${MID} L${HEAD} ${MID}`);
-  const tipY = pts.length ? pts[pts.length - 1][1] : MID, tipX = pts.length ? pts[pts.length - 1][0] : HEAD;
-  const lf = ACCEL(span(t, STOP, STOP + 260)), ap = DECEL(span(t, CARD[0] + 200, CARD[1] + 100));
-  $('wnib').setAttribute('transform', `translate(${(tipX + 6 * lf).toFixed(2)} ${(tipY - 10 * lf).toFixed(2)}) rotate(${(35 + 8 * lf).toFixed(2)})`);
-  $('wnib').style.opacity = (ap * (1 - lf)).toFixed(3);
+  const te = Math.min(t, STOP), k1 = Math.max(0, Math.floor((te - LISTEN[0]) / (STEP / SPEED)));
+  const head = Math.min(XMAX, X0 + Math.max(0, te - LISTEN[0]) * SPEED), pts = [];
+  for (let k = k1; k >= 0; k--) { const tk = LISTEN[0] + k * STEP / SPEED, x = head - (te - tk) * SPEED; if (x < X0 - 1) break;
+    const amp = env(tk) * 11 * (0.4 + 0.6 * hash(k)); pts.push([x, MID + (k % 2 ? -amp : amp)]); }
+  if (!pts.length) pts.push([head, MID]);
+  pts.reverse();
+  $('wline').setAttribute('d', (pts.length < 2 ? `M${X0} ${MID} ` : '') + pts.map((p, i) => (i || pts.length < 2 ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' '));
+  const tip = pts[pts.length - 1];
+  $('wnib').setAttribute('transform', `translate(${tip[0].toFixed(2)} ${tip[1].toFixed(2)}) rotate(35)`);
 }
-
 const ink = $('ink'), nib = $('nib'); const L = ink.getTotalLength();
 function drawSplash(t) {
   const p = V.writeEase(span(t, V.write[0], V.write[1]));
@@ -201,44 +188,42 @@ function drawSplash(t) {
 
 function render(t) {
   t = ((t % T) + T) % T;
-  // background parallax: one full sine per loop, so frame 0 and frame 8,000 match
   const ph = 2 * Math.PI * t / T;
   $('d1').style.transform = `translate(${(-10 * Math.sin(ph)).toFixed(2)}px,${(4 * Math.cos(ph)).toFixed(2)}px) rotateY(-16deg) rotateX(5deg) rotateZ(-1deg)`;
   $('d3').style.transform = `translate(${(-16 * Math.sin(ph + .5)).toFixed(2)}px,${(6 * Math.cos(ph + .5)).toFixed(2)}px) rotateY(14deg) rotateX(4deg) rotateZ(3deg) scale(.92)`;
   $('d2').style.transform = `translate(${(-24 * Math.sin(ph + 1)).toFixed(2)}px,${(8 * Math.cos(ph + 1)).toFixed(2)}px) rotateY(-12deg) rotateX(4deg) rotateZ(4deg)`;
-  // outro
   const o = ACCEL(span(t, OUT[0], OUT[1])), keep = 1 - o, lift = -6 * o;
   drawSplash(t);
   const word = document.querySelector('.word'); word.style.opacity = keep; word.style.transform = `translateY(${lift}px)`;
   const tg = DECEL(span(t, TAG[0], TAG[1]));
   $('tag').style.opacity = (tg * keep).toFixed(3); $('tag').style.transform = `translateY(${(12 * (1 - tg) + lift).toFixed(2)}px)`;
-  const c = DECEL(span(t, CARD[0], CARD[1]));
-  $('card').style.opacity = (Math.min(1, c * 1.4) * keep).toFixed(3);
-  $('card').style.transform = `translateY(${(24 * (1 - c) + lift).toFixed(2)}px) scale(${(0.97 + .03 * c).toFixed(4)})`;
-  // header: listening, then pasted
-  const sw = span(t, STOP, STOP + 450), outL = STD(span(t, STOP, STOP + 260)), inD = DECEL(span(t, STOP + 150, STOP + 450));
-  $('stL').style.opacity = (1 - outL).toFixed(3); $('stL').style.transform = `translateY(${(-14 * outL).toFixed(2)}px)`;
-  $('stD').style.opacity = inD.toFixed(3); $('stD').style.transform = `translateY(${(14 * (1 - inD)).toFixed(2)}px)`;
-  const breath = t < STOP ? (((t - LISTEN[0]) % 1100) + 1100) % 1100 / 1100 : 0;
-  const recOn = t >= LISTEN[0] ? 1 : DECEL(span(t, CARD[0] + 200, LISTEN[0]));
-  $('rec').style.opacity = recOn; $('rec').style.transform = `scale(${(0.6 + 0.4 * recOn).toFixed(3)})`;
-  $('halo').style.opacity = t >= LISTEN[0] && t < STOP ? (.32 * (1 - DECEL(breath))).toFixed(3) : 0;
-  $('halo').style.transform = `scale(${(1 + 1.3 * DECEL(breath)).toFixed(3)})`;
-  $('ok').style.transform = `scale(${(0.6 + 0.4 * inD).toFixed(3)})`;
-  const tick = $('tick'), tl = 22; tick.style.strokeDasharray = tl; tick.style.strokeDashoffset = (tl * (1 - STD(span(t, STOP + 220, STOP + 520)))).toFixed(2);
-  const sv = DECEL(span(t, SAVED[0], SAVED[1]));
-  $('saved').style.opacity = sv.toFixed(3); $('saved').style.transform = `translateY(${(6 * (1 - sv)).toFixed(2)}px)`;
-  // timer: seven seconds of speech, shown as a time lapse
-  const secs = Math.min(7, Math.floor(span(t, LISTEN[0], STOP) * 7.999));
-  $('time').textContent = `0:0${secs}`;
-  $('time').style.color = t >= STOP ? '#555555' : '#1A1A1A';
+  const c = DECEL(span(t, CHAT[0], CHAT[1]));
+  $('chat').style.opacity = (Math.min(1, c * 1.4) * keep).toFixed(3); $('chat').style.transform = `translateY(${(16 * (1 - c) + lift).toFixed(2)}px)`;
+  // the strip slides up from the bottom of the screen, like the app's
+  const sp = DECEL(span(t, STRIP[0], STRIP[1])), so = ACCEL(span(t, OUT[0] - 100, OUT[1] - 200));
+  $('strip').style.opacity = (Math.min(1, sp * 1.5) * (1 - so)).toFixed(3);
+  $('strip').style.transform = `translateY(${(22 * (1 - sp) + 14 * so).toFixed(2)}px)`;
+  // Stop: a short press
+  const pr = Math.sin(Math.PI * span(t, STOP - 140, STOP + 40));
+  $('stop').style.background = pr > 0 ? `color-mix(in srgb, #7A3F22, #000 ${(18 * pr).toFixed(1)}%)` : '';
+  $('stop').style.transform = `scale(${(1 - .04 * pr).toFixed(3)})`;
+  // lanes: listening, writing it out, pasted
+  const lOut = STD(span(t, STOP + 120, STOP + 320)), wIn = DECEL(span(t, WRITE[0], WRITE[0] + 260)), wOut = STD(span(t, PASTE - 120, PASTE + 80));
+  const dIn = DECEL(span(t, PASTE, PASTE + 320));
+  $('laneL').style.opacity = (1 - lOut).toFixed(3); $('laneL').style.transform = `translateY(${(-8 * lOut).toFixed(2)}px)`;
+  $('btns').style.opacity = (1 - lOut).toFixed(3);
+  $('laneW').style.opacity = (wIn * (1 - wOut)).toFixed(3); $('laneW').style.transform = `translateY(${(8 * (1 - wIn) - 8 * wOut).toFixed(2)}px)`;
+  $('laneD').style.opacity = dIn.toFixed(3); $('laneD').style.transform = `translateY(${(8 * (1 - dIn)).toFixed(2)}px)`;
+  const tick = $('tick'); tick.style.strokeDasharray = 22; tick.style.strokeDashoffset = (22 * (1 - STD(span(t, PASTE + 120, PASTE + 420)))).toFixed(2);
+  const breath = t < STOP && t >= LISTEN[0] ? ((t - LISTEN[0]) % 1100) / 1100 : 0;
+  $('rd').style.opacity = (1 - .45 * Math.sin(Math.PI * breath)).toFixed(3);
+  $('time').textContent = `0:0${Math.min(7, Math.floor(span(t, LISTEN[0], STOP) * 7.999))}`;
   drawWave(t);
-  // words: each appears 260 ms after it is spoken, out of a 4 px blur
-  let last = -1;
-  spans.forEach((sEl, i) => { const k = STD(span(t, SPOKEN[i] + 260, SPOKEN[i] + 500));
-    sEl.style.opacity = k.toFixed(3); sEl.style.filter = k < 1 ? `blur(${(4 * (1 - k)).toFixed(2)}px)` : 'none';
-    sEl.style.transform = `translateY(${(3 * (1 - k)).toFixed(2)}px)`; if (k > 0) last = i; sEl.classList.remove('last'); });
-  if (last >= 0) { spans[last].classList.add('last'); out.style.setProperty('--caret', (1 - STD(span(t, STOP + 100, STOP + 400))).toFixed(3)); }
+  // the paste: all at once, the way the app does it, with a brief selection tint that fades
+  const pa = t >= PASTE;
+  $('ph').style.opacity = pa ? 0 : 1; $('pasted').style.display = pa ? '' : 'none';
+  $('pasted').style.background = pa ? `rgba(122,63,34,${(.16 * (1 - STD(span(t, PASTE, PASTE + 700)))).toFixed(3)})` : '';
+  $('caret').style.opacity = Math.floor(t / 530) % 2 ? 0 : 1;
 }
 window.render = render; window.STILL_T = 7000;
 

@@ -46,8 +46,17 @@ class Browser:
         self.exe, self.env = exe, dict(os.environ, AGENT_BROWSER_SESSION=session)
         self.run("set", "viewport", str(width), str(height))
 
-    def run(self, *args, stdin=None):
-        p = subprocess.run([self.exe, *args], input=stdin, capture_output=True, text=True, env=self.env, shell=False)
+    def run(self, *args, stdin=None, timeout=90):
+        # A fresh or just closed session can leave the first command hanging; time out and retry once.
+        for attempt in (1, 2):
+            try:
+                p = subprocess.run([self.exe, *args], input=stdin, capture_output=True, text=True, env=self.env,
+                                   shell=False, timeout=timeout)
+                break
+            except subprocess.TimeoutExpired:
+                if attempt == 2:
+                    raise SystemExit(f"agent-browser {' '.join(args[:2])} timed out twice")
+                print(f"agent-browser {args[0]} timed out, retrying")
         if p.returncode != 0:
             raise SystemExit(f"agent-browser {' '.join(args[:2])} failed: {p.stderr or p.stdout}")
         return p.stdout.strip()
