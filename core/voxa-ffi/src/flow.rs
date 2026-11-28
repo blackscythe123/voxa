@@ -571,11 +571,10 @@ impl Drop for VoxaFlow {
 /// A new History entry's id: the ms recording started, made unique in this process (two takes
 /// in one millisecond would share an entry and a recording).
 fn unique_entry_id() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static LAST: AtomicU64 = AtomicU64::new(0);
-    let now = now_ms();
-    let prev = LAST.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |last| Some(last.max(now.saturating_sub(1)) + 1)).unwrap_or(0);
-    prev.max(now.saturating_sub(1)) + 1
+    static LAST: Mutex<u64> = Mutex::new(0);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    *last = (*last + 1).max(now_ms());
+    *last
 }
 
 /// Whether the flow's view of an entry may be written over what History holds now.
