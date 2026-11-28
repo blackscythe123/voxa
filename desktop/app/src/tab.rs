@@ -121,49 +121,69 @@ mod focus_probe {
 /// Editors and terminals that can host Claude Code.
 const HOSTS: &[(&str, &str)] = &[("code", "VS Code"), ("cursor", "Cursor"), ("windsurf", "Windsurf"), ("windowsterminal", "Terminal")];
 
-/// "Claude Code" when the focused part of an editor or terminal is Claude Code: its extension
-/// panel, or a terminal running the claude CLI. Returns (app, host), e.g. ("Claude Code", "VS Code").
-pub fn coding_agent(exe_stem: &str, pid: u32) -> Option<(String, String)> {
+/// The coding agent the user is typing into inside an editor or terminal: Claude Code's panel,
+/// or the focused terminal running an agent CLI. Returns (app, host), e.g. ("Claude Code", "VS Code").
+pub fn coding_agent(exe_stem: &str, _pid: u32) -> Option<(String, String)> {
     let host = HOSTS.iter().find(|(s, _)| *s == exe_stem)?.1.to_string();
     let path = focus_path(8);
-    let first = path.first().map(|s| s.as_str()).unwrap_or("");
-    let names = path.join(" | ").to_lowercase();
-    let in_terminal = first.starts_with("Terminal") || exe_stem == "windowsterminal";
-    // Claude Code titles its terminal with a status mark (idle or working).
-    let claude_title = first.chars().take(24).any(|c| matches!(c, '✳' | '✻' | '✽' | '◐' | '◑' | '◒' | '◓' | '✶' | '✢' | '·'));
-    let is_claude = names.contains("claude") || (in_terminal && (claude_title || claude_under(pid)));
-    is_claude.then(|| ("Claude Code".to_string(), host))
+    let in_terminal = path.first().is_some_and(|f| f.starts_with("Terminal")) || exe_stem == "windowsterminal";
+    agent_from_focus(&path, in_terminal).map(|a| (a.to_string(), host))
 }
 
-/// Is a claude.exe running somewhere under process `root` (e.g. in one of VS Code's terminals)?
-fn claude_under(root: u32) -> bool {
-    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
-    let mut procs: Vec<(u32, u32, String)> = Vec::new();
-    unsafe {
-        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
-        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
-        if Process32FirstW(snap, &mut e).is_ok() {
-            loop {
-                let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
-                procs.push((e.th32ProcessID, e.th32ParentProcessID, String::from_utf16_lossy(&e.szExeFile[..len]).to_lowercase()));
-                if Process32NextW(snap, &mut e).is_err() {
-                    break;
-                }
-            }
-        }
-        let _ = windows::Win32::Foundation::CloseHandle(snap);
+/// Decide the agent from the focused element's own name and its ancestors only. A terminal is
+/// judged by its own title, never by what runs elsewhere in the editor: with Claude Code in one
+/// terminal and Antigravity in another, dictating into the Antigravity one must not say Claude Code.
+pub(crate) fn agent_from_focus(path: &[String], in_terminal: bool) -> Option<&'static str> {
+    let first = path.first().map(|s| s.as_str()).unwrap_or("");
+    if in_terminal {
+        let title = first.to_lowercase();
+        let word = |w: &str| title.split(|c: char| !c.is_alphanumeric()).any(|t| t == w);
+        // Claude Code titles its terminal with a status mark (idle or working).
+        let claude_mark = first.chars().take(24).any(|c| matches!(c, '✳' | '✻' | '✽' | '◐' | '◑' | '◒' | '◓' | '✶' | '✢'));
+        return if claude_mark || title.contains("claude") {
+            Some("Claude Code")
+        } else if word("agy") || title.contains("antigravity") {
+            Some("Antigravity")
+        } else if title.contains("gemini") {
+            Some("Gemini CLI")
+        } else if word("codex") {
+            Some("Codex")
+        } else {
+            None
+        };
     }
-    procs.iter().filter(|(_, _, n)| n == "claude.exe").any(|(pid, _, _)| {
-        let mut cur = *pid;
-        for _ in 0..12 {
-            match procs.iter().find(|(p, _, _)| *p == cur) {
-                Some((_, parent, _)) if *parent == root => return true,
-                Some((_, parent, _)) if *parent != 0 && *parent != cur => cur = *parent,
-                _ => return false,
-            }
-        }
-        false
-    })
+    // Outside a terminal: Claude Code's extension panel names itself.
+    path.join(" | ").to_lowercase().contains("claude").then_some("Claude Code")
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::agent_from_focus;
+    fn p(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_terminal_is_judged_by_its_own_title_not_by_claude_running_in_another_terminal() {
+        // The owner's case: Claude Code runs in the "cc" terminal, dictation went into "agy".
+        assert_eq!(agent_from_focus(&p(&["Terminal 2, agy", "Terminal", "Visual Studio Code"]), true), Some("Antigravity"));
+        assert_eq!(agent_from_focus(&p(&["Terminal 3, powershell", "Visual Studio Code"]), true), None);
+    }
+
+    #[test]
+    fn claude_code_terminals_and_panel_are_still_named() {
+        assert_eq!(agent_from_focus(&p(&["Terminal 1, ✳ cc"]), true), Some("Claude Code"));
+        assert_eq!(agent_from_focus(&p(&["Terminal 1, claude"]), true), Some("Claude Code"));
+        assert_eq!(agent_from_focus(&p(&["Message input", "Claude Code"]), false), Some("Claude Code"));
+        assert_eq!(agent_from_focus(&p(&["page.tsx", "Editor"]), false), None);
+    }
+
+    #[test]
+    fn other_agent_clis_get_their_own_names() {
+        assert_eq!(agent_from_focus(&p(&["Terminal 4, gemini"]), true), Some("Gemini CLI"));
+        assert_eq!(agent_from_focus(&p(&["Terminal 5, codex"]), true), Some("Codex"));
+        assert_eq!(agent_from_focus(&p(&["Terminal 6, legacy"]), true), None, "agy must be a whole word");
+    }
 }
 
 /// What the focused element looks like to UI Automation, for deciding whether a paste lands.
