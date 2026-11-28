@@ -87,7 +87,7 @@ pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, la
         esc(title),
         esc(body)
     );
-    match post(tag, &xml, update) {
+    match off_ui(|| post(tag, &xml, update)) {
         Ok(()) => {
             crate::os::log(&format!("toast shown: {tag}"));
             true
@@ -97,6 +97,23 @@ pub fn show(tag: &str, title: &str, body: &str, button: Option<(&str, &str)>, la
             false
         }
     }
+}
+
+/// Runs a toast call on a short-lived worker thread in the multithreaded apartment and waits for
+/// it. Called on the UI thread (an STA) the call goes out of process, and COM's modal loop
+/// dispatches the strip's window messages to GPUI while it is inside an update: GPUI logged
+/// "RefCell already borrowed" at every start (the sign-in toast removed after the session check).
+/// Waiting on a thread join pumps nothing.
+fn off_ui<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    // The multithreaded apartment stays up for the whole run (toasts made on a worker keep their
+    // Activated and Dismissed events after it ends); workers join it implicitly.
+    static MTA: std::sync::Once = std::sync::Once::new();
+    MTA.call_once(|| {
+        if let Err(e) = unsafe { windows::Win32::System::Com::CoIncrementMTAUsage() } {
+            crate::os::log(&format!("FAIL keeping the toast apartment: {e}"));
+        }
+    });
+    std::thread::scope(|s| s.spawn(f).join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
 }
 
 fn post(tag: &str, xml: &str, update: bool) -> windows::core::Result<()> {
@@ -137,7 +154,7 @@ fn post(tag: &str, xml: &str, update: bool) -> windows::core::Result<()> {
 
 pub fn remove(tag: &str) {
     LIVE.lock().unwrap_or_else(|e| e.into_inner()).retain(|(t, _)| t != tag);
-    let r = ToastNotificationManager::History().and_then(|h| h.RemoveGroupedTagWithId(&HSTRING::from(tag), &HSTRING::from(GROUP), &HSTRING::from(aumid())));
+    let r = off_ui(|| ToastNotificationManager::History().and_then(|h| h.RemoveGroupedTagWithId(&HSTRING::from(tag), &HSTRING::from(GROUP), &HSTRING::from(aumid()))));
     if let Err(e) = r {
         crate::os::log(&format!("toast {tag} not removed: {e}"));
     }
@@ -146,4 +163,20 @@ pub fn remove(tag: &str) {
 /// Windows doesn't ask: toasts are on unless the user turned them off in Settings.
 pub fn ask_permission() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    /// "RefCell already borrowed" at every start: toast calls never run on the UI thread, where
+    /// COM's modal loop re-entered GPUI. Every WinRT toast call goes through off_ui.
+    #[test]
+    fn toast_calls_run_off_the_ui_thread() {
+        let src = include_str!("notify_win.rs").replace("\r\n", "\n");
+        let code = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
+        assert!(code.contains("off_ui(|| post("), "show posts off the UI thread");
+        for line in code.lines().filter(|l| l.contains("ToastNotificationManager::History()")) {
+            assert!(line.contains("off_ui("), "History() off the UI thread: {line}");
+        }
+        assert_eq!(code.matches("post(tag").count(), 2, "post is defined once and called once (through off_ui)");
+    }
 }
