@@ -1,0 +1,5 @@
+#!/bin/sh
+# Voxa guardrails: every commit must pass the decision lints (docs/guardrails.md).
+# Runs for people and agents alike; a failing rule blocks the commit.
+command -v python >/dev/null 2>&1 || { echo "pre-commit: python not found, guardrails not run" >&2; exit 1; }
+python tools/lint/run.py || { echo "pre-commit: guardrails failed, commit blocked (fix the code, see docs/guardrails.md)" >&2; exit 1; }

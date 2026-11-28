@@ -1,0 +1,4 @@
+#!/bin/sh
+# Voxa: nothing is pushed unless every regression test and the lint self-test pass.
+python tools/lint/run.py --self-test || exit 1
+PATH="$HOME/.cargo/bin:$PATH" cargo test -q --release --workspace --no-fail-fast || { echo "pre-push: tests failed, push blocked" >&2; exit 1; }
