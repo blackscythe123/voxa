@@ -13,6 +13,11 @@
                        write_unique_then_rename), never with a bare std::fs::write / File::create on the
                        final path; and each writer's temporary file has a unique name (process id plus a
                        counter or time), so two writers never share one temp file.
+  robust-strip-sync    no synchronous SetWindowPos / ShowWindow / ShowWindowAsync / MoveWindow under
+                       desktop/app/src outside ALLOWED_WINDOW_CALLS: the strip is moved, shown and hidden by
+                       posting to its own message queue (1.0.0 "RefCell already borrowed" at start).
+  robust-toast-thread  WinRT toast calls in notify_win.rs run through off_ui (a worker thread), never on
+                       the UI thread, where COM's modal loop re-entered a borrowed GPUI.
 """
 
 from __future__ import annotations
@@ -172,4 +177,73 @@ def check_rename(ctx: Ctx) -> list[Violation]:
 
 
 def check(ctx: Ctx) -> list[Violation]:
-    return check_case_slice(ctx) + check_unwrap(ctx) + check_atomic_writes(ctx) + check_unique_temp(ctx) + check_rename(ctx)
+    return (check_case_slice(ctx) + check_unwrap(ctx) + check_atomic_writes(ctx) + check_unique_temp(ctx) + check_rename(ctx)
+        + check_strip_sync(ctx) + check_toast_thread(ctx))
+
+
+# Synchronous window calls on the desktop: allowed only where nothing in GPUI is borrowed.
+WINDOW_CALL = re.compile(r"\b(SetWindowPos|ShowWindow|ShowWindowAsync|MoveWindow|SetWindowPlacement)\s*\(")
+ALLOWED_WINDOW_CALLS = {
+    ("desktop/app/src/win.rs", "place_now", "SetWindowPos"): "the strip's posted message, run from the message loop",
+    ("desktop/app/src/win.rs", "strip_message", "ShowWindowAsync"): "the strip's posted message, run from the message loop",
+    ("desktop/app/src/win.rs", "no_activate_proc", "ShowWindow"): "hides the strip GPUI showed on a display change, from the message loop",
+    ("desktop/app/src/win.rs", "make_overlay", "SetWindowPos"): "styles a window GPUI is still creating, before its callbacks are wired",
+    ("desktop/app/src/win.rs", "switch_to", "ShowWindow"): "restores another app's window (the paste target), never a Voxa window",
+    ("desktop/app/src/win.rs", "bring_to_front", "ShowWindow"): "the main window in its own process, never the strip",
+}
+
+
+def check_strip_sync(ctx: Ctx) -> list[Violation]:
+    """robust-strip-sync: the strip is moved, shown and hidden only by posting to its own message
+    queue (win.rs post_strip). A synchronous SetWindowPos / ShowWindow from inside a GPUI update
+    re-enters GPUI's window procedure: "RefCell already borrowed" at the 1.0.0 start."""
+    out = []
+    for rel in S.files(ctx.root, "desktop/app/src/**/*.rs"):
+        src = S.load(ctx.root, rel)
+        m = S.masked(src)
+        tests = S.test_ranges(src)
+        fns = S.functions(src)
+        for hit in WINDOW_CALL.finditer(m):
+            if S.in_ranges(hit.start(), tests):
+                continue
+            f = S.enclosing_fn(fns, hit.start())
+            name = f.name if f else "?"
+            if (rel, name, hit.group(1)) in ALLOWED_WINDOW_CALLS:
+                continue
+            line = src.line_of(hit.start())
+            out.append(Violation("robust-strip-sync", rel, line, f"{hit.group(1)} in {name}(). Rule: move, show or hide the strip "
+                                 "through os::strip_visible / place_strip / move_strip, which post to the strip's message queue; "
+                                 "a synchronous window call inside GPUI logs \"RefCell already borrowed\" and drops the move "
+                                 "(docs/guardrails.md#8-robustness)", key=f"{name}: {src.line_text(line).strip()}"))
+    return out
+
+
+TOAST_FILE = "desktop/app/src/notify_win.rs"
+
+
+def check_toast_thread(ctx: Ctx) -> list[Violation]:
+    """robust-toast-thread: WinRT toast calls run through off_ui (a worker thread), never on the
+    UI thread, where COM's modal loop dispatched window messages into a borrowed GPUI."""
+    out = []
+    for rel in S.files(ctx.root, TOAST_FILE):
+        src = S.load(ctx.root, rel)
+        m = S.masked(src)
+        tests = S.test_ranges(src)
+        fns = S.functions(src)
+        hits = [(h, "ToastNotificationManager") for h in re.finditer(r"\bToastNotificationManager::", m)]
+        hits += [(h, "post") for h in re.finditer(r"(?<!fn )\bpost\s*\(", m)]
+        for hit, what in hits:
+            if S.in_ranges(hit.start(), tests):
+                continue
+            f = S.enclosing_fn(fns, hit.start())
+            if what == "ToastNotificationManager" and f and f.name == "post":
+                continue
+            line_start = m.rfind("\n", 0, hit.start()) + 1
+            if "off_ui(" in m[line_start:hit.start()]:
+                continue
+            line = src.line_of(hit.start())
+            out.append(Violation("robust-toast-thread", rel, line, f"{what} called on the UI thread in "
+                                 f"{f.name if f else '?'}(). Rule: toast calls go through off_ui(|| ...); on the UI thread "
+                                 "COM's modal loop re-enters GPUI (\"RefCell already borrowed\") (docs/guardrails.md#8-robustness)",
+                                 key=src.line_text(line).strip()))
+    return out

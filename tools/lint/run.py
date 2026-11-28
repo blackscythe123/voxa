@@ -117,7 +117,7 @@ def main_self_test() -> int:
     rules = {r for r, _ in expected}
     every = {"contrast", "copy-emoji", "copy-dash", "copy-case", "copy-occasion", "privacy-log", "privacy-notify", "focus-steal",
              "focus-notify", "android-size", "android-deps", "android-workmanager", "android-exact-alarm", "android-signing", "isolation-env", "isolation-test-hook",
-             "release-latest", "release-version-sync", "robust-case-slice", "robust-unwrap", "robust-atomic-write", "robust-rename", "licence-consistent",
+             "release-latest", "release-version-sync", "robust-case-slice", "robust-unwrap", "robust-atomic-write", "robust-rename", "robust-strip-sync", "robust-toast-thread", "licence-consistent",
              "update-hosts", "update-key-present", "update-secret", "update-gate", "update-isolation", "android-release-key",
              "android-onboarding-permissions",
              "licences-stale", "licences-allowed", "licences-asset",

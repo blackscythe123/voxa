@@ -58,6 +58,9 @@
 1 robust-rename core/voxa-demo/src/lib.rs                         # bare fs::rename; replace_file is fine
 1 robust-rename desktop/app/src/ui.rs                             # the fixed-temp settings write also renames bare
 2 robust-atomic-write desktop/app/src/ui.rs                         # direct settings.json write, fixed temp name
+2 robust-strip-sync desktop/app/src/ui.rs                         # the focus-steal fixture's ShowWindow is also synchronous
+2 robust-strip-sync desktop/app/src/win.rs                        # synchronous move and show of the strip
+2 robust-toast-thread desktop/app/src/notify_win.rs               # post and History() on the UI thread
 
 # 9. licence (fixture: GPL LICENSE, no NOTICE, MIT Cargo.toml, GPL README)
 1 licence-consistent LICENSE
