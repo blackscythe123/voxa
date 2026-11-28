@@ -8,6 +8,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,8 +32,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,21 +40,29 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.voxa.android.MainActivity
@@ -271,14 +279,12 @@ fun KeyboardLookScreen(activity: MainActivity) {
                         Text("${(minOf(look.strength, cap) * 100).toInt()} %", style = Type.SBold, color = c.text56)
                     }
                     // The thumb stops where text would stop reading (the rest of the track can't be picked).
-                    Slider(
+                    VSlider(
                         value = minOf(look.strength, cap),
-                        onValueChange = { look = look.copy(strength = it.coerceAtMost(cap)) },
-                        onValueChangeFinished = { update(look) },
-                        colors = SliderDefaults.colors(
-                            thumbColor = c.accent, activeTrackColor = c.accent, inactiveTrackColor = c.text16,
-                            activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
-                        ),
+                        max = cap,
+                        label = "Photo strength",
+                        onChange = { look = look.copy(strength = it) },
+                        onDone = { update(look) },
                     )
                     Box(Modifier.fillMaxWidth().height(1.dp).background(c.hair))
                     Row(
@@ -371,3 +377,46 @@ private fun MicDot(name: String, color: Color, selected: Boolean, onClick: () ->
 }
 
 private fun Color.toArgbInt(): Int = android.graphics.Color.argb((alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())
+
+/**
+ * Photo strength: 0 to 100 %, sepia up to the value. The thumb can't pass [max] (where text would
+ * stop reading); a small dot marks that stop. Small on purpose: Material's slider is a large library.
+ */
+@Composable
+private fun VSlider(value: Float, max: Float, label: String, onChange: (Float) -> Unit, onDone: () -> Unit) {
+    val c = vx
+    val change by rememberUpdatedState(onChange)
+    val done by rememberUpdatedState(onDone)
+    val thumb = 20.dp
+    Box(
+        Modifier.fillMaxWidth().height(48.dp)
+            .pointerInput(max) {
+                val pad = thumb.toPx() / 2
+                val at = { x: Float -> ((x - pad) / (size.width - 2 * pad)).coerceIn(0f, max) }
+                detectTapGestures { change(at(it.x)); done() }
+            }
+            .pointerInput(max) {
+                val pad = thumb.toPx() / 2
+                val at = { x: Float -> ((x - pad) / (size.width - 2 * pad)).coerceIn(0f, max) }
+                detectHorizontalDragGestures(onDragEnd = { done() }, onDragCancel = { done() }) { e, _ ->
+                    e.consume()
+                    change(at(e.position.x))
+                }
+            }
+            .semantics {
+                contentDescription = label
+                progressBarRangeInfo = ProgressBarRangeInfo(value, 0f..1f)
+                setProgress { v -> change(v.coerceIn(0f, max)); done(); true }
+            }
+            .drawBehind {
+                val pad = thumb.toPx() / 2
+                val w = size.width - 2 * pad
+                val h = 4.dp.toPx()
+                val y = size.height / 2
+                drawRoundRect(c.text16, Offset(pad, y - h / 2), Size(w, h), CornerRadius(h / 2))
+                drawRoundRect(c.accent, Offset(pad, y - h / 2), Size(w * value, h), CornerRadius(h / 2))
+                if (max < 1f) drawCircle(c.text40, 3.dp.toPx(), Offset(pad + w * max, y))
+                drawCircle(c.accent, pad, Offset(pad + w * value, y))
+            },
+    )
+}
