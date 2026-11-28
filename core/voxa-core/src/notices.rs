@@ -180,6 +180,7 @@ pub const BIRTHDAY_GRACE_DESKTOP_MIN: u16 = 2;
 /// never wishes twice. 29 February is wished on 28 February in other years. Local dates only, so
 /// a time zone or daylight saving change can't move the day.
 pub fn next_birthday_wish(today: Date, birthday: MonthDay, wished_year: i32) -> Date {
+    let wished_year = sane_wished_year(today, wished_year);
     let mut y = today.y;
     loop {
         let d = Date::new(y, birthday.month, birthday.day).in_year(y);
@@ -190,9 +191,16 @@ pub fn next_birthday_wish(today: Date, birthday: MonthDay, wished_year: i32) -> 
     }
 }
 
+/// A wish recorded in a year after today's was shown while the clock was wrong (set ahead by hand
+/// or by a bad network time). It can't block real birthdays until that year: it counts as last year.
+fn sane_wished_year(today: Date, wished_year: i32) -> i32 {
+    if wished_year > today.y { today.y - 1 } else { wished_year }
+}
+
 /// Whether to show the wish now: it is the birthday, `minutes` after local midnight is still
 /// within `grace_minutes`, and this year's wish hasn't been shown.
 pub fn birthday_wish_due(today: Date, minutes: u16, birthday: MonthDay, wished_year: i32, grace_minutes: u16) -> bool {
+    let wished_year = sane_wished_year(today, wished_year);
     birthday.valid() && birthday.is(today) && wished_year < today.y && minutes < grace_minutes
 }
 
@@ -389,5 +397,16 @@ mod tests {
     fn quiet_hours() {
         assert!(quiet_hour(21) && quiet_hour(23) && quiet_hour(0) && quiet_hour(7));
         assert!(!quiet_hour(8) && !quiet_hour(12) && !quiet_hour(20));
+    }
+
+    #[test]
+    fn a_wish_shown_while_the_clock_was_set_ahead_does_not_skip_real_birthdays() {
+        let bday = MonthDay { month: 11, day: 30 };
+        let today = Date::new(2026, 11, 29);
+        // Wished "in 2027" while the clock read 2027; the clock is back to 2026.
+        assert_eq!(next_birthday_wish(today, bday, 2027), Date::new(2026, 11, 30));
+        assert!(birthday_wish_due(Date::new(2026, 11, 30), 5, bday, 2027, BIRTHDAY_GRACE_ANDROID_MIN));
+        // A real wish this year still blocks a second one.
+        assert!(!birthday_wish_due(Date::new(2026, 11, 30), 5, bday, 2026, BIRTHDAY_GRACE_ANDROID_MIN));
     }
 }
