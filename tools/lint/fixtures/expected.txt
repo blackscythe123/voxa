@@ -33,6 +33,7 @@
 3 android-deps android/app/build.gradle.kts
 2 android-workmanager android/app/build.gradle.kts
 1 android-workmanager android/app/src/main/java/com/voxa/android/notify/Notifier.kt
+1 android-signing android/app/build.gradle.kts                    # no v1/v2/v3 signing
 
 # 6. isolation
 1 isolation-env desktop/app/src/ui.rs

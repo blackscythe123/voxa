@@ -5,6 +5,8 @@
   android-deps         every dependency in android/app/build.gradle.kts is on ALLOWED_DEPS, every plugin
                        on ALLOWED_PLUGINS. A new library is an owner decision: add it here with the reason.
   android-workmanager  no WorkManager (androidx.work): background work uses JobScheduler.
+  android-signing      the APK is signed with the v1, v2 and v3 schemes, so every installer takes it
+                       ("There was a problem parsing the package" on a sideloaded universal APK).
 """
 
 from __future__ import annotations
@@ -97,5 +99,17 @@ def check_workmanager(ctx: Ctx) -> list[Violation]:
     return out
 
 
+def check_signing(ctx: Ctx) -> list[Violation]:
+    if not ctx.exists(GRADLE):
+        return []
+    code = S.load(ctx.root, GRADLE).code
+    missing = [f"V{n}" for n in (1, 2, 3) if not re.search(rf"\benableV{n}Signing\s*=\s*true\b", code)]
+    if not missing:
+        return []
+    return [Violation("android-signing", GRADLE, 1, f"signingConfigs must set enable{'/'.join(missing)}Signing = true. Rule: the APK is "
+                      "signed with the v1, v2 and v3 schemes so every installer accepts it (\"There was a problem parsing the package\"; "
+                      "docs/guardrails.md#5-android)", key="signing " + ",".join(missing))]
+
+
 def check(ctx: Ctx) -> list[Violation]:
-    return check_size(ctx) + check_deps(ctx) + check_workmanager(ctx)
+    return check_size(ctx) + check_deps(ctx) + check_workmanager(ctx) + check_signing(ctx)

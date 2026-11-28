@@ -132,6 +132,9 @@ stays under 6.0 MB, no new dependencies without the owner's OK, and no WorkManag
   on `ALLOWED_DEPS` / `ALLOWED_PLUGINS`. A new library means adding it there with its reason.
 - WorkManager: `androidx.work`, `work-runtime`, `WorkManager`, `CoroutineWorker`, work requests,
   anywhere in the Android build files or sources.
+- Signing (`android-signing`): `build.gradle.kts` enables the v1, v2 and v3 signature schemes, so
+  every installer takes a sideloaded APK (the universal APK once gave "There was a problem parsing
+  the package").
 
 ## 6. Isolation
 
