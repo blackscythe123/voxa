@@ -126,6 +126,12 @@ voxa.release.lineage=C:/Users/Sam/voxa-keys/voxa.lineage
 Environment variables: `VOXA_RELEASE_STORE_FILE`, `VOXA_RELEASE_STORE_PASSWORD`,
 `VOXA_RELEASE_KEY_ALIAS`, `VOXA_RELEASE_KEY_PASSWORD`, `VOXA_RELEASE_LINEAGE`.
 
+Build a real release with `./gradlew assembleRelease -Pvoxa.release=true` (from `android/`, or
+`android/release.ps1`, which also builds the universal APK). `-Pvoxa.release=true` makes the Rust
+core refuse placeholder update keys. AGP can't sign with a lineage, so the `lineageSignRelease`
+task re-signs the release APKs with `apksigner` after packaging: the debug key as the old signer,
+`--next-signer` the release key, `--lineage voxa.lineage`.
+
 Once the lineage exists, a release build signed with the debug key fails (the gradle check in
 `android/app/build.gradle.kts`, and the lint `android-signing`). Check a release APK with:
 

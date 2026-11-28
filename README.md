@@ -25,6 +25,11 @@ Always the newest version: [Windows](https://github.com/blackscythe123/voxa/rele
   Allow the microphone, and Accessibility so Voxa can paste.
 - **Android:** if you had an older Voxa for Android, uninstall it first, then install the APK. Send it as a file (Drive, or a WhatsApp/Telegram document); a broken copy shows "problem while parsing the package".
 
+Updates: 1.0.0 is the first version that updates itself (Windows installs new versions when you're
+not using Voxa; Android downloads on Wi-Fi and asks you to tap Install; Mac tells you when one is
+out). Older versions (0.4.7 and before on Windows and Mac, 0.3.0 on Android) have no updater, so
+install 1.0.0 by hand once. Settings has "Check for updates" and "What's new".
+
 You need a ChatGPT account (free works). Voxa signs in on ChatGPT's own page and never sees your
 password.
 
