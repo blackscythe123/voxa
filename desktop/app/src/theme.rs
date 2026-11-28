@@ -244,20 +244,43 @@ pub fn os_is_dark(a: gpui::WindowAppearance) -> bool {
     matches!(a, gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark)
 }
 
+/// WCAG relative luminance of an opaque 0xRRGGBB.
+fn lum(c: u32) -> f64 {
+    let ch = |v: u32| {
+        let v = v as f64 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * ch(c >> 16 & 0xFF) + 0.7152 * ch(c >> 8 & 0xFF) + 0.0722 * ch(c & 0xFF)
+}
+
+/// WCAG contrast ratio of two opaque colours.
+pub fn ratio(a: u32, b: u32) -> f64 {
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// White or black, whichever reads better on `bg` (always at least 4.5:1): for letters on
+/// a colour Voxa doesn't choose, such as an app's brand colour.
+pub fn on_color(bg: u32) -> u32 {
+    const INK: u32 = 0x000000;
+    if ratio(0xFFFFFF, bg) >= ratio(INK, bg) { 0xFFFFFF } else { INK }
+}
+
+/// The Settings avatar when there is no picture: a darker ChatGPT green, 5.3:1 with white.
+pub const AVATAR_FILL: u32 = 0x0B7A5E;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn lum(c: u32) -> f64 {
-        let ch = |v: u32| {
-            let v = v as f64 / 255.0;
-            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * ch(c >> 16 & 0xFF) + 0.7152 * ch(c >> 8 & 0xFF) + 0.0722 * ch(c & 0xFF)
-    }
-    fn ratio(a: u32, b: u32) -> f64 {
-        let (x, y) = (lum(a), lum(b));
-        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    /// Letters on any app colour, and the avatar initial, are at least AA.
+    #[test]
+    fn letters_on_brand_colours_are_readable() {
+        for bg in [0x25D366, 0x10A37F, 0xFF0000, 0x4A154B, 0xE3008C, 0xFB542B, 0x229ED9, 0xFFFFFF, 0x000000, 0x808080] {
+            let fg = on_color(bg);
+            assert!(ratio(fg, bg) >= 4.5, "{fg:06X} on {bg:06X}: {:.2}:1", ratio(fg, bg));
+        }
+        assert!(ratio(0xFFFFFF, AVATAR_FILL) >= 4.5);
     }
     /// 0xRRGGBBAA over an opaque 0xRRGGBB.
     fn over(fg_a: u32, bg: u32) -> u32 {

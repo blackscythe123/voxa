@@ -548,7 +548,7 @@ fn app_badge(app: &str, size: f32) -> gpui::Div {
         .flex_none()
         .rounded(px(6.))
         .bg(rgb(brand.unwrap_or(COLORS[(h % 10) as usize])))
-        .text_color(rgb(0xFFFFFF))
+        .text_color(rgb(crate::theme::on_color(brand.unwrap_or(COLORS[(h % 10) as usize]))))
         .text_size(px(size * 0.5))
         .font_weight(FontWeight::SEMIBOLD)
         .flex()
@@ -1867,7 +1867,7 @@ impl Home {
                 let avatar = if avatar_file.exists() {
                     div().size(px(48.)).flex_none().rounded_full().overflow_hidden().child(gpui::img(avatar_file).size(px(48.)).rounded_full())
                 } else {
-                    div().size(px(48.)).flex_none().rounded_full().bg(rgb(0x10A37F)).text_color(rgb(0xFFFFFF)).text_size(px(20.)).flex().items_center().justify_center().child(initial)
+                    div().size(px(48.)).flex_none().rounded_full().bg(rgb(crate::theme::AVATAR_FILL)).text_color(rgb(0xFFFFFF)).text_size(px(20.)).flex().items_center().justify_center().child(initial)
                 };
                 out.push(
                     card()
