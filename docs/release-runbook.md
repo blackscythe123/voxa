@@ -15,7 +15,7 @@ friend reinstalling by hand. So nobody but the owner gets 1.0.0 until the
 |---|---|---|
 | A1 | Generate K1 and K2, commit their public keys in `core/voxa-update/src/keys.rs` (update-keys.md steps 1 and 3) | `cargo test -q --release -p voxa-update` and `python tools/lint/run.py --release` pass `update-key-present` |
 | A2 | Create the `release` Environment (required reviewer: you; tags `v*` and `android-v*`), set `VOXA_UPDATE_KEY` (update-keys.md step 2) | `gh secret list --env release` shows it |
-| A3 | Create the Android release keystore with keytool, back it up offline, commit its certificate SHA-256 to `android/signing/release-cert.sha256`, add `voxa.release.*` to `android/local.properties` (update-keys.md step 6). Never regenerate it | `python tools/lint/run.py --release` passes `release-android-signing` |
+| A3 | Create the Android release keystore with keytool, back it up offline, commit its certificate SHA-256 to `android/signing/release-cert.sha256`, and put it into the `release` Environment as `ANDROID_RELEASE_KEYSTORE_B64`, `ANDROID_RELEASE_STORE_PASSWORD`, `ANDROID_RELEASE_KEY_PASSWORD`, `ANDROID_RELEASE_KEY_ALIAS` (update-keys.md step 6). `voxa.release.*` in `android/local.properties` is needed only for the local fallback. Never regenerate it | `python tools/lint/run.py --release` passes `release-android-signing`; `gh secret list --env release` shows the four secrets |
 | A4 | Mac: create the stable certificate and its two secrets (update-keys.md step 7), or leave the Mac row marked "not yet tested" in the README | The tag's macos job log says "signing with the stable identity" |
 | A5 | Create the `update-feed` prerelease (update-keys.md step 5). **Before the first `v*` tag**, or that tag's feed job fails after the release is already public | `gh release view update-feed` |
 | A6 | Tag rulesets for `v*`, `android-v*`, `update-feed` (update-keys.md step 4) | Settings, Rules |
@@ -29,12 +29,22 @@ friend reinstalling by hand. So nobody but the owner gets 1.0.0 until the
 | B2 | Push to `main`, wait for green Guardrails and Desktop runs | Both workflows green |
 | B3 | Tag the desktop release on that commit: `git tag v1.0.0 && git push origin v1.0.0` | Desktop workflow starts on the tag |
 | B4 | Approve the `release` environment twice: the `macos` job, then the `feed` job | The release has `Voxa-Setup-1.0.0.exe`, `Voxa-1.0.0-mac.dmg` and the version-free copies; the feed job ran `guard-forward`, `verify` and `fetch-check` |
-| B5 | Build Android on your PC: `powershell -File android/release.ps1` (refuses a dirty tree, placeholder keys, a missing or debug release key, or an unpinned signer) | `android/build/release/Voxa-Android-1.0.0-arm64-v8a.apk` and `-universal.apk`; the arm64 APK is within the 6.0 MB budget and the universal one under the 15 MiB feed cap |
-| B6 | Publish Android exactly as release.ps1 prints it: `gh release create android-v1.0.0 <both APKs> --target <commit> --latest=false --title "Voxa for Android 1.0.0"` | The Android release is never "Latest"; the desktop release is a prerelease until B10 |
-| B7 | Sign the Android feed from the tag ref: `gh workflow run android-feed.yml --ref android-v1.0.0 -f tag=android-v1.0.0`, approve it | The run checks the ref, the versionCode, the pinned signer, `guard-forward`, then `fetch-check` |
+| B5 | Tag Android on the same commit: `git tag android-v1.0.0 && git push origin android-v1.0.0`. CI builds Android (`.github/workflows/android-release.yml`); this is the normal path | The android-release workflow starts on the tag and waits for the `release` environment |
+| B6 | Approve the `build` job. It checks the tag against `versionName`/`versionCode`, builds the arm64 and the universal APK with the release key (Gradle `verifyReleaseSigner`: v1, v2, v3 and the pinned certificate), checks them again with `apksigner verify --min-sdk-version 21 --print-certs`, enforces the 6.0 MB arm64 budget and the 15 MiB feed cap, and deletes the keystore. The `release` job then creates `android-v1.0.0` with both APKs as `--prerelease --latest=false` | `gh release view android-v1.0.0` lists `Voxa-Android-1.0.0-arm64-v8a.apk` and `-universal.apk` and says Pre-release; it is never "Latest" |
+| B7 | Approve the `feed` job when phones may see the update. It re-reads the APKs from the release, checks the versionCode and the pinned signer, then `guard-forward`, signs `android.json` with K1, `verify`, upload, `fetch-check` | The feed job is green; `update-feed` has the new `android.json` |
 | B8 | Click every README download link while logged out of GitHub | Each one downloads (no 404) |
 | B9 | First release, or any release that changes the updater: section C before anyone else gets it | The gate's checklist is all ticked |
-| B10 | Promote the desktop release only after the gate: `gh release edit v1.0.0 --prerelease=false --latest` (the tag workflow always publishes a prerelease, so "latest" and every `releases/latest/download/...` link keep the previous version until now) | `gh api repos/blackscythe123/voxa/releases/latest --jq .tag_name` prints the new tag; then click the README links again |
+| B10 | Promote both releases only after the gate. Desktop: `gh release edit v1.0.0 --prerelease=false --latest` (the tag workflow always publishes a prerelease, so "latest" and every `releases/latest/download/...` link keep the previous version until now). Android: `gh release edit android-v1.0.0 --prerelease=false --latest=false` (never "latest") | `gh api repos/blackscythe123/voxa/releases/latest --jq .tag_name` prints the new desktop tag; `gh release view android-v1.0.0` is no longer a pre-release; then click the README links again |
+
+**Local fallback, only when CI cannot build Android** (B5 to B7): on your PC,
+`powershell -File android/release.ps1` (refuses a dirty tree, placeholder keys, a missing or debug
+release key, an unpinned signer or an APK over budget; needs `voxa.release.*` in
+`android/local.properties`). Publish what it prints:
+`gh release create android-v1.0.0 <both APKs> --target <commit> --prerelease --latest=false --title "Voxa for Android 1.0.0"`;
+the new tag starts android-release.yml, so reject its `build` approval (your APKs are the release); then sign the feed
+from the tag ref with `gh workflow run android-release.yml --ref android-v1.0.0 -f prebuilt=true`
+and approve the `feed` job. It checks the published APKs' versionCode and signer exactly as the
+CI path does.
 
 ## C. REAL-HARDWARE RELEASE GATE
 
@@ -87,7 +97,7 @@ Tick each before friends get the build. Record results in `docs/verification/`.
 
 **CI and macOS**
 
-- [ ] 16. CI: the first tag run (both approvals, the feed, `fetch-check` through `release-assets.githubusercontent.com`); android-feed from the tag ref (and refused from `main`); a 304 on the conditional GET.
+- [ ] 16. CI: the first tag run (both approvals, the feed, `fetch-check` through `release-assets.githubusercontent.com`); the first android-release tag run (both approvals; the APKs, the prerelease and the feed) and a `prebuilt` run from the tag ref (and refused from `main`); a 304 on the conditional GET.
 - [ ] 17. Kill-switch drill: `gh workflow run feed-pause.yml --ref v1.0.1 -f channel=desktop -f paused=true` (and android). Both platforms drop the staged file at the next check or at the last look before installing. Unpause with `-f paused=false`.
 - [ ] 18. macOS, while it stays in the README: install; Gatekeeper on macOS 15 (Privacy & Security, Open Anyway); microphone and Accessibility; paste; the "is out" bar; whether the Accessibility grant survives an update with the stable certificate.
 
@@ -100,14 +110,15 @@ Tick each before friends get the build. Record results in `docs/verification/`.
 2. If the workflow can't run, delete the feed asset: `gh release delete-asset update-feed desktop.json`
    (clients then see "Couldn't check" and install nothing).
 3. Fix, then publish a higher version through section B. Its feed is unpaused. To publish an older
-   version on purpose instead, run android-feed with `-f force=true` (desktop: a new patch version
-   is simpler than a forced rollback).
+   Android version on purpose instead, re-sign its feed from its tag ref:
+   `gh workflow run android-release.yml --ref android-vX.Y.Z -f prebuilt=true -f force=true`
+   (desktop: a new patch version is simpler than a forced rollback).
 4. An install that already crashes at start: after two early exits in a row, Voxa for Windows
    checks the feed for a fixed version before anything else starts and installs it.
 
 ## Which checks guard this runbook
 
 `python tools/lint/run.py` (`release-runbook`, `release-readme-links`, `release-feed-guard`,
-`release-android-signing`, `release-placeholder-guard`, `release-version-sync`,
-`release-latest`); `--release` on every tag (CI) adds `update-key-present` and the pinned
+`release-android-signing`, `release-android-ci`, `release-placeholder-guard`,
+`release-version-sync`, `release-latest`); `--release` on every tag (CI) adds `update-key-present` and the pinned
 release certificate.
