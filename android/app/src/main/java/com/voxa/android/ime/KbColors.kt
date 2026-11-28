@@ -61,7 +61,7 @@ class KbColors(
         /** The 1.0 sepia: 8.2:1 with white. Dark keeps #D9946D (#7A3F22 is only 2.3:1 on near-black). */
         private const val SEPIA = 0xFF7A3F22.toInt()
         private const val SEPIA_DARK = 0xFFD9946D.toInt()
-        private fun MUTED(dark: Boolean) = if (dark) 0xFFB8B8B6.toInt() else 0xFF505050.toInt()
+        private fun mutedFor(dark: Boolean) = if (dark) 0xFFB8B8B6.toInt() else 0xFF505050.toInt()
 
         /** On the dark check (#45C27C): 7.2:1, where white was 2.3:1. */
         const val ON_GOOD_DARK = 0xFF0E2416.toInt()

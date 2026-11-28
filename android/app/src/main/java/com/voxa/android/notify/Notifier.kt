@@ -280,7 +280,7 @@ object Notifier {
             .build()
         return NotificationCompat.Builder(ctx, ch.id)
             .setSmallIcon(R.drawable.ic_notify)
-            .setColor(0xFF8F4C2C.toInt())
+            .setColor(0xFF7A3F22.toInt())
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))

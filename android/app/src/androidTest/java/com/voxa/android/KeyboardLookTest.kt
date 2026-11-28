@@ -40,11 +40,11 @@ class KeyboardLookTest {
     }
 
     @Test
-    fun theVoxaLookIsTheV6Palette() {
+    fun theVoxaLookIsTheV6PaletteWithThe10Sepia() {
         val light = KbColors.voxa(false, KeyboardLook.Look())
         assertEquals(0xFFF3F3F1.toInt(), light.surface)
         assertEquals(0xFFFFFFFF.toInt(), light.key)
-        assertEquals(0xFF8F4C2C.toInt(), light.accent)
+        assertEquals("the 1.0 palette's deeper sepia", 0xFF7A3F22.toInt(), light.accent)
         assertTrue("the 1 dp key elevation stays in Voxa light", light.keyElevation)
         val dark = KbColors.voxa(true, KeyboardLook.Look())
         assertEquals(0xFF1A1A19.toInt(), dark.surface)
