@@ -40,6 +40,7 @@ import uniffi.voxa_ffi.TranscribeFailure
 import uniffi.voxa_ffi.VoxaFlow
 import uniffi.voxa_ffi.fieldKind
 import uniffi.voxa_ffi.passwordFieldText
+import uniffi.voxa_ffi.pauseKeyLabel
 
 /**
  * The Voxa voice keyboard. A thin shell around the core's dictation flow (voxa-core via voxa-ffi):
@@ -60,7 +61,10 @@ class VoxaKeyboard : InputMethodService() {
     private var editorInfo: EditorInfo? = null
     /** A finished text that arrived while no field was bound; the next field decides. */
     private var pendingPaste: FlowEffect.Paste? = null
+    /** When the mic last went live in this take (start or resume). */
     private var recordingSince = 0L
+    /** Talking time before the current stretch, in ms (paused time is left out). */
+    private var talkedMs = 0L
     private var haptics = true
     /** Settings, "Hold to talk": a press held past [HOLD_MS] stops on release. Off: taps only. */
     private var holdToTalk = true
@@ -75,14 +79,24 @@ class VoxaKeyboard : InputMethodService() {
     private var notice: Pair<String, String>? = null
     private val clearNotice = Runnable { notice = null; render() }
 
+    /** Shown instead of the paused detail when Resume was refused (on a call); the bar's usual
+     *  notices only show while idle. Cleared when the take leaves the paused state. */
+    private var pausedNotice: String? = null
+
     private val timerTick = object : Runnable {
         override fun run() {
             val p = panel ?: return
-            val secs = (SystemClock.elapsedRealtime() - recordingSince) / 1000
+            val secs = talkedSecs()
             p.right.text = "%d:%02d".format(secs / 60, secs % 60)
             main.postDelayed(this, 500)
         }
     }
+
+    private fun isPaused(): Boolean = (flow.state() as? FlowState.Recording)?.paused == true
+
+    /** Talking time of the take on screen, frozen while paused. */
+    private fun talkedSecs(): Long =
+        (talkedMs + if (isPaused()) 0L else SystemClock.elapsedRealtime() - recordingSince) / 1000
 
     override fun onCreate() {
         super.onCreate()
@@ -237,6 +251,26 @@ class VoxaKeyboard : InputMethodService() {
                 main.removeCallbacks(timerTick)
                 flow.setRecordingSecs(effect.job, secs)
             }
+            is FlowEffect.PauseCapture -> {
+                talkedMs += SystemClock.elapsedRealtime() - recordingSince
+                recorder.pause()
+                main.removeCallbacks(timerTick)
+                panel?.bars?.reset()
+                Diag.log("mic", "paused: %.1f s talked, %d bytes".format(recorder.talkingSecs(), recorder.bytesWritten))
+            }
+            is FlowEffect.ResumeCapture -> {
+                val err = recorder.resume()
+                if (err == null) {
+                    recordingSince = SystemClock.elapsedRealtime()
+                    main.removeCallbacks(timerTick)
+                    main.post(timerTick)
+                    Diag.log("mic", "resumed")
+                } else {
+                    // Like an interruption: finish and send what was recorded.
+                    Diag.log("mic", "resume failed: $err; sending what was recorded")
+                    main.post { if (!destroyed && flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop) }
+                }
+            }
             is FlowEffect.DiscardCapture -> {
                 recorder.discard()
                 Diag.log("mic", "discarded")
@@ -262,6 +296,7 @@ class VoxaKeyboard : InputMethodService() {
             Diag.log("mic", "started")
             Diag.memory("recording started")
             recordingSince = SystemClock.elapsedRealtime()
+            talkedMs = 0L
             main.removeCallbacks(timerTick)
             main.post(timerTick)
             panel?.bars?.reset()
@@ -396,10 +431,14 @@ class VoxaKeyboard : InputMethodService() {
             getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             true
         }
-        // While listening the wide key reads "Tap to stop" and stops; otherwise it is space.
+        // During a take the wide key pauses and resumes (the big mic is Stop); otherwise it is space.
         p.spaceKey.setOnClickListener {
             tap(it)
-            if (flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop) else currentInputConnection?.commitText(" ", 1)
+            when {
+                isPaused() -> onResumePressed()
+                flow.state() is FlowState.Recording -> dispatch(FlowEvent.Pause)
+                else -> currentInputConnection?.commitText(" ", 1)
+            }
         }
         p.enterKey.setOnClickListener { tap(it); enter() }
         repeating(p.backspaceKey) { backspace() }
@@ -417,6 +456,18 @@ class VoxaKeyboard : InputMethodService() {
         }
         notice = null
         dispatch(FlowEvent.MicPressed(t, field == FieldKind.PRIVATE))
+    }
+
+    /** Resume, unless a call owns the microphone now: then stay paused and say so. */
+    private fun onResumePressed() {
+        if (inCall()) {
+            Diag.log("ime", "resume refused: in a call (audio mode ${audioMode()})")
+            pausedNotice = "You're on a call. Resume when it ends"
+            render()
+            return
+        }
+        pausedNotice = null
+        dispatch(FlowEvent.Resume)
     }
 
     private fun audioMode(): Int = getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
@@ -437,7 +488,8 @@ class VoxaKeyboard : InputMethodService() {
     /** The system took the microphone mid-take (a call started, another app grabbed it). Keep
      *  what was said; if nothing was heard at all, drop the empty take and say why. */
     private fun onMicInterrupted() {
-        if (destroyed || flow.state() !is FlowState.Recording) return
+        // Paused, the mic is already released: nothing of ours was interrupted.
+        if (destroyed || flow.state() !is FlowState.Recording || isPaused()) return
         if (recorder.peakLevel <= 0.001f) {
             Diag.log("ime", "mic taken with nothing recorded: cancelling (audio mode ${audioMode()})")
             dispatch(FlowEvent.Cancel)
@@ -507,6 +559,8 @@ class VoxaKeyboard : InputMethodService() {
         val state = flow.state()
         val status = flow.status()
         val recording = state is FlowState.Recording
+        val paused = (state as? FlowState.Recording)?.paused == true
+        if (!paused) pausedNotice = null
         val busy = state is FlowState.Transcribing || state is FlowState.Delivering
         val done = if (state is FlowState.Delivered) flow.delivered() else null
         val password = field == FieldKind.PASSWORD && state is FlowState.Idle
@@ -526,7 +580,7 @@ class VoxaKeyboard : InputMethodService() {
             detail = n.second
         } else if (shown != null) {
             p.title.text = shown.title
-            detail = shown.detail
+            detail = pausedNotice.takeIf { paused } ?: shown.detail
             // While listening the action is the big mic itself (Stop); the bar offers Cancel.
             action = shown.action.takeIf { !recording }
             closable = shown.dismissable || recording || state is FlowState.Transcribing
@@ -541,7 +595,7 @@ class VoxaKeyboard : InputMethodService() {
             closable = false
         }
         p.title.setTextColor(if (done != null) c.good else c.text)
-        p.dot.visibility = if (recording) View.VISIBLE else View.GONE
+        p.dot.visibility = if (recording && !paused) View.VISIBLE else View.GONE
         p.detail.text = detail ?: ""
         p.detail.visibility = if (detail.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE
         p.action.text = action ?: ""
@@ -549,7 +603,7 @@ class VoxaKeyboard : InputMethodService() {
         p.close.visibility = if (closable) View.VISIBLE else View.GONE
         p.close.contentDescription = if (recording || state is FlowState.Transcribing) "Cancel" else "Close"
         p.right.text = when {
-            recording -> ((SystemClock.elapsedRealtime() - recordingSince) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
+            recording -> talkedSecs().let { "%d:%02d".format(it / 60, it % 60) }
             done != null -> if (done.words == 1u) "1 word" else "${done.words} words"
             else -> ""
         }
@@ -566,8 +620,8 @@ class VoxaKeyboard : InputMethodService() {
         val micOff = busy || password
         p.mic.alpha = if (micOff) 0.4f else 1f
         p.mic.isEnabled = !micOff
-        p.spaceKey.text = if (recording) "Tap to stop" else "space"
-        p.spaceKey.contentDescription = if (recording) "Stop" else "Space"
+        p.spaceKey.text = if (recording) pauseKeyLabel(paused) else "space"
+        p.spaceKey.contentDescription = if (recording) pauseKeyLabel(paused) else "Space"
     }
 
     /** "That's 6 seconds of typing saved"; nothing when speaking wasn't faster. */

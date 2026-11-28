@@ -67,15 +67,53 @@ class Recorder(
     }
 
     val isRecording get() = running
+    /** The take is paused: the mic is released (focus, AudioRecord, callback) and the file closed. */
+    @Volatile var isPaused = false
+        private set
     /** Bytes written and the loudest meter level of the current or last take (diagnostics). */
     @Volatile var bytesWritten = 0L
         private set
+    /** Silence written at resumes (part of [bytesWritten], not of the talking time). */
+    private var silenceBytes = 0L
+    private var resumes = 0
     @Volatile var peakLevel = 0f
         private set
 
-    @SuppressLint("MissingPermission")
     fun start(pcmPath: String): StartError? {
-        if (running) return null
+        if (running || isPaused) return null
+        val err = open(pcmPath, append = false)
+        if (err == null) {
+            bytesWritten = 0L
+            silenceBytes = 0L
+            resumes = 0
+            peakLevel = 0f
+        }
+        return err
+    }
+
+    /** Turn the mic off mid-take: the same release as stopping (focus abandoned, AudioRecord
+     *  stopped, callback unregistered) and the file closed. Nothing is recorded until [resume]. */
+    fun pause() {
+        if (!running) return
+        running = false
+        thread?.join(1000)
+        thread = null
+        release()
+        isPaused = true
+    }
+
+    /** Turn the mic back on and append to the same raw PCM file, after ~300 ms of silence so
+     *  words either side of the pause don't run together. */
+    fun resume(): StartError? {
+        if (!isPaused) return null
+        val p = path ?: return StartError.Missing
+        val err = open(p, append = true)
+        if (err == null) isPaused = false
+        return err
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun open(pcmPath: String, append: Boolean): StartError? {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return StartError.Denied
         val min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return StartError.Missing
@@ -92,7 +130,13 @@ class Recorder(
         }
         val out = try {
             File(pcmPath).parentFile?.mkdirs()
-            FileOutputStream(pcmPath)
+            FileOutputStream(pcmPath, append).also {
+                if (append && resumes++ < MAX_GAPS) {
+                    it.write(ByteArray(GAP_BYTES))
+                    bytesWritten += GAP_BYTES
+                    silenceBytes += GAP_BYTES
+                }
+            }
         } catch (e: Exception) {
             r.release()
             return StartError.Missing
@@ -110,8 +154,7 @@ class Recorder(
         record = r
         path = pcmPath
         running = true
-        bytesWritten = 0L
-        peakLevel = 0f
+        // Also on resume, so the first-second grace for focus and silencing applies again.
         startedAt = SystemClock.elapsedRealtime()
         thread = Thread({
             val buf = ByteArray(CHUNK_BYTES)
@@ -133,15 +176,22 @@ class Recorder(
         return null
     }
 
-    /** Stop and keep the recording. Returns how long it ran, in seconds. */
+    /** Stop and keep the recording (also from paused). Returns the talking time in seconds, from
+     *  the audio written, so paused time is left out. */
     fun stop(): Float {
-        if (!running) return 0f
-        running = false
-        thread?.join(1000)
-        thread = null
-        release()
-        return (SystemClock.elapsedRealtime() - startedAt) / 1000f
+        if (!running && !isPaused) return 0f
+        if (running) {
+            running = false
+            thread?.join(1000)
+            thread = null
+            release()
+        }
+        isPaused = false
+        return talkingSecs()
     }
+
+    /** Seconds of talking in the take so far: what was written, minus the silence at resumes. */
+    fun talkingSecs(): Float = (bytesWritten - silenceBytes) / BYTES_PER_SEC.toFloat()
 
     /** Stop and delete the recording. */
     fun discard() {
@@ -187,5 +237,10 @@ class Recorder(
         const val RATE = 16_000
         /** 40 ms of audio, one ink-line tick. */
         const val CHUNK_BYTES = RATE * 2 * 40 / 1000
+        const val BYTES_PER_SEC = RATE * 2
+        /** ~300 ms of silence written at each resume. */
+        const val GAP_BYTES = BYTES_PER_SEC * 3 / 10
+        /** After this many pauses in one take, resume without adding more silence. */
+        const val MAX_GAPS = 50
     }
 }
