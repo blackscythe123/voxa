@@ -21,9 +21,15 @@ notification may name the app a dictation was for. All wording lives in one plac
 | A1, D1 | Signed out (must) | A session check says the session ended, it was known good before, and a second check about 2 minutes later agrees | You're signed out of ChatGPT | Voxa can't write anything until you sign in. (+ "N dictations are waiting and will send when you do.") | Sign in |
 | A2, D2 | Ready to copy (should) | A dictation that wasn't on screen was written out (background send, or sent when the network came back) | Your dictation for {App} is ready / N dictations are ready | It couldn't paste, so it's waiting in History. / They're waiting in History. | Copy (one only) |
 | A3, D3 | Couldn't send (should) | A background send gave up (unreachable after retries, or the dictation waited over 24 h) | Voxa couldn't send N dictation(s) | Your recordings are kept. Your sign-in is fine. | Retry (Android), Send now (desktop) |
+| A4 | Update ready (should) | A verified update has finished downloading on Android | Voxa {version} is ready to install | Tap to install. Your history and settings stay as they are. | Install |
 
 Never a notification (already shown in context): waiting to send, mic permission, keyboard
-disabled or not selected, storage, new version, recaps or streaks, Cloudflare blocking.
+disabled or not selected, storage, recaps or streaks, Cloudflare blocking.
+
+Updates (amended on purpose by the owner, 2026-11-28, with the auto update spec): Android gets
+A4 only, once a verified update is downloaded. The Windows "Voxa was updated to X" note and the
+macOS "Voxa X is out" notice are in context only: a dismissible Home bar, the Settings status
+line and the tray tooltip. There is no desktop update toast (no D4).
 
 ### "Signed out" is only said when it is certain
 
@@ -45,12 +51,17 @@ A false "signed out" is worse than a late one (a Cloudflare 403 once caused a si
    desktop tags `signin` and `dictations`.
 2. Sign-in at most once per expiry episode.
 3. Dictations alert at most once every 6 hours; in between the count is only updated silently.
-4. No more than 2 new Voxa notifications in 24 hours across kinds.
+4. No more than 2 new Voxa notifications in 24 hours across kinds. A4 counts toward the cap;
+   because it is never urgent, a capped A4 is deferred to the next allowed moment (the next
+   update job or app start), never dropped (`voxa_core::notices::decide_update`).
 5. Never posted while you can see Voxa: the Android keyboard showing or an app screen in front;
    the desktop strip visible or Voxa's window in front.
 6. Opening History or the dictation, copying it, deleting it or resending removes the dictations
    notification.
-7. Sign-in at night (21:00 to 08:00) arrives silently on Android.
+7. Sign-in at night (21:00 to 08:00) arrives silently on Android. A4 is always silent (its
+   channel is low importance).
+8. A4 is posted at most once per version. If you swipe it away it never comes back for that
+   version; the Home card and the Settings row still show the update.
 
 ## Android
 
@@ -61,12 +72,18 @@ Files: `android/app/src/main/java/com/voxa/android/notify/` (`Notifier.kt`, `Vox
 - Channels: "Sign-in" ("When you need to sign in to ChatGPT again", default importance) and
   "Dictations" ("Dictations sent in the background, or that couldn't be sent", low importance).
   `Notifier.CHANNELS` is a list so a third channel, "Reminders", can be added later.
-- Lock screen: `VISIBILITY_PRIVATE` with a public version that only says "Voxa needs you".
+- "Updates" channel ("When a new version of Voxa is ready to install", low importance) for A4,
+  notification ID 4 (IDs 1 to 3 are taken).
+- Lock screen: `VISIBILITY_PRIVATE` with a public version that only says "Voxa needs you". A4 is
+  the exception: its content is not private, so it is `VISIBILITY_PUBLIC` with the public title
+  "Voxa update ready".
 - Taps: A1 opens sign-in (`EXTRA_OPEN=sign-in`); A2 opens the dictation (`entry:<id>`) or
   History; A3 opens History. "Copy" and "Retry" go to `NotifyReceiver` (not exported), which
   reads the text from History by entry id, so the text is never in the notification.
 - Permission (`POST_NOTIFICATIONS`, Android 13+). The keyboard can't ask, and the app never asks
-  at first launch or during onboarding. At most two asks:
+  for notifications at first launch or during onboarding. The one onboarding exception is not a
+  notification permission: the optional, skippable "Keep Voxa up to date" step asks for "install
+  unknown apps" (`REQUEST_INSTALL_PACKAGES`), owner decision 2026-11-28. At most two asks:
   1. Right after signing back in when the session had ended (sign-in opened from the keyboard
      or from A1): a sheet "Want a notification next time you're signed out?" with Allow and
      Not now. Allow brings up Android's prompt.
