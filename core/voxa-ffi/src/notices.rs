@@ -98,6 +98,8 @@ pub enum SendOutcome {
     Unreachable { blocked: bool },
     /// Deleted, already sent, or its recording is gone.
     Gone,
+    /// Already being sent (History's "Send now", or a send that outlived its job): try later.
+    Busy,
 }
 
 #[uniffi::export]
@@ -116,6 +118,10 @@ impl VoxaCore {
     /// `resend`, being offline or unreachable keeps it waiting, and an entry deleted meanwhile
     /// stays deleted. `canned`: debug builds only, the text to use instead of calling ChatGPT.
     pub fn send_waiting(&self, entry_id: u64, give_up: bool, canned: Option<String>) -> SendOutcome {
+        let Some(_claim) = self.claim(entry_id) else {
+            diag::log(|| format!("background send {entry_id}: already being sent"));
+            return SendOutcome::Busy;
+        };
         let eligible = |s: &Status| matches!(s, Status::Waiting(r) if r == WAITING_FOR_NETWORK) || (give_up && matches!(s, Status::Failed(_)));
         let Some(entry) = History::edit(&self.dir, |h| (false, h.get(entry_id).filter(|e| eligible(&e.status)).cloned())) else {
             return SendOutcome::Gone;
@@ -130,7 +136,7 @@ impl VoxaCore {
             Ok(t) if t.trim().is_empty() => (Status::Failed("No speech in the recording".into()), String::new(), SendOutcome::NoSpeech),
             Ok(t) => (Status::Ready, t, SendOutcome::Sent { app: entry.app.clone() }),
             Err(e) if e.needs_sign_in() => (Status::Waiting(WAITING_FOR_SIGN_IN.into()), String::new(), SendOutcome::NeedsSignIn),
-            Err(TranscribeError::Offline) => return SendOutcome::Offline,
+            Err(TranscribeError::Offline) if !give_up => return SendOutcome::Offline,
             Err(e) if give_up => (Status::Failed("Couldn't reach ChatGPT".into()), String::new(), SendOutcome::Unreachable { blocked: e == TranscribeError::Blocked }),
             Err(e) => return SendOutcome::Unreachable { blocked: e == TranscribeError::Blocked },
         };
@@ -149,5 +155,30 @@ impl VoxaCore {
             let ids = h.entries.iter().filter(|e| matches!(&e.status, Status::Waiting(r) if r == reason)).map(|e| e.id).collect();
             (false, ids)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::now_ms;
+
+    #[test]
+    fn a_dictation_being_sent_is_never_sent_a_second_time() {
+        let dir = std::env::temp_dir().join(format!("voxa-send-twice-{}-{}", std::process::id(), now_ms()));
+        let core = VoxaCore::new(dir.to_string_lossy().to_string());
+        let audio = dir.join("a.pcm");
+        std::fs::write(&audio, vec![0u8; 3200]).unwrap();
+        History::edit(&dir, |h| {
+            let e = voxa_store::Entry { id: 42, app: "Notes".into(), text: String::new(), secs: 1.0, status: Status::Waiting(WAITING_FOR_NETWORK.into()), audio: Some(audio.clone()), started_in: None, via: None };
+            (h.upsert(e), ())
+        });
+        let held = core.claim(42).expect("free");
+        assert_eq!(core.send_waiting(42, false, Some("hello".into())), SendOutcome::Busy);
+        drop(held);
+        assert_eq!(core.send_waiting(42, false, Some("hello".into())), SendOutcome::Sent { app: "Notes".into() });
+        // Sent: a late second run finds nothing to send.
+        assert_eq!(core.send_waiting(42, false, Some("hello".into())), SendOutcome::Gone);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

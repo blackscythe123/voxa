@@ -15,7 +15,8 @@ use voxa_store::{Entry, History, Settings, Status};
 use crate::{TranscribeFailure, now_ms};
 
 /// History reasons for takes still in flight. If the process dies they are found on the next
-/// start and become [`NOT_SENT`], ready for "Send now".
+/// start: a take cut off while recording becomes [`NOT_SENT`], ready for "Send now"; one cut off
+/// while it was being written out goes back to waiting, so the background send finishes it.
 pub(crate) const RECORDING: &str = "Recording";
 pub(crate) const WRITING: &str = "Writing it out";
 pub(crate) const NOT_SENT: &str = "Not sent";
@@ -304,12 +305,13 @@ pub struct VoxaFlow {
 #[uniffi::export]
 impl VoxaFlow {
     /// `data_dir`: the app's files folder (recordings and history live there). Creating the flow
-    /// also recovers takes a previous process left half done (recording or being written out
-    /// when it died): they become "Not sent" in History, with their audio.
+    /// also recovers takes a previous process left half done (see [`RECORDING`]), and deletes
+    /// recordings no History entry keeps (incognito takes cut off by a process death).
     #[uniffi::constructor]
     pub fn new(data_dir: String, readiness: ReadinessInfo) -> Arc<Self> {
         let dir = PathBuf::from(data_dir);
         recover_interrupted(&dir);
+        sweep_orphan_audio(&dir);
         Arc::new(Self { inner: Mutex::new(Inner { flow: Flow::new(readiness.into()), dir, meta: BTreeMap::new() }) })
     }
 
@@ -408,7 +410,22 @@ impl VoxaFlow {
     /// never notified about).
     pub fn entry_for_job(&self, job: u64) -> Option<u64> {
         let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        // A cancelled take has no entry any more.
+        if g.flow.job(JobId(job)).is_some_and(|j| matches!(j.state, JobState::Discarded)) {
+            return None;
+        }
         g.meta.get(&JobId(job)).filter(|m| !m.private).map(|m| m.entry)
+    }
+
+    /// Whether the keyboard will send this entry itself: it is recording, being written out, or
+    /// waiting for the network inside the live flow. Ready, failed or finished takes are not
+    /// the keyboard's any more (a notification's Retry may send them).
+    pub fn owns(&self, entry_id: u64) -> bool {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        g.meta.iter().any(|(job, m)| {
+            m.entry == entry_id
+                && g.flow.job(*job).is_some_and(|j| matches!(j.state, JobState::Recording | JobState::Transcribing | JobState::WaitingForNetwork))
+        })
     }
 
     /// Whether a history entry belongs to a dictation the flow is still handling.
@@ -438,18 +455,40 @@ pub fn pause_key_label(paused: bool) -> String {
     if paused { voxa_core::copy::RESUME_LABEL } else { voxa_core::copy::PAUSE_LABEL }.to_string()
 }
 
-/// Takes left recording or being written out by a process that died become "Not sent".
+/// Takes left half done by a process that died: one cut off while recording becomes "Not sent";
+/// one that was being written out (the user had pressed Stop) waits for the background send.
 fn recover_interrupted(dir: &std::path::Path) {
     History::edit(dir, |h| {
         let mut changed = false;
         for e in h.entries.iter_mut() {
-            if matches!(&e.status, Status::Waiting(r) if r == RECORDING || r == WRITING) {
-                e.status = Status::Waiting(NOT_SENT.into());
-                changed = true;
-            }
+            let next = match &e.status {
+                Status::Waiting(r) if r == RECORDING => NOT_SENT,
+                Status::Waiting(r) if r == WRITING => crate::notices::WAITING_FOR_NETWORK,
+                _ => continue,
+            };
+            e.status = Status::Waiting(next.into());
+            changed = true;
         }
         (changed, ())
     });
+}
+
+/// Delete recordings in `audio/` that no History entry keeps. Only incognito takes are never
+/// in History; if the process died during one, its audio is found and deleted here.
+fn sweep_orphan_audio(dir: &std::path::Path) {
+    let Ok(files) = std::fs::read_dir(dir.join("audio")) else { return };
+    let kept: std::collections::HashSet<std::ffi::OsString> =
+        History::edit(dir, |h| (false, h.entries.iter().filter_map(|e| e.audio.as_ref()?.file_name().map(|n| n.to_os_string())).collect()));
+    let mut removed = 0;
+    for f in files.flatten() {
+        let name = f.file_name();
+        if name.to_string_lossy().ends_with(".pcm") && !kept.contains(&name) && std::fs::remove_file(f.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        crate::diag::log(|| format!("deleted {removed} recordings no dictation keeps"));
+    }
 }
 
 impl Inner {
@@ -464,8 +503,10 @@ impl Inner {
             for job in jobs {
                 let Some(m) = meta.get(&job.id) else { continue };
                 if m.private {
-                    // Incognito field: nothing kept. The recording goes once the take is done.
-                    if matches!(job.state, JobState::Delivered(_) | JobState::Discarded | JobState::Failed(_)) {
+                    // Incognito field: nothing kept. The recording goes as soon as nothing needs
+                    // it: only a take still recording, being written out or waiting to be sent
+                    // keeps its audio (and a process death is swept at the next start).
+                    if !matches!(job.state, JobState::Recording | JobState::Transcribing | JobState::WaitingForNetwork) {
                         let _ = std::fs::remove_file(&m.pcm);
                     }
                     continue;

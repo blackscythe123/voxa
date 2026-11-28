@@ -13,7 +13,9 @@
 //!
 //! Never logs or returns cookie or token values.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use voxa_chatgpt::{ChatGpt, Session as GptSession};
@@ -105,6 +107,9 @@ pub struct SessionCheck {
     pub account: Option<AccountInfo>,
     /// ChatGPT answered with Cloudflare's challenge or block (HTML or `cf-mitigated`).
     pub blocked: bool,
+    /// ChatGPT's session call answered 2xx with no token for a session we had: the only answer
+    /// that may lead to a "signed out" notification (a 401 or 403 may be a rate limit).
+    pub definite: bool,
 }
 
 /// The session, settings, words and history in one data folder, plus the ChatGPT client.
@@ -116,6 +121,24 @@ pub struct VoxaCore {
     dir: PathBuf,
     gpt: OnceLock<ChatGpt>,
     session: Mutex<Option<GptSession>>,
+    /// Goes up on every new session and sign-out: work that started with an older session
+    /// never writes anything back.
+    session_gen: AtomicU64,
+    /// History entries being sent right now (background send, History's "Send now"), so one
+    /// dictation is never uploaded twice at once.
+    sending: Mutex<HashSet<u64>>,
+}
+
+/// Holds an entry in [`VoxaCore::sending`] until dropped.
+pub(crate) struct SendClaim<'a> {
+    core: &'a VoxaCore,
+    id: u64,
+}
+
+impl Drop for SendClaim<'_> {
+    fn drop(&mut self) {
+        self.core.sending.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
+    }
 }
 
 impl VoxaCore {
@@ -130,6 +153,14 @@ impl VoxaCore {
     fn store_settings(&self) -> voxa_store::Settings {
         voxa_store::Settings::load(&self.dir)
     }
+
+    /// Claim an entry for sending; None when it is already being sent.
+    pub(crate) fn claim(&self, id: u64) -> Option<SendClaim<'_>> {
+        let fresh = self.sending.lock().unwrap_or_else(|e| e.into_inner()).insert(id);
+        // Built only when claimed: a dropped claim removes the id again (and `then_some` would
+        // build and drop one while the lock is still held).
+        if fresh { Some(SendClaim { core: self, id }) } else { None }
+    }
 }
 
 #[uniffi::export]
@@ -139,7 +170,7 @@ impl VoxaCore {
     pub fn new(data_dir: String) -> Arc<Self> {
         let dir = PathBuf::from(data_dir);
         let _ = std::fs::create_dir_all(&dir);
-        Arc::new(Self { dir, gpt: OnceLock::new(), session: Mutex::new(None) })
+        Arc::new(Self { dir, gpt: OnceLock::new(), session: Mutex::new(None), session_gen: AtomicU64::new(0), sending: Mutex::new(HashSet::new()) })
     }
 
     // ── session ──────────────────────────────────────────────────────────────
@@ -149,16 +180,30 @@ impl VoxaCore {
     pub fn use_session(&self, cookie_header: String, user_agent: String) {
         let s = (!cookie_header.trim().is_empty())
             .then(|| GptSession { cookie_header, user_agent, device_id: voxa_chatgpt::device_id(&self.dir) });
-        *self.session.lock().unwrap_or_else(|e| e.into_inner()) = s;
+        let mut g = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        self.session_gen.fetch_add(1, Ordering::SeqCst);
+        // Cookies refreshed for the session before this one must never be merged into it.
+        self.gpt().clear_refreshed();
+        *g = s;
     }
 
-    /// The sign-in cookies after ChatGPT re-issued them (it does on use, 90 days from then), once:
-    /// the app saves them in its encrypted vault. The live session already uses them.
+    /// Goes up on every `use_session` and `sign_out`. The app compares it before and after slow
+    /// work, and drops the result when the session changed meanwhile.
+    pub fn session_generation(&self) -> u64 {
+        self.session_gen.load(Ordering::SeqCst)
+    }
+
+    /// The sign-in cookies after ChatGPT re-issued them (it does on use, 90 days from then), once,
+    /// and only if they were refreshed from the live session: the app saves them in its
+    /// encrypted vault. The live session already uses them.
     pub fn take_refreshed_cookies(&self) -> Option<String> {
-        let h = self.gpt().take_refreshed()?;
-        if let Some(s) = self.session.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-            s.cookie_header = h.clone();
-        }
+        let mut g = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(s) = g.as_mut() else {
+            self.gpt().clear_refreshed();
+            return None;
+        };
+        let h = self.gpt().take_refreshed(&s.cookie_header)?;
+        s.cookie_header = h.clone();
         diag::log(|| "sign-in refreshed by ChatGPT".into());
         Some(h)
     }
@@ -168,32 +213,47 @@ impl VoxaCore {
     }
 
     pub fn sign_out(&self) {
-        *self.session.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let mut g = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        self.session_gen.fetch_add(1, Ordering::SeqCst);
+        self.gpt().clear_refreshed();
+        *g = None;
+        drop(g);
         let _ = std::fs::remove_file(self.dir.join("account.json"));
     }
 
     /// Check the session with ChatGPT (network; call off the main thread). Same mapping as the
     /// desktop: only a real rejection means signed out; being offline or blocked does not.
     pub fn check_session(&self) -> SessionCheck {
-        let check = |session, network, account, blocked| SessionCheck { session, network, account, blocked };
+        let check = |session, network, account, blocked, definite| SessionCheck { session, network, account, blocked, definite };
+        let generation = self.session_generation();
         let Some(s) = self.session() else {
             diag::log(|| "session check: no session saved".into());
-            return check(SessionState::Expired, NetworkState::Up, None, false);
+            return check(SessionState::Expired, NetworkState::Up, None, false, false);
         };
         let t = std::time::Instant::now();
-        let result = self.gpt().account(&s);
-        diag::log(|| format!("session check: {} in {} ms", match &result { Ok(_) => "ok".to_string(), Err(e) => format!("{e:?}") }, t.elapsed().as_millis()));
-        match result {
-            Ok(a) => {
-                if let Ok(b) = serde_json::to_vec_pretty(&a) {
-                    let _ = voxa_store::write_atomic(&self.dir.join("account.json"), &b);
+        let answer = self.gpt().check(&s);
+        diag::log(|| format!("session check: {} in {} ms", match &answer {
+            voxa_chatgpt::SessionAnswer::Valid(_) => "ok".to_string(),
+            voxa_chatgpt::SessionAnswer::NoToken => "no token".to_string(),
+            voxa_chatgpt::SessionAnswer::Failed(e) => format!("{e:?}"),
+        }, t.elapsed().as_millis()));
+        match answer {
+            voxa_chatgpt::SessionAnswer::Valid(a) => {
+                // Signed out or in again while this check ran: its account is not this session's.
+                if self.session_generation() == generation {
+                    if let Ok(b) = serde_json::to_vec_pretty(&a) {
+                        let _ = voxa_store::write_atomic(&self.dir.join("account.json"), &b);
+                    }
                 }
-                check(SessionState::Valid, NetworkState::Up, Some(AccountInfo::from(&a)), false)
+                check(SessionState::Valid, NetworkState::Up, Some(AccountInfo::from(&a)), false, false)
             }
-            Err(TranscribeError::SignedOut | TranscribeError::SessionExpired) => check(SessionState::Expired, NetworkState::Up, None, false),
-            Err(TranscribeError::Offline) => check(SessionState::Unknown, NetworkState::Down, None, false),
-            Err(TranscribeError::Blocked) => check(SessionState::Unknown, NetworkState::Up, None, true),
-            Err(_) => check(SessionState::Unknown, NetworkState::Up, None, false),
+            voxa_chatgpt::SessionAnswer::NoToken => check(SessionState::Expired, NetworkState::Up, None, false, true),
+            voxa_chatgpt::SessionAnswer::Failed(TranscribeError::SignedOut | TranscribeError::SessionExpired) => {
+                check(SessionState::Expired, NetworkState::Up, None, false, false)
+            }
+            voxa_chatgpt::SessionAnswer::Failed(TranscribeError::Offline) => check(SessionState::Unknown, NetworkState::Down, None, false, false),
+            voxa_chatgpt::SessionAnswer::Failed(TranscribeError::Blocked) => check(SessionState::Unknown, NetworkState::Up, None, true, false),
+            voxa_chatgpt::SessionAnswer::Failed(_) => check(SessionState::Unknown, NetworkState::Up, None, false, false),
         }
     }
 
@@ -245,7 +305,13 @@ impl VoxaCore {
 
     /// History's "Send now" (waiting or failed) or "Write it out again". The result stays in
     /// History as "Not pasted"; it is never inserted into whatever field is open now.
+    /// Returns None when the entry is gone, has no recording, or is already being sent (by the
+    /// background send, or a second tap).
     pub fn resend(&self, entry_id: u64) -> Option<HistoryEntry> {
+        let Some(_claim) = self.claim(entry_id) else {
+            diag::log(|| format!("resend {entry_id}: already being sent"));
+            return None;
+        };
         let entry = History::edit(&self.dir, |h| (false, h.get(entry_id).cloned()))?;
         let audio = entry.audio.clone()?.to_string_lossy().to_string();
         let updated = match self.transcribe_recording(audio, entry.app.clone()) {
@@ -255,8 +321,19 @@ impl VoxaCore {
             Err(_) => voxa_store::Entry { status: Status::Failed("Couldn't reach ChatGPT".into()), ..entry },
         };
         let u = updated.clone();
-        History::edit(&self.dir, move |h| (h.upsert(u), ()));
+        // Deleted while it was being sent: leave it deleted.
+        History::edit(&self.dir, move |h| if h.get(entry_id).is_some() { (h.upsert(u), ()) } else { (false, ()) });
         Some(updated.into())
+    }
+
+    /// Whether an entry is being sent right now (background send or "Send now").
+    pub fn is_sending(&self, entry_id: u64) -> bool {
+        self.sending.lock().unwrap_or_else(|e| e.into_inner()).contains(&entry_id)
+    }
+
+    /// One saved dictation, without pruning History (a read only; for notification buttons).
+    pub fn entry(&self, entry_id: u64) -> Option<HistoryEntry> {
+        History::edit(&self.dir, |h| (false, h.get(entry_id).cloned().map(HistoryEntry::from)))
     }
 
     /// Filler removal (if on in Settings), then the word list for `app`.
@@ -451,4 +528,42 @@ pub fn field_kind(input_type: i32, ime_options: i32) -> FieldKind {
 #[uniffi::export]
 pub fn password_field_text() -> StatusText {
     StatusText { title: "Voxa doesn't listen in password fields".into(), detail: Some("Switch keyboards to type it".into()), action: None, dismissable: false }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    fn core() -> (Arc<VoxaCore>, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("voxa-ffi-session-{}-{}", std::process::id(), now_ms()));
+        (VoxaCore::new(dir.to_string_lossy().to_string()), dir)
+    }
+
+    #[test]
+    fn sign_in_and_out_bump_the_generation_and_drop_waiting_cookies() {
+        let (c, dir) = core();
+        let g0 = c.session_generation();
+        c.use_session("__Secure-next-auth.session-token=A".into(), "ua".into());
+        assert!(c.session_generation() > g0);
+        assert_eq!(c.take_refreshed_cookies(), None);
+        let g1 = c.session_generation();
+        c.sign_out();
+        assert!(c.session_generation() > g1);
+        assert!(!c.has_session());
+        assert_eq!(c.take_refreshed_cookies(), None, "nothing to adopt once signed out");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_entry_can_only_be_claimed_once_at_a_time() {
+        let (c, dir) = core();
+        let first = c.claim(7).expect("free");
+        assert!(c.is_sending(7));
+        assert!(c.claim(7).is_none(), "a second sender must back off");
+        assert!(c.resend(7).is_none(), "Send now while the background send runs does nothing");
+        drop(first);
+        assert!(!c.is_sending(7));
+        assert!(c.claim(7).is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
