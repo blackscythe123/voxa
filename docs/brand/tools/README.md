@@ -1,7 +1,7 @@
 # Brand renders: social card, still, GIF and MP4
 
 Generic tooling for an animated 1280 by 640 card (a GitHub social preview, a README hero). Nothing in
-here knows about Voxa; the content lives in the page (here `../social-preview.html`).
+here knows about Voxa; the content lives in the page (here the page (see assets/starter.html)).
 
 ## The HTML contract
 
@@ -14,7 +14,7 @@ A page that follows this can be rendered by `render.py`:
 | `window.READY` | Optional. Set to `true` once fonts and images are loaded. Without it the renderer waits for `document.fonts` and `readyState`. |
 | `?t=<ms>` | Renders that frame and stays frozen (no animation loop). The renderer opens the page this way. |
 | `?still` | Renders the finished frame, the one used for the static PNG. |
-| `?guides` | Draws the safe zone guide lines and reports violations on the page (include `og-guides.js`). |
+| `?guides` | Draws the safe zone guide lines and reports violations on the page (copy `assets/og-guides.js` next to the page). |
 | `data-safe="name"` | Marks content that must stay inside the safe zone: text, logos, the icon, cards. Backgrounds and decoration that may bleed to the edges are not marked. |
 | `prefers-reduced-motion` | With no `?t`, the page shows the finished frame, still. |
 
@@ -26,7 +26,7 @@ GitHub's repository open graph template: canvas 1280 by 640, important content i
 y 80 to 560 (its 40 pt border at 2x). `og-guides.js` gives the page `?guides` and `window.checkSafe()`.
 `render.py` runs the same check itself on every run, at the still and every 100 ms over the loop (any
 `data-safe` element that is visible, at opacity 0.02 or more, and outside the zone fails), and exits with
-code 2 on a violation. Change the zone with `--zone x0,y0,x1,y1`.
+code 2 on a violation. The canvas (1280 x 640) and the zone are fixed: there is no option to change them or skip the check.
 
 ## render.py
 
@@ -48,4 +48,6 @@ then 92 % width, then 80 % width and half the colours. The PNG falls back to 256
 folder, because the `.cmd` shim mangles arguments) and `--ffmpeg` (defaults to PATH, then the WinGet
 install). `--keep-frames DIR` keeps the captured PNG frames.
 
-Exit codes: 0 fine, 2 a check failed (safe zone, or a file over its size target).
+Each run also writes `<name>-guides.png`: the still with the template guide lines, as proof for review.
+
+Exit codes: 0 fine, 2 a check failed (safe zone, a missing og-guides.js, or a file over its size target).

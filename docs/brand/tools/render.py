@@ -26,6 +26,9 @@ DEFAULT_FFMPEG = shutil.which("ffmpeg") or str(Path.home() / (
     "ffmpeg-9.1-full_build/bin/ffmpeg.exe"))
 
 MIB = 1024 * 1024
+# GitHub repository open graph template (fixed, every project).
+WIDTH, HEIGHT = 1280, 640
+GITHUB_ZONE = (80.0, 80.0, 1200.0, 560.0)
 
 # The same check as og-guides.js, injected so pages need not include anything to be checked.
 SAFE_JS = """(() => { const Z = %s, times = %s;
@@ -99,26 +102,23 @@ def main():
     ap.add_argument("--png", default=None, help="still file name (default <page>.png)")
     ap.add_argument("--anim-name", default="hero", help="base name for the GIF and MP4 (default hero)")
     ap.add_argument("--only", choices=["png", "gif", "mp4", "check"], action="append", help="repeatable; default all")
-    ap.add_argument("--width", type=int, default=1280); ap.add_argument("--height", type=int, default=640)
     ap.add_argument("--still-t", type=float, help="still frame time in ms (default: the page's ?still)")
     ap.add_argument("--fps", type=int, default=30, help="capture and MP4 frame rate")
     ap.add_argument("--crf", type=int, default=20, help="H.264 quality, lower is better")
     ap.add_argument("--gif-fps", type=int, default=20); ap.add_argument("--gif-width", type=int, default=960)
     ap.add_argument("--gif-colors", type=int, default=128); ap.add_argument("--gif-max-mb", type=float, default=4.0, help="MiB")
     ap.add_argument("--png-max-mb", type=float, default=1.0, help="MiB")
-    ap.add_argument("--zone", default="80,80,1200,560", help="safe zone x0,y0,x1,y1 (GitHub open graph template)")
     ap.add_argument("--check-step", type=float, default=100, help="ms between safe zone checks over the loop")
-    ap.add_argument("--no-check", action="store_true", help="skip the safe zone check")
     ap.add_argument("--agent-browser", default=DEFAULT_AB); ap.add_argument("--ffmpeg", default=DEFAULT_FFMPEG)
     ap.add_argument("--session", default="og-render")
     ap.add_argument("--keep-frames", type=Path, help="keep the captured frames in this folder")
     a = ap.parse_args()
 
     only = set(a.only or ["png", "gif", "mp4", "check"])
-    if not a.no_check: only.add("check")
+    only.add("check")
     html = a.html.resolve(); out = (a.out_dir or html.parent).resolve(); out.mkdir(parents=True, exist_ok=True)
     url = html.as_uri()
-    b = Browser(a.agent_browser, a.session, a.width, a.height)
+    b = Browser(a.agent_browser, a.session, WIDTH, HEIGHT)
     b.open(url + "?t=0")
     dur = b.eval("window.DURATION")
     if not isinstance(dur, (int, float)) or b.eval("typeof window.render") != "function":
@@ -126,8 +126,12 @@ def main():
     print(f"page: {html.name}, loop {dur:.0f} ms")
     failed = False
 
-    if "check" in only and not a.no_check:
-        x0, y0, x1, y1 = (float(v) for v in a.zone.split(","))
+    # GitHub's repository open graph template is not optional: the canvas is 1280 x 640 and every
+    # important element stays inside its 40 pt (80 px) border. There is no flag to change or skip this.
+    if "check" not in only:
+        only = only | {"check"}
+    if True:
+        x0, y0, x1, y1 = GITHUB_ZONE
         js = SAFE_JS % (json.dumps(dict(x0=x0, y0=y0, x1=x1, y1=y1)), "%s")
         times = [i * a.check_step for i in range(int(dur // a.check_step) + 1)]
         r = b.eval(js % json.dumps(times)); n, bad = r["n"], dict(r["bad"])
@@ -138,9 +142,9 @@ def main():
         elif bad:
             failed = True
             for k, it in bad.items():
-                print(f"safe zone FAIL: {k} at t={it[0]} spans x {it[1]} to {it[3]}, y {it[2]} to {it[4]} (zone {a.zone})")
+                print(f"safe zone FAIL: {k} at t={it[0]} spans x {it[1]} to {it[3]}, y {it[2]} to {it[4]} (GitHub zone x 80 to 1200, y 80 to 560)")
         else:
-            print(f"safe zone: {n} data-safe elements inside {a.zone} at the still and every {a.check_step:.0f} ms")
+            print(f"safe zone: {n} data-safe elements inside the GitHub zone at the still and every {a.check_step:.0f} ms")
         b.open(url + "?t=0")
 
     tmp = Path(tempfile.mkdtemp(prefix="og-render-"))
@@ -154,6 +158,14 @@ def main():
                 ff(a.ffmpeg, "-i", str(raw), "-vf", "split[a][b];[a]palettegen=max_colors=256:stats_mode=full[p];"
                    "[b][p]paletteuse=dither=sierra2_4a", str(png))
             print(f"still: {png} ({png.stat().st_size / 1e3:.0f} kB)")
+            # Proof for review: the still with the template's red guide lines drawn on top.
+            if not b.eval("typeof window.checkSafe === 'function'"):
+                print("guides: the page doesn't load og-guides.js (copy it next to the page)"); failed = True
+            else:
+                guides = png.with_name(png.stem + "-guides.png")
+                b.open(url + (f"?t={a.still_t}&guides" if a.still_t is not None else "?still&guides"))
+                b.run("screenshot", str(guides))
+                print(f"guides: {guides} (show this to the user as proof the template is followed)")
             if png.stat().st_size > a.png_max_mb * MIB: print("still: over the size target"); failed = True
 
         if only & {"gif", "mp4"}:
@@ -172,7 +184,7 @@ def main():
                 mp4 = out / f"{a.anim_name}.mp4"
                 ff(a.ffmpeg, "-framerate", str(a.fps), "-i", seq, "-c:v", "libx264", "-preset", "slow", "-crf", str(a.crf),
                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-tune", "animation", str(mp4))
-                print(f"mp4: {mp4} ({mp4.stat().st_size / 1e3:.0f} kB, {a.fps} fps, {a.width}x{a.height})")
+                print(f"mp4: {mp4} ({mp4.stat().st_size / 1e3:.0f} kB, {a.fps} fps, {WIDTH}x{HEIGHT})")
             if "gif" in only:
                 gif = out / f"{a.anim_name}.gif"
                 # step down quality until under the target: colours first, then dither, then width
