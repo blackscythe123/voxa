@@ -71,12 +71,14 @@ impl Session {
         Some(Self { cookie_header: saved.cookie_header, user_agent: saved.user_agent, device_id: device_id(dir) })
     }
 
-    /// Save the session where the sign-in window keeps it (atomically; same format).
+    /// Save the session where the sign-in window keeps it (same format). Atomic and safe to call
+    /// from several threads or processes at once: each write goes to its own temporary file, is
+    /// flushed to disk, then renamed over `session.json`, so a reader never sees a mix of two.
+    /// Callers that must not let an older header win hold [`SESSION_FILE_LOCK`] around their
+    /// whole take, check and save.
     pub fn save_to_voxa_dir(&self, dir: &Path) -> std::io::Result<()> {
         let bytes = serde_json::to_vec_pretty(&SavedSession { cookie_header: self.cookie_header.clone(), user_agent: self.user_agent.clone() })?;
-        let tmp = dir.join("session.json.tmp");
-        std::fs::write(&tmp, bytes)?;
-        std::fs::rename(tmp, dir.join("session.json"))
+        write_unique_then_rename(&dir.join("session.json"), &bytes)
     }
 
     /// Load the session the current Electron app saved (`%APPDATA%\voxa`), for migration and testing.
@@ -88,13 +90,79 @@ impl Session {
     }
 }
 
+/// Held around every take, check and save of the saved session in this process, so two saves
+/// never interleave and an older header is never written after a newer one.
+pub static SESSION_FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Write `bytes` to a temporary file with a name no other writer uses, flush it to disk, then
+/// rename it over `path`. A failed rename removes the temporary file and reports the error.
+pub fn write_unique_then_rename(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = path.with_file_name(format!("{name}.{}-{n}-{nanos}.tmp", std::process::id()));
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    let result = written.and_then(|()| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// NextAuth splits a large session token across `__Secure-next-auth.session-token.0`, `.1`, ...
+/// Whether a cookie header holds a complete session token (one cookie, or every chunk from 0).
+pub fn has_session_token(cookie_header: &str) -> bool {
+    const BASE: &str = "__Secure-next-auth.session-token";
+    let pairs: Vec<(&str, &str)> = cookie_header
+        .split(';')
+        .filter_map(|c| {
+            let (n, v) = c.trim().split_once('=')?;
+            Some((n.trim(), v.trim()))
+        })
+        .collect();
+    if pairs.iter().any(|(n, v)| *n == BASE && !v.is_empty()) {
+        return true;
+    }
+    let mut chunks: Vec<usize> = pairs
+        .iter()
+        .filter(|(_, v)| !v.is_empty())
+        .filter_map(|(n, _)| n.strip_prefix(BASE)?.strip_prefix('.')?.parse().ok())
+        .collect();
+    chunks.sort_unstable();
+    !chunks.is_empty() && chunks.iter().enumerate().all(|(i, c)| i == *c)
+}
+
 pub struct ChatGpt {
     http: Client,
     session_id: String,
-    /// The cookie header after ChatGPT's latest Set-Cookie headers, when it differs from what the
-    /// caller sent: ChatGPT re-issues the session token (90 days from now) on use. Callers save it
-    /// with `take_refreshed`, or the saved sign-in dies 90 days after the original sign-in.
-    refreshed: std::sync::Mutex<Option<String>>,
+    /// The cookie header after ChatGPT's latest Set-Cookie headers on a successful reply, tied to
+    /// the header that was sent: ChatGPT re-issues the session token (90 days from now) on use.
+    /// Callers save it with `take_refreshed`, or the saved sign-in dies 90 days after the
+    /// original sign-in. Cookies refreshed for one session are never merged into another.
+    refreshed: std::sync::Mutex<Option<Refreshed>>,
+}
+
+/// Re-issued cookies waiting to be saved: `merged` was built from `source`, the header sent.
+#[derive(Clone)]
+struct Refreshed {
+    source: String,
+    merged: String,
+}
+
+/// What a session check found. Only `NoToken` (ChatGPT answered 2xx without an access token, and
+/// it wasn't Cloudflare) is a definite sign-out; a 401 or 403 may be a rate limit or a region
+/// block, so it is reported as `Failed(SessionExpired)` and is never definite.
+#[derive(Debug)]
+pub enum SessionAnswer {
+    Valid(Account),
+    NoToken,
+    Failed(TranscribeError),
 }
 
 /// Merge `Set-Cookie` headers into a `Cookie` header. Cookies are replaced by name; an expired or
@@ -102,6 +170,15 @@ pub struct ChatGpt {
 /// chunk is re-issued, chunks that weren't re-issued are dropped, so an old chunk never gets glued
 /// onto a new token.
 pub fn merge_set_cookies(cookie_header: &str, set_cookies: &[&str]) -> String {
+    merge_set_cookies_at(cookie_header, set_cookies, unix_now())
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// [`merge_set_cookies`] with an explicit clock (seconds since 1970), for tests.
+pub fn merge_set_cookies_at(cookie_header: &str, set_cookies: &[&str], now: i64) -> String {
     const TOKEN: &str = "__Secure-next-auth.session-token";
     let mut jar: Vec<(String, String)> = cookie_header
         .split(';')
@@ -114,12 +191,33 @@ pub fn merge_set_cookies(cookie_header: &str, set_cookies: &[&str]) -> String {
     for sc in set_cookies {
         let mut parts = sc.split(';');
         let Some((n, v)) = parts.next().and_then(|nv| nv.trim().split_once('=')) else { continue };
+        let mut max_age: Option<i64> = None;
+        let mut expires: Option<i64> = None;
+        for a in parts {
+            let a = a.trim();
+            let lower = a.to_ascii_lowercase();
+            if let Some(x) = lower.strip_prefix("max-age=") {
+                max_age = Some(x.trim().parse::<i64>().unwrap_or(0));
+            } else if lower.starts_with("expires=") {
+                expires = parse_http_date(&a[8..]);
+            }
+        }
+        // Max-Age wins over Expires (RFC 6265 5.3); a date in the past deletes the cookie.
         let expired = v.is_empty()
-            || parts.any(|a| {
-                let a = a.trim().to_ascii_lowercase();
-                a.strip_prefix("max-age=").and_then(|x| x.trim().parse::<i64>().ok()).is_some_and(|x| x <= 0)
-            });
-        set.push((n.trim().to_string(), v.to_string(), expired));
+            || match max_age {
+                Some(x) => x <= 0,
+                None => expires.is_some_and(|t| t <= now),
+            };
+        let n = n.trim().to_string();
+        // The same name twice in one response (another Domain or Path): a live value wins over a
+        // deletion, whatever the order.
+        if let Some(i) = set.iter().position(|(s, _, _)| *s == n) {
+            if expired && !set[i].2 {
+                continue;
+            }
+            set.remove(i);
+        }
+        set.push((n, v.to_string(), expired));
     }
     if set.iter().any(|(n, _, _)| n.starts_with(TOKEN)) {
         jar.retain(|(n, _)| !n.starts_with(TOKEN) || set.iter().any(|(s, _, _)| s == n));
@@ -131,6 +229,43 @@ pub fn merge_set_cookies(cookie_header: &str, set_cookies: &[&str]) -> String {
         }
     }
     jar.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join("; ")
+}
+
+/// Parse a cookie `Expires` date ("Sat, 28 Nov 2026 08:59:41 GMT", or with dashes as in
+/// "Sat, 28-Nov-2026 08:59:41 GMT") into seconds since 1970. None if it can't be read.
+pub fn parse_http_date(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let s = s.split_once(',').map(|(_, r)| r).unwrap_or(s);
+    let parts: Vec<&str> = s.split([' ', '-']).filter(|p| !p.is_empty()).collect();
+    let [day, mon, year, time, ..] = parts.as_slice() else { return None };
+    let day: i64 = day.parse().ok()?;
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let m = MONTHS.iter().position(|x| mon.to_ascii_lowercase().starts_with(x))? as i64 + 1;
+    let mut y: i64 = year.parse().ok()?;
+    if y < 100 {
+        y += if y < 70 { 2000 } else { 1900 };
+    }
+    let hms: Vec<i64> = time.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+    let [h, mi, sec] = hms.as_slice() else { return None };
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let (yy, mm) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = yy.div_euclid(400);
+    let yoe = yy - era * 400;
+    let doy = (153 * mm + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + mi * 60 + sec)
+}
+
+/// Whether a merged header is worth saving over the sent one: something other than Cloudflare's
+/// bot cookie (`__cf_bm`, new on nearly every reply) changed.
+fn worth_saving(sent: &str, merged: &str) -> bool {
+    let meaningful = |h: &str| {
+        let mut v: Vec<String> = h.split(';').map(|c| c.trim().to_string()).filter(|c| !c.is_empty() && !c.starts_with("__cf_bm=")).collect();
+        v.sort();
+        v
+    };
+    meaningful(sent) != meaningful(merged)
 }
 
 fn classify_send_error(e: &reqwest::Error) -> TranscribeError {
@@ -148,32 +283,52 @@ impl Default for ChatGpt {
     }
 }
 
-/// Time allowed to upload and transcribe `bytes` of audio: 30 s, plus 20 s per MB (a slow
-/// ~400 kbit/s uplink), at most 15 minutes. The client's 20 s default is for small requests;
-/// a long dictation would never fit in it.
+/// Time allowed to upload and transcribe `bytes` of audio: 30 s, plus 60 s per started MB (a
+/// slow ~130 kbit/s uplink, and ChatGPT's own time to transcribe a long take), at most 15
+/// minutes. A 70 s dictation (2.3 MB of WAV) gets 210 s; it timed out at 70 s on a slow network
+/// before. No connection at all still fails within the 10 s connect timeout.
 pub fn upload_timeout(bytes: usize) -> Duration {
-    let secs = 30 + (bytes as u64 / 1_000_000) * 20;
-    Duration::from_secs(secs.min(15 * 60))
+    let mb = (bytes as u64).div_ceil(1_000_000);
+    Duration::from_secs((30 + mb * 60).min(15 * 60))
 }
 
 impl ChatGpt {
-    /// Remember ChatGPT's re-issued cookies from a response (see `refreshed`). Never logs values.
+    /// Remember ChatGPT's re-issued cookies from a successful response (see `refreshed`). Merged
+    /// onto cookies waiting from the same sent header only; anything else is replaced. Never logs
+    /// values.
     fn note_cookies(&self, s: &Session, headers: &HeaderMap) {
         let sets: Vec<&str> = headers.get_all(reqwest::header::SET_COOKIE).iter().filter_map(|v| v.to_str().ok()).collect();
+        self.note_set_cookies(&s.cookie_header, &sets);
+    }
+
+    fn note_set_cookies(&self, sent: &str, sets: &[&str]) {
         if sets.is_empty() {
             return;
         }
         let mut r = self.refreshed.lock().unwrap_or_else(|e| e.into_inner());
-        let base = r.clone().unwrap_or_else(|| s.cookie_header.clone());
-        let merged = merge_set_cookies(&base, &sets);
-        if merged != s.cookie_header {
-            *r = Some(merged);
+        let base = match r.as_ref() {
+            Some(w) if w.source == sent => w.merged.clone(),
+            _ => sent.to_string(),
+        };
+        let merged = merge_set_cookies(&base, sets);
+        if worth_saving(sent, &merged) {
+            *r = Some(Refreshed { source: sent.to_string(), merged });
+        } else if r.as_ref().is_some_and(|w| w.source != sent) {
+            *r = None;
         }
     }
 
-    /// The cookie header with ChatGPT's latest re-issued cookies, once; save it as the session.
-    pub fn take_refreshed(&self) -> Option<String> {
-        self.refreshed.lock().unwrap_or_else(|e| e.into_inner()).take()
+    /// The cookie header with ChatGPT's latest re-issued cookies, once, if they were refreshed
+    /// from `current` (the session's header now) and still hold a whole session token. Cookies
+    /// refreshed for a session that has since been replaced or signed out are dropped.
+    pub fn take_refreshed(&self, current: &str) -> Option<String> {
+        let w = self.refreshed.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        (w.source == current && has_session_token(&w.merged)).then_some(w.merged)
+    }
+
+    /// Forget re-issued cookies waiting to be saved (sign-in, sign-out, a new session).
+    pub fn clear_refreshed(&self) {
+        *self.refreshed.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     pub fn new() -> Self {
@@ -207,11 +362,21 @@ impl ChatGpt {
 
     /// Who is signed in, from the same session call (no extra request). Never includes tokens.
     pub fn account(&self, s: &Session) -> Result<Account, TranscribeError> {
-        let v = self.session_json(s)?;
-        if v.get("accessToken").is_none() {
-            return Err(TranscribeError::SessionExpired);
+        match self.check(s) {
+            SessionAnswer::Valid(a) => Ok(a),
+            SessionAnswer::NoToken => Err(TranscribeError::SessionExpired),
+            SessionAnswer::Failed(e) => Err(e),
         }
-        Ok(Account::from_session(&v))
+    }
+
+    /// The session check, telling a definite sign-out (`NoToken`) from a rejection that may be
+    /// something else (`Failed(SessionExpired)` for a 401 or 403).
+    pub fn check(&self, s: &Session) -> SessionAnswer {
+        match self.session_json(s) {
+            Ok(v) if v.get("accessToken").and_then(|t| t.as_str()).is_some() => SessionAnswer::Valid(Account::from_session(&v)),
+            Ok(_) => SessionAnswer::NoToken,
+            Err(e) => SessionAnswer::Failed(e),
+        }
     }
 
     fn session_json(&self, s: &Session) -> Result<serde_json::Value, TranscribeError> {
@@ -225,12 +390,17 @@ impl ChatGpt {
             .map_err(|e| classify_send_error(&e))?;
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
-        self.note_cookies(s, &headers);
         let body = resp.text().map_err(|e| classify_send_error(&e))?;
         if let Some(e) = TranscribeError::from_response(status, is_html(&headers, &body), headers.contains_key("cf-mitigated")) {
             return Err(e);
         }
-        serde_json::from_str(&body).map_err(|_| TranscribeError::Server(status))
+        let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| TranscribeError::Server(status))?;
+        // Only a reply that carries a token refreshes the saved cookies: a failed or signed-out
+        // reply may delete the token, and saving that would turn a blip into a sign-out.
+        if v.get("accessToken").and_then(|t| t.as_str()).is_some() {
+            self.note_cookies(s, &headers);
+        }
+        Ok(v)
     }
 
     /// Turn recorded speech into text. `audio` is a complete file (e.g. WAV), `file_name` carries its extension.
@@ -251,12 +421,12 @@ impl ChatGpt {
             .map_err(|e| classify_send_error(&e))?;
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
-        self.note_cookies(s, &headers);
         let body = resp.text().map_err(|e| classify_send_error(&e))?;
         if let Some(e) = TranscribeError::from_response(status, is_html(&headers, &body), headers.contains_key("cf-mitigated")) {
             return Err(e);
         }
         let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| TranscribeError::Server(status))?;
+        self.note_cookies(s, &headers);
         Ok(["text", "transcript", "message"]
             .iter()
             .find_map(|k| v.get(*k).and_then(|t| t.as_str()))
@@ -324,10 +494,12 @@ mod timeout_tests {
 
     #[test]
     fn upload_time_grows_with_the_recording() {
-        assert_eq!(upload_timeout(200_000), Duration::from_secs(30));
-        // A 10-minute WAV at 16 kHz mono 16-bit is about 19 MB.
-        assert_eq!(upload_timeout(19_200_000), Duration::from_secs(30 + 19 * 20));
-        assert_eq!(upload_timeout(500_000_000), Duration::from_secs(15 * 60));
+        assert_eq!(upload_timeout(0), Duration::from_secs(30));
+        assert_eq!(upload_timeout(200_000), Duration::from_secs(90));
+        // A 71 s take (16 kHz mono 16-bit WAV, about 2.27 MB) on a slow network.
+        assert_eq!(upload_timeout(2_272_000), Duration::from_secs(210));
+        // A 10-minute WAV is about 19 MB: capped at 15 minutes.
+        assert_eq!(upload_timeout(19_200_000), Duration::from_secs(15 * 60));
     }
 }
 
@@ -364,18 +536,40 @@ mod cookie_probe {
 
 #[cfg(test)]
 mod cookie_tests {
-    use super::merge_set_cookies;
+    use super::{merge_set_cookies, merge_set_cookies_at, parse_http_date};
 
     #[test]
     fn refreshed_token_replaces_all_chunks_and_expired_cookies_go() {
         let jar = "a=1; __Secure-next-auth.session-token.0=OLD0; __Secure-next-auth.session-token.1=OLD1; __cf_bm=x";
         let merged = merge_set_cookies(jar, &[
             "__Secure-next-auth.session-token.0=NEW0; Path=/; Max-Age=7776000; Secure",
-            "__cf_bm=y; Expires=Sat, 28 Nov 2026 08:59:41 GMT",
+            "__cf_bm=y; Expires=Fri, 28 Nov 2036 08:59:41 GMT",
             "a=; Max-Age=0",
         ]);
         // The token came back as one chunk: the old second chunk must not survive.
         assert_eq!(merged, "__Secure-next-auth.session-token.0=NEW0; __cf_bm=y");
+    }
+
+    #[test]
+    fn a_past_expires_date_deletes_and_a_future_one_keeps() {
+        let now = parse_http_date("Sat, 28 Nov 2026 12:00:00 GMT").unwrap();
+        let merged = merge_set_cookies_at("a=1; b=2", &["a=x; Expires=Thu, 01 Jan 1970 00:00:00 GMT", "b=y; Expires=Sun, 28-Nov-2027 08:59:41 GMT"], now);
+        assert_eq!(merged, "b=y");
+    }
+
+    #[test]
+    fn a_live_value_wins_over_a_deletion_of_the_same_name() {
+        let both = ["t=new; Path=/", "t=; Path=/api; Max-Age=0"];
+        assert_eq!(merge_set_cookies_at("t=old", &both, 0), "t=new");
+        let reversed = ["t=; Path=/api; Max-Age=0", "t=new; Path=/"];
+        assert_eq!(merge_set_cookies_at("t=old", &reversed, 0), "t=new");
+    }
+
+    #[test]
+    fn http_dates_parse() {
+        assert_eq!(parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+        assert_eq!(parse_http_date("Sat, 28 Nov 2026 08:59:41 GMT"), Some(1_795_856_381));
+        assert_eq!(parse_http_date("nonsense"), None);
     }
 
     #[test]
@@ -399,12 +593,97 @@ mod refresh_live {
         let s = Session::from_voxa_dir(&dir).expect("signed in on desktop");
         let gpt = ChatGpt::new();
         gpt.account(&s).expect("first check");
-        let h = gpt.take_refreshed().expect("ChatGPT re-issued cookies");
+        let h = gpt.take_refreshed(&s.cookie_header).expect("ChatGPT re-issued cookies");
         let names: Vec<&str> = h.split("; ").filter_map(|c| c.split('=').next()).collect();
         eprintln!("refreshed header has {} cookies; token chunks: {:?}", names.len(), names.iter().filter(|n| n.contains("session-token")).collect::<Vec<_>>());
         eprintln!("token changed: {}", h.split("; ").filter(|c| c.contains("session-token")).collect::<Vec<_>>() != s.cookie_header.split("; ").filter(|c| c.contains("session-token")).collect::<Vec<_>>());
         let s2 = Session { cookie_header: h, ..s };
         let a = gpt.account(&s2).expect("second check with only the refreshed cookies");
         eprintln!("second check with the refreshed sign-in: OK ({} chars of name)", a.name.len());
+    }
+}
+
+#[cfg(test)]
+mod refresh_slot_tests {
+    use super::*;
+
+    const T0: &str = "__Secure-next-auth.session-token=OLD; __cf_bm=a";
+    const T1: &str = "__Secure-next-auth.session-token=NEW; __cf_bm=b";
+
+    #[test]
+    fn refreshed_cookies_are_only_adopted_by_the_session_they_came_from() {
+        let gpt = ChatGpt::new();
+        gpt.note_set_cookies(T0, &["__Secure-next-auth.session-token=R0; Max-Age=7776000"]);
+        // The user signed in again meanwhile: the old session's refresh must not leak into it.
+        assert_eq!(gpt.take_refreshed(T1), None);
+        assert_eq!(gpt.take_refreshed(T0), None, "taken once, even when dropped");
+        gpt.note_set_cookies(T0, &["__Secure-next-auth.session-token=R0; Max-Age=7776000"]);
+        assert_eq!(gpt.take_refreshed(T0).as_deref(), Some("__cf_bm=a; __Secure-next-auth.session-token=R0"));
+    }
+
+    #[test]
+    fn a_new_sessions_cookies_never_merge_onto_an_old_slot() {
+        let gpt = ChatGpt::new();
+        gpt.note_set_cookies(T0, &["__Secure-next-auth.session-token=R0; Max-Age=7776000"]);
+        // First reply for the new sign-in: built from the new header, not the old slot.
+        gpt.note_set_cookies(T1, &["extra=1"]);
+        let h = gpt.take_refreshed(T1).expect("new session refreshed");
+        assert!(h.contains("session-token=NEW") && !h.contains("R0") && !h.contains("OLD"), "{h}");
+    }
+
+    #[test]
+    fn clear_drops_waiting_cookies() {
+        let gpt = ChatGpt::new();
+        gpt.note_set_cookies(T0, &["__Secure-next-auth.session-token=R0; Max-Age=7776000"]);
+        gpt.clear_refreshed();
+        assert_eq!(gpt.take_refreshed(T0), None);
+    }
+
+    #[test]
+    fn only_a_new_cf_bm_is_not_worth_saving() {
+        let gpt = ChatGpt::new();
+        gpt.note_set_cookies(T0, &["__cf_bm=zzz; Max-Age=1800"]);
+        assert_eq!(gpt.take_refreshed(T0), None);
+    }
+
+    #[test]
+    fn a_header_without_a_whole_token_is_never_handed_out() {
+        let gpt = ChatGpt::new();
+        gpt.note_set_cookies(T0, &["__Secure-next-auth.session-token=; Max-Age=0"]);
+        assert_eq!(gpt.take_refreshed(T0), None);
+    }
+
+    #[test]
+    fn session_token_must_be_whole() {
+        assert!(has_session_token("a=1; __Secure-next-auth.session-token=x"));
+        assert!(has_session_token("__Secure-next-auth.session-token.0=x; __Secure-next-auth.session-token.1=y"));
+        assert!(!has_session_token("__Secure-next-auth.session-token.1=y"));
+        assert!(!has_session_token("__Secure-next-auth.session-token="));
+        assert!(!has_session_token(""));
+    }
+
+    #[test]
+    fn concurrent_saves_never_leave_a_broken_file() {
+        let dir = std::env::temp_dir().join(format!("voxa-session-save-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    for j in 0..25 {
+                        let s = Session { cookie_header: format!("__Secure-next-auth.session-token={}", "x".repeat(200 + i * 50 + j)), user_agent: "ua".into(), device_id: String::new() };
+                        s.save_to_voxa_dir(&dir).expect("save");
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let s = Session::from_voxa_dir(&dir).expect("the file is whole");
+        assert!(has_session_token(&s.cookie_header));
+        let leftovers = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
+        assert_eq!(leftovers, 0, "no temporary files left behind");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
