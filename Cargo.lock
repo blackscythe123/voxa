@@ -7968,7 +7968,16 @@ dependencies = [
  "uniffi",
  "voxa-chatgpt",
  "voxa-core",
+ "voxa-nudge",
  "voxa-store",
+]
+
+[[package]]
+name = "voxa-nudge"
+version = "0.4.7"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
