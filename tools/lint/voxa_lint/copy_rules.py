@@ -57,6 +57,9 @@ PROPER = {
     "Meet", "Gmail", "Microsoft", "Apple", "Ctrl", "Alt", "Shift", "Cmd", "Option", "Space", "Fn", "Enter", "Esc", "Tab",
     "Home", "History", "Insights", "Words", "Settings", "Accessibility", "Explorer", "File", "VS", "Next", "I", "OK",
     "Wi-Fi", "Bluetooth", "Support", "Application", "AI", "UI", "USB", "PC", "OS",
+    # Days, months and New Year are capitalised in English sentence case too (the greetings use them).
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "New", "Year",
+    "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
 }
 
 
