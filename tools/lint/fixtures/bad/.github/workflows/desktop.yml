@@ -3,3 +3,5 @@ jobs:
   windows:
     steps:
       - run: ISCC.exe /Q desktop\windows\voxa.iss
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "Voxa"   # Bad: release-latest (not a prerelease)
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --prerelease --latest=false   # Good

@@ -30,10 +30,11 @@ friend reinstalling by hand. So nobody but the owner gets 1.0.0 until the
 | B3 | Tag the desktop release on that commit: `git tag v1.0.0 && git push origin v1.0.0` | Desktop workflow starts on the tag |
 | B4 | Approve the `release` environment twice: the `macos` job, then the `feed` job | The release has `Voxa-Setup-1.0.0.exe`, `Voxa-1.0.0-mac.dmg` and the version-free copies; the feed job ran `guard-forward`, `verify` and `fetch-check` |
 | B5 | Build Android on your PC: `powershell -File android/release.ps1` (refuses a dirty tree, placeholder keys, a missing or debug release key, or an unpinned signer) | `android/build/release/Voxa-Android-1.0.0-arm64-v8a.apk` and `-universal.apk`; the arm64 APK is within the 6.0 MB budget and the universal one under the 15 MiB feed cap |
-| B6 | Publish Android exactly as release.ps1 prints it: `gh release create android-v1.0.0 <both APKs> --target <commit> --latest=false --title "Voxa for Android 1.0.0"` | The Android release is never "Latest"; the desktop release still is |
+| B6 | Publish Android exactly as release.ps1 prints it: `gh release create android-v1.0.0 <both APKs> --target <commit> --latest=false --title "Voxa for Android 1.0.0"` | The Android release is never "Latest"; the desktop release is a prerelease until B10 |
 | B7 | Sign the Android feed from the tag ref: `gh workflow run android-feed.yml --ref android-v1.0.0 -f tag=android-v1.0.0`, approve it | The run checks the ref, the versionCode, the pinned signer, `guard-forward`, then `fetch-check` |
 | B8 | Click every README download link while logged out of GitHub | Each one downloads (no 404) |
 | B9 | First release, or any release that changes the updater: section C before anyone else gets it | The gate's checklist is all ticked |
+| B10 | Promote the desktop release only after the gate: `gh release edit v1.0.0 --prerelease=false --latest` (the tag workflow always publishes a prerelease, so "latest" and every `releases/latest/download/...` link keep the previous version until now) | `gh api repos/blackscythe123/voxa/releases/latest --jq .tag_name` prints the new tag; then click the README links again |
 
 ## C. REAL-HARDWARE RELEASE GATE
 

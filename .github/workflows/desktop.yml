@@ -142,7 +142,9 @@ jobs:
           cp dist/Voxa-Setup-*.exe dist/Voxa-Setup.exe
           cp dist/Voxa-*-mac.dmg dist/Voxa-mac.dmg
           ls -la dist
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Voxa $GITHUB_REF_NAME" --generate-notes
+          # Always a prerelease: "latest" (and so every public download link) moves only when the owner
+          # promotes it after the real-hardware gate: gh release edit <tag> --prerelease=false --latest
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Voxa $GITHUB_REF_NAME" --generate-notes --prerelease --latest=false
 
   # Signs desktop.json with K1 and replaces it on the fixed "update-feed" prerelease. The only job
   # that can read VOXA_UPDATE_KEY (environment "release", owner approval). Uploaded last, so the

@@ -107,6 +107,13 @@ def check_latest(ctx: Ctx) -> list[Violation]:
                                      "the feed release never becomes the latest release (docs/guardrails.md#7-release)",
                                      key=cmd.strip()[:120]))
                 continue
+            if rel.endswith("workflows/desktop.yml") and "create" in cmd and "GITHUB_REF_NAME" in cmd \
+                    and not (re.search(r"--prerelease\b", cmd) and re.search(r"--latest(=|\s+)false\b", cmd)):
+                line = text.count("\n", 0, m.start()) + 1
+                out.append(Violation("release-latest", rel, line, "the tagged desktop release is created without --prerelease --latest=false. "
+                                     "Rule: a new version stays a prerelease until the owner promotes it after the real-hardware gate, "
+                                     "so the public download links never jump early (docs/release-runbook.md B10)", key=cmd.strip()[:120]))
+                continue
             if ANDROID.search(cmd) and not re.search(r"--latest(=|\s+)false\b", cmd):
                 line = text.count("\n", 0, m.start()) + 1
                 out.append(Violation("release-latest", rel, line, "Android release without --latest=false. Rule: Android GitHub releases "
