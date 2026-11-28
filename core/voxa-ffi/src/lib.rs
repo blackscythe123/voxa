@@ -28,6 +28,7 @@ mod greeting;
 mod nudge;
 mod notices;
 mod records;
+mod update;
 
 pub use diag::{LogSink, set_log_sink};
 pub use flow::*;
@@ -35,6 +36,7 @@ pub use greeting::*;
 pub use nudge::*;
 pub use notices::*;
 pub use records::*;
+pub use update::*;
 
 uniffi::setup_scaffolding!();
 

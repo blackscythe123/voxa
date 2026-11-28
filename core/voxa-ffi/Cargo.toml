@@ -28,6 +28,7 @@ voxa-core = { path = "../voxa-core" }
 voxa-chatgpt = { path = "../voxa-chatgpt" }
 voxa-store = { path = "../voxa-store" }
 voxa-nudge = { path = "../voxa-nudge" }
+voxa-update = { path = "../voxa-update" }
 uniffi = "0.32"
 serde_json = "1"
 thiserror = "2"

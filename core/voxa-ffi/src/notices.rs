@@ -30,6 +30,8 @@ impl From<notices::Notice> for NoticeText {
 pub enum NoticeKind {
     SignIn,
     Dictations,
+    /// A4: a verified update is ready to install (ID 4, channel "updates").
+    Update,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -65,6 +67,7 @@ pub fn notice_decide(kind: NoticeKind, now_ms: u64, showing: bool, posted: Vec<u
     let kind = match kind {
         NoticeKind::SignIn => Kind::SignIn,
         NoticeKind::Dictations => Kind::Dictations,
+        NoticeKind::Update => Kind::Update,
     };
     match notices::decide(kind, now_ms, showing, &posted, last_dictations) {
         Decision::Post => NoticeDecision::Post,
@@ -77,6 +80,38 @@ pub fn notice_decide(kind: NoticeKind, now_ms: u64, showing: bool, posted: Vec<u
 #[uniffi::export]
 pub fn notice_record(posted: Vec<u64>, now_ms: u64) -> Vec<u64> {
     notices::record(&posted, now_ms)
+}
+
+/// A4: "Voxa 1.1.0 is ready to install".
+#[uniffi::export]
+pub fn notice_update_ready(version: String) -> NoticeText {
+    notices::update_ready(&version).into()
+}
+
+/// A4's lock screen title ("Voxa update ready"), not the global "Voxa needs you".
+#[uniffi::export]
+pub fn notice_update_public_title() -> String {
+    notices::UPDATE_PUBLIC_TITLE.into()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum NoticeUpdateDecision {
+    Post,
+    /// Deferred to the next allowed moment (on screen, or the daily cap is used).
+    Wait,
+    /// Already posted for this version: never again.
+    Never,
+}
+
+/// A4's rules (see `voxa_core::notices::decide_update`): once per version, never while Voxa is
+/// visible, and it counts toward the daily cap, deferred rather than dropped.
+#[uniffi::export]
+pub fn notice_decide_update(version: String, posted_for: String, visible: bool, now_ms: u64, posted: Vec<u64>) -> NoticeUpdateDecision {
+    match notices::decide_update(&version, &posted_for, visible, now_ms, &posted) {
+        notices::UpdateDecision::Post => NoticeUpdateDecision::Post,
+        notices::UpdateDecision::Wait => NoticeUpdateDecision::Wait,
+        notices::UpdateDecision::Never => NoticeUpdateDecision::Never,
+    }
 }
 
 #[uniffi::export]

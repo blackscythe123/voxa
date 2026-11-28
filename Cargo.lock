@@ -7972,6 +7972,7 @@ dependencies = [
  "voxa-core",
  "voxa-nudge",
  "voxa-store",
+ "voxa-update",
 ]
 
 [[package]]
