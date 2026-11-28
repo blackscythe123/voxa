@@ -41,6 +41,8 @@ pub struct DoodleStroke {
     pub tag: StrokeTag,
     pub pivot_x: f32,
     pub pivot_y: f32,
+    /// The long ground line at (6, 92) (voxa-core's `is_horizon`): the phone's Home leaves it out.
+    pub horizon: bool,
 }
 
 impl From<&doodle::Stroke> for DoodleStroke {
@@ -65,6 +67,7 @@ impl From<&doodle::Stroke> for DoodleStroke {
             },
             pivot_x: s.pivot.0,
             pivot_y: s.pivot.1,
+            horizon: doodle::is_horizon(s),
         }
     }
 }
@@ -116,6 +119,18 @@ pub struct HomeGreeting {
     /// The subject's scale (for the flourish).
     pub scale: f32,
     pub done_ms: u32,
+    /// The drawing's own box [x0, y0, x1, y1] in band units, without the horizon and with the
+    /// flourish's reach (voxa-core's `drawn_bounds`). The phone crops the doodle to it.
+    pub bounds: Vec<f32>,
+}
+
+/// One doodle drawn for a day and a count, for tests and previews.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DoodleArt {
+    pub strokes: Vec<DoodleStroke>,
+    pub scale: f32,
+    pub done_ms: u32,
+    pub bounds: Vec<f32>,
 }
 
 /// The flourish's transform for one stroke: an SVG matrix [a, b, c, d, e, f] and an opacity.
@@ -244,6 +259,7 @@ impl VoxaCore {
             strokes: drawing.strokes.iter().map(DoodleStroke::from).collect(),
             scale: drawing.scale,
             done_ms: drawing.done_ms,
+            bounds: doodle::drawn_bounds(g.doodle, &drawing).to_vec(),
         }
     }
 
@@ -255,6 +271,19 @@ impl VoxaCore {
         if ledger.should_play(doodle_of(&doodle), today) {
             let _ = voxa_store::write_atomic(&path, ledger.to_text().as_bytes());
         }
+    }
+}
+
+/// `doodle` ("night") drawn for `date` ("2026-11-28") with `count` marks, in the phone band.
+#[uniffi::export]
+pub fn doodle_art(doodle: String, date: String, count: u32) -> DoodleArt {
+    let d = doodle_of(&doodle);
+    let drawing = doodle::draw(d, Date::parse(&date).unwrap_or(Date::new(2026, 1, 1)), count, doodle::BAND_W, 0.0);
+    DoodleArt {
+        strokes: drawing.strokes.iter().map(DoodleStroke::from).collect(),
+        scale: drawing.scale,
+        done_ms: drawing.done_ms,
+        bounds: doodle::drawn_bounds(d, &drawing).to_vec(),
     }
 }
 

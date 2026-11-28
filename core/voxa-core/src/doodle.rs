@@ -583,6 +583,45 @@ fn contains(poly: &[(f32, f32)], p: (f32, f32)) -> bool {
     c
 }
 
+/// Whether `s` is the horizon: the long ground line every doodle starts with at (6, 92). The
+/// faint outline of a new moon is ground too, but part of the drawing.
+pub fn is_horizon(s: &Stroke) -> bool {
+    s.kind == Kind::Ground && matches!(s.segs().first(), Some(Seg::Move(x, y)) if (x - 6.0).abs() < 0.01 && (y - 92.0).abs() < 0.01)
+}
+
+/// The box the doodle's own drawing covers, [x0, y0, x1, y1] in band units: every stroke but the
+/// horizon, half a pen wide, and everywhere the flourish moves a stroke. The phone crops to it.
+pub fn drawn_bounds(doodle: Doodle, d: &Drawing) -> [f32; 4] {
+    let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    let mut add = |x: f32, y: f32, r: f32| {
+        b = [b[0].min(x - r), b[1].min(y - r), b[2].max(x + r), b[3].max(y + r)];
+    };
+    for s in d.strokes.iter().filter(|s| !is_horizon(s)) {
+        let r = match s.kind {
+            Kind::Ink | Kind::Ground => INK_W.max(GROUND_W) / 2.0,
+            Kind::Hatch => HATCH_W / 2.0,
+            Kind::Wash | Kind::Dot => 0.0,
+        };
+        let pts: Vec<(f32, f32)> = svgpath::flatten(&s.segs(), 0.1).into_iter().flatten().collect();
+        for &(x, y) in &pts {
+            add(x, y, r);
+        }
+        if s.tag != Tag::None {
+            for t in (FLOURISH_START..FLOURISH_START + FLOURISH_MS).step_by(5) {
+                if let Some((m, _)) = flourish_at(doodle, s, d.scale, t as f32) {
+                    // The pen scales with a growing star too.
+                    let grow = (m[0] * m[3] - m[1] * m[2]).abs().sqrt().max(1.0);
+                    for &(x, y) in &pts {
+                        let (x2, y2) = Affine(m).apply(x, y);
+                        add(x2, y2, r * grow);
+                    }
+                }
+            }
+        }
+    }
+    if b[0] > b[2] { [0.0, 0.0, BAND_W, BAND_H] } else { b }
+}
+
 /// Material's standard curve, cubic-bezier(0.4, 0, 0.2, 1): every stroke and fade.
 pub fn standard(t: f32) -> f32 {
     crate::splash::cubic(0.4, 0.0, 0.2, 1.0, t)
@@ -652,6 +691,50 @@ mod tests {
     fn bounds(st: &Stroke) -> (f32, f32, f32, f32) {
         let pts: Vec<(f32, f32)> = svgpath::flatten(&st.segs(), 0.5).into_iter().flatten().collect();
         pts.iter().fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |b, &(x, y)| (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y)))
+    }
+
+    /// The 12 doodles the mockup shows: the 11, with the streak at 7 and at 30 days.
+    fn twelve(date: Date) -> Vec<(Doodle, u32, Drawing)> {
+        let mut v: Vec<(Doodle, u32)> = Doodle::ALL.iter().map(|&d| (d, if d == Doodle::Streak { 7 } else { 0 })).collect();
+        v.push((Doodle::Streak, 30));
+        v.into_iter().map(|(d, n)| (d, n, draw(d, date, n, BAND_W, 0.0))).collect()
+    }
+
+    #[test]
+    fn the_drawn_bounds_hold_every_stroke_but_the_horizon_and_every_flourish() {
+        for k in 0..40 {
+            let date = Date::new(2026, 11, 28).plus(k);
+            for (d, n, dr) in twelve(date) {
+                let b = drawn_bounds(d, &dr);
+                let inside = |x: f32, y: f32| x >= b[0] - 0.01 && x <= b[2] + 0.01 && y >= b[1] - 0.01 && y <= b[3] + 0.01;
+                assert_eq!(dr.strokes.iter().filter(|s| is_horizon(s)).count(), 1, "{d:?} {n} on {date}: one horizon");
+                for s in dr.strokes.iter().filter(|s| !is_horizon(s)) {
+                    for (x, y) in svgpath::flatten(&s.segs(), 0.1).into_iter().flatten() {
+                        assert!(inside(x, y), "{d:?} {n} on {date}: ({x}, {y}) outside {b:?}");
+                        for t in (FLOURISH_START..FLOURISH_START + FLOURISH_MS).step_by(7) {
+                            if let Some((m, _)) = flourish_at(d, s, dr.scale, t as f32) {
+                                let (x2, y2) = Affine(m).apply(x, y);
+                                assert!(inside(x2, y2), "{d:?} {n} at {t} ms: ({x2}, {y2}) outside {b:?}");
+                            }
+                        }
+                    }
+                }
+                // Cropped to the drawing, not the band: the horizon's 6 to 337 run is left out.
+                assert!(b[0] > 6.5 || b[2] < 336.5, "{d:?} {n} on {date}: {b:?} spans the horizon");
+                assert!(b[2] - b[0] > 10.0 && b[3] - b[1] > 10.0, "{d:?} {n}: {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_new_moons_faint_outline_is_drawing_not_horizon() {
+        let new = draw(Doodle::Night, Date::new(2026, 12, 9), 0, BAND_W, 0.0);
+        let ground: Vec<&Stroke> = new.strokes.iter().filter(|s| s.kind == Kind::Ground).collect();
+        assert_eq!(ground.iter().filter(|s| is_horizon(s)).count(), 1);
+        let moon = ground.iter().find(|s| !is_horizon(s)).unwrap();
+        let (mx0, my0, mx1, my1) = bounds(moon);
+        let b = drawn_bounds(Doodle::Night, &new);
+        assert!(b[0] <= mx0 && b[1] <= my0 && b[2] >= mx1 && b[3] >= my1, "{b:?}");
     }
 
     #[test]
