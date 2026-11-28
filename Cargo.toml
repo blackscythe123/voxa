@@ -4,7 +4,7 @@ members = ["core/voxa-core", "core/voxa-chatgpt", "core/voxa-vad", "core/voxa-st
 
 [workspace.package]
 edition = "2024"
-version = "0.4.7"
+version = "1.0.0"
 license = "MIT"
 publish = false
 
