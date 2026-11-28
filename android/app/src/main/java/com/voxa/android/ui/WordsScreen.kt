@@ -18,11 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -42,28 +39,51 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.voxa.android.MainActivity
 import com.voxa.android.R
 import com.voxa.android.voxa
 import uniffi.voxa_ffi.WordPair
 
 private enum class WordsTab(val label: String) { Fixes("Fixes"), Snippets("Snippets"), Formatting("Formatting") }
 
-/** What is being edited in the sheet: a list, and the index (null to add). */
-private data class Editing(val tab: WordsTab, val index: Int?)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WordsScreen() {
     val c = vx
     val app = LocalContext.current.voxa
     var words by remember { mutableStateOf(app.core.words()) }
     var tab by remember { mutableIntStateOf(0) }
-    var editing by remember { mutableStateOf<Editing?>(null) }
-    val current = WordsTab.entries[tab]
     val save = { next: uniffi.voxa_ffi.Words ->
         app.core.setWords(next)
         words = app.core.words()
     }
+    val activity = LocalContext.current as MainActivity
+    /** Open the editor sheet for a fix or snippet ([index] null to add one). */
+    val edit = { tab: WordsTab, index: Int? ->
+        activity.showSheet {
+            val fix = tab == WordsTab.Fixes
+            val now = app.core.words()
+            val list = if (fix) now.fixes else now.snippets
+            PairEditor(
+                fix = fix,
+                initial = index?.let { list.getOrNull(it) },
+                onSave = { p ->
+                    val fresh = app.core.words()
+                    val l = (if (fix) fresh.fixes else fresh.snippets).toMutableList().apply { if (index != null && index < size) set(index, p) else add(p) }
+                    save(if (fix) fresh.copy(fixes = l) else fresh.copy(snippets = l))
+                    activity.hideSheet()
+                },
+                onDelete = index?.let { i ->
+                    {
+                        val fresh = app.core.words()
+                        val l = (if (fix) fresh.fixes else fresh.snippets).toMutableList().apply { if (i < size) removeAt(i) }
+                        save(if (fix) fresh.copy(fixes = l) else fresh.copy(snippets = l))
+                        activity.hideSheet()
+                    }
+                },
+            )
+        }
+    }
+    val current = WordsTab.entries[tab]
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 104.dp)) {
@@ -73,45 +93,22 @@ fun WordsScreen() {
             when (current) {
                 WordsTab.Fixes -> {
                     if (words.fixes.isEmpty()) Empty("No fixes yet. When ChatGPT keeps writing a word or a name wrong, add it here and Voxa writes it your way.")
-                    words.fixes.forEachIndexed { i, p -> FixCard(p) { editing = Editing(WordsTab.Fixes, i) } }
+                    words.fixes.forEachIndexed { i, p -> FixCard(p) { edit(WordsTab.Fixes, i) } }
                 }
                 WordsTab.Snippets -> {
                     if (words.snippets.isEmpty()) Empty("No snippets yet. Say a short phrase, and Voxa types the longer text you saved for it.")
-                    words.snippets.forEachIndexed { i, p -> SnippetCard(p) { editing = Editing(WordsTab.Snippets, i) } }
+                    words.snippets.forEachIndexed { i, p -> SnippetCard(p) { edit(WordsTab.Snippets, i) } }
                 }
                 WordsTab.Formatting -> FormattingCard(words.spokenFormatting) { save(words.copy(spokenFormatting = it)) }
             }
         }
         if (current != WordsTab.Formatting) {
             Fab(if (current == WordsTab.Fixes) "Add a fix" else "Add a snippet", R.drawable.ic_add, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)) {
-                editing = Editing(current, null)
+                edit(current, null)
             }
         }
     }
 
-    editing?.let { ed ->
-        val list = if (ed.tab == WordsTab.Fixes) words.fixes else words.snippets
-        val existing = ed.index?.let { list.getOrNull(it) }
-        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { editing = null }, sheetState = sheet, containerColor = c.base, shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
-            PairEditor(
-                fix = ed.tab == WordsTab.Fixes,
-                initial = existing,
-                onSave = { p ->
-                    val next = list.toMutableList().apply { if (ed.index != null) set(ed.index, p) else add(p) }
-                    save(if (ed.tab == WordsTab.Fixes) words.copy(fixes = next) else words.copy(snippets = next))
-                    editing = null
-                },
-                onDelete = ed.index?.let { i ->
-                    {
-                        val next = list.toMutableList().apply { removeAt(i) }
-                        save(if (ed.tab == WordsTab.Fixes) words.copy(fixes = next) else words.copy(snippets = next))
-                        editing = null
-                    }
-                },
-            )
-        }
-    }
 }
 
 @Composable
@@ -199,7 +196,7 @@ private fun PairEditor(fix: Boolean, initial: WordPair?, onSave: (WordPair) -> U
     val c = vx
     var from by remember { mutableStateOf(initial?.from ?: "") }
     var to by remember { mutableStateOf(initial?.to ?: "") }
-    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp).navigationBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp).navigationBarsPadding()) {
         Text(
             when {
                 fix && initial == null -> "Add a fix"

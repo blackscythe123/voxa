@@ -20,11 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -92,7 +89,6 @@ fun fix(activity: MainActivity, p: Problem) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(activity: MainActivity) {
     val c = vx
@@ -109,7 +105,6 @@ fun HomeScreen(activity: MainActivity) {
             recent = app.core.history("").take(3)
         }
     }
-    var practice by remember { mutableStateOf(false) }
     val first = account?.name?.trim()?.split(' ')?.firstOrNull()?.takeIf { it.isNotEmpty() }
 
     Box(Modifier.fillMaxSize()) {
@@ -138,13 +133,8 @@ fun HomeScreen(activity: MainActivity) {
             }
             recent.forEach { e -> HistoryItem(e) { activity.go(Route.Detail(e.id)) } }
         }
-        Fab("Try Voxa", R.drawable.ic_mic, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)) { practice = true }
-    }
-
-    if (practice) {
-        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { practice = false }, sheetState = sheet, containerColor = c.base, shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
-            PracticeSheet(activity)
+        Fab("Try Voxa", R.drawable.ic_mic, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)) {
+            activity.showSheet { PracticeSheet(activity) }
         }
     }
 }
@@ -241,7 +231,7 @@ fun PracticeSheet(activity: MainActivity) {
         delay(300)
         runCatching { focus.requestFocus() }
     }
-    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp).navigationBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp).navigationBarsPadding()) {
         Text("Try Voxa", style = Type.L, color = c.text)
         Spacer(Modifier.height(8.dp))
         Text(

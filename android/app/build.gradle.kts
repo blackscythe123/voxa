@@ -146,6 +146,11 @@ android {
         buildConfig = true
     }
 
+    // Voxa's own words are English only; drop the translations libraries bring along.
+    androidResources {
+        localeFilters += listOf("en")
+    }
+
     packaging {
         // Per-phone APKs: stored uncompressed (smallest on the phone). Universal: compressed (smallest
         // download; the phone's own copy is extracted at install).

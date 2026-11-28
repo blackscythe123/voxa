@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.voxa.android.diag.Diag
+import com.voxa.android.ui.BottomSheet
 import com.voxa.android.ui.DetailScreen
 import com.voxa.android.ui.HistoryScreen
 import com.voxa.android.ui.HomeScreen
@@ -70,6 +72,16 @@ class MainActivity : ComponentActivity() {
         tick.intValue++
     }
     private val stack = mutableStateListOf<Route>()
+    /** The open bottom sheet, drawn over everything (tabs included). */
+    private var sheet by mutableStateOf<(@Composable ColumnScope.() -> Unit)?>(null)
+
+    fun showSheet(content: @Composable ColumnScope.() -> Unit) {
+        sheet = content
+    }
+
+    fun hideSheet() {
+        sheet = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -143,6 +155,7 @@ class MainActivity : ComponentActivity() {
     // ── navigation ───────────────────────────────────────────────────────────
 
     fun go(route: Route) {
+        sheet = null
         if (route is Route.Tabbed) {
             // A fresh visit to History starts without the last search.
             if (route.tab == Tab.History) getSharedPreferences("ui", MODE_PRIVATE).edit().remove("history_query").apply()
@@ -244,6 +257,7 @@ class MainActivity : ComponentActivity() {
                 } }
                 if (route is Route.Tabbed) TabBar(route.tab) { go(Route.Tabbed(it)) }
             }
+            sheet?.let { s -> BottomSheet(onDismiss = { sheet = null }, content = s) }
             if (launching) LaunchOverlay(freeze) { launching = false }
         }
     }
