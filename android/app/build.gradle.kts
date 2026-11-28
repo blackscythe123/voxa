@@ -276,10 +276,27 @@ val verifyReleaseSigner = tasks.register("verifyReleaseSigner") {
         val pinned = pinnedDigests("release-cert.sha256")
         val apks = layout.buildDirectory.dir("outputs/apk/release").get().asFile.listFiles()?.filter { it.name.endsWith(".apk") }.orEmpty()
         for (apk in apks) {
+            // Gradle signs only v3 because minSdk is 29; some installers and file managers still read
+            // v1/v2 ("There was a problem parsing the package"). Re-sign with all three schemes, with the
+            // same release key (passwords through the environment, never on the command line).
+            if (hasReleaseKey) {
+                project.exec {
+                    commandLine(apksigner(), "sign", "--ks", releaseStoreFile!!, "--ks-key-alias", releaseKeyAlias!!,
+                        "--ks-pass", "env:VOXA_KS_PASS", "--key-pass", "env:VOXA_KEY_PASS", "--min-sdk-version", "21",
+                        "--v1-signing-enabled", "true", "--v2-signing-enabled", "true", "--v3-signing-enabled", "true", apk.path)
+                    environment("VOXA_KS_PASS", releaseStorePassword!!)
+                    environment("VOXA_KEY_PASS", releaseKeyPassword ?: releaseStorePassword!!)
+                }
+            }
             val out = ByteArrayOutputStream()
             project.exec {
-                commandLine(apksigner(), "verify", "--print-certs", apk.path)
+                commandLine(apksigner(), "verify", "--verbose", "--min-sdk-version", "21", "--print-certs", apk.path)
                 standardOutput = out
+            }
+            for (scheme in listOf("v1", "v2", "v3")) {
+                if (!Regex("Verified using $scheme scheme[^:]*: true").containsMatchIn(out.toString())) {
+                    throw GradleException("Voxa: ${apk.name} is not signed with the $scheme scheme; release APKs carry v1, v2 and v3")
+                }
             }
             val digests = Regex("certificate SHA-256 digest: ([0-9a-fA-F]{64})").findAll(out.toString()).map { it.groupValues[1].lowercase() }.toSet()
             if (digests.isEmpty()) throw GradleException("Voxa: could not read the signing certificate of ${apk.name}")
