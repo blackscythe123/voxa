@@ -1,7 +1,6 @@
 package com.voxa.android.ime
 
 import android.content.Context
-import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -10,42 +9,6 @@ import android.graphics.drawable.Drawable
 import android.view.View
 import kotlin.math.abs
 import kotlin.math.pow
-
-/** The keyboard's v6 palette (docs/ui-mocks/v6-app-redesign.html), light or dark with the phone. */
-class KbColors(
-    val surface: Int,
-    val key: Int,
-    val text: Int,
-    val muted: Int,
-    val accent: Int,
-    val onAccent: Int,
-    val good: Int,
-    val recording: Int,
-    val keyShadow: Int,
-    val press: Int,
-    val dark: Boolean,
-) {
-    fun alpha(color: Int, a: Float) = Color.argb((a * 255).toInt(), Color.red(color), Color.green(color), Color.blue(color))
-
-    companion object {
-        fun of(context: Context): KbColors {
-            val dark = com.voxa.android.ui.ThemePref.isDark(context)
-            return if (dark) {
-                KbColors(
-                    surface = 0xFF1A1A19.toInt(), key = 0xFF2E2E2C.toInt(), text = 0xFFF2F2F0.toInt(), muted = 0x8FF2F2F0.toInt(),
-                    accent = 0xFFD9946D.toInt(), onAccent = 0xFF24140C.toInt(), good = 0xFF45C27C.toInt(), recording = 0xFFF2555A.toInt(),
-                    keyShadow = 0x00000000, press = 0x33FFFFFF, dark = true,
-                )
-            } else {
-                KbColors(
-                    surface = 0xFFF3F3F1.toInt(), key = 0xFFFFFFFF.toInt(), text = 0xFF141414.toInt(), muted = 0x8F141414.toInt(),
-                    accent = 0xFF8F4C2C.toInt(), onAccent = 0xFFFFFFFF.toInt(), good = 0xFF1F9D55.toInt(), recording = 0xFFE5484D.toInt(),
-                    keyShadow = 0x14000000, press = 0x1F000000, dark = false,
-                )
-            }
-        }
-    }
-}
 
 /**
  * A round button with a soft ring and a tinted glow (the big mic, and the green check when the

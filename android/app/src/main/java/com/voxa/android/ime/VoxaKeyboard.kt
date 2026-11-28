@@ -2,6 +2,7 @@ package com.voxa.android.ime
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
@@ -18,11 +19,12 @@ import android.view.inputmethod.InputMethodManager
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.voxa.android.MainActivity
-import com.voxa.android.R
 import com.voxa.android.diag.Diag
 import com.voxa.android.voxa
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
@@ -53,6 +55,16 @@ class VoxaKeyboard : InputMethodService() {
     private lateinit var flow: VoxaFlow
     private lateinit var recorder: Recorder
     private var panel: KeyboardPanel? = null
+    /** What the panel's colours were built from ([KeyboardLook.stamp]); a new stamp on show rebuilds it. */
+    private var builtStamp: String? = null
+    /** The navigation bar under the keyboard, px (the panel's bottom padding). */
+    private var navInset = 0
+
+    /** The decoded photo of the Keyboard look, kept here (not in the panel) so a rebuilt panel
+     *  doesn't decode it again; keyed by file, modification time, size, position and soften. */
+    private var photo: Bitmap? = null
+    private var photoKey: String? = null
+    private var photoJob: Job? = null
 
     /** The field in front now, or null when no field is bound. */
     private var target: FfiTarget? = null
@@ -109,6 +121,7 @@ class VoxaKeyboard : InputMethodService() {
         destroyed = true
         if (recorder.isRecording) recorder.stop()
         scope.cancel()
+        releasePhoto()
         main.removeCallbacksAndMessages(null)
         // super.onDestroy() calls onFinishInputView (which checks the flow): destroy the flow after it.
         super.onDestroy()
@@ -117,15 +130,31 @@ class VoxaKeyboard : InputMethodService() {
 
     override fun onEvaluateFullscreenMode() = false
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // The photo is decoded again (off the main thread) the next time the keyboard shows.
+        if (level >= TRIM_MEMORY_RUNNING_LOW && !isInputViewShown && photo != null) {
+            Diag.log("look", "photo released (trim level $level)")
+            releasePhoto()
+        }
+    }
+
     override fun onCreateInputView(): View {
         Diag.log("ime", if (panel == null) "panel created" else "panel recreated")
-        val p = KeyboardPanel(this)
+        val colors = KbColors.of(this)
+        builtStamp = KeyboardLook.stamp(this)
+        val p = KeyboardPanel(this, colors)
         panel = p
+        if (colors.photo) attachPhoto(p) else releasePhoto()
+        // A rebuilt panel gets no new insets until they change: start from the last ones.
+        p.bottomInset(navInset)
         ViewCompat.setOnApplyWindowInsetsListener(p) { v, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            navInset = nav.bottom
             (v as KeyboardPanel).bottomInset(nav.bottom)
             insets
         }
+        ViewCompat.requestApplyInsets(p)
         wire(p)
         render()
         return p
@@ -157,6 +186,15 @@ class VoxaKeyboard : InputMethodService() {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         Diag.log("ime", "shown (onStartInputView ${info.packageName}, restarting $restarting)")
+        // A Keyboard look or Appearance change (or new phone colours) since the view was built:
+        // build it again, so the change shows now and not only after the keyboard restarts.
+        val p = panel
+        if (p != null && KeyboardLook.stamp(this) != builtStamp) {
+            Diag.log("look", "look changed: keyboard view rebuilt")
+            setInputView(onCreateInputView())
+        } else if (p != null && p.colors.photo && !p.hasPhoto && photoJob?.isActive != true) {
+            attachPhoto(p)
+        }
         Diag.memory("keyboard shown")
         val s = app.core.settings()
         haptics = s.haptics
@@ -342,6 +380,58 @@ class VoxaKeyboard : InputMethodService() {
         startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN, open).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // ── the Keyboard look's photo ────────────────────────────────────────────
+
+    /** Decodes the photo off the main thread (once per file and size) and hands it to [p]. Any
+     *  failure, out of memory included, falls back to the Voxa look instead of crashing. */
+    private fun attachPhoto(p: KeyboardPanel) {
+        val look = p.colors.look
+        val m = resources.displayMetrics
+        val w = m.widthPixels
+        val h = (Photo.PANEL_DP * m.density).toInt()
+        val file = KeyboardLook.photoFile(this)
+        val key = "${file.path}:${file.lastModified()}:$w:$h:${look.position}:${look.soften}"
+        val have = photo
+        if (key == photoKey && have != null && !have.isRecycled) {
+            p.setPhoto(have)
+            return
+        }
+        photoJob?.cancel()
+        photoJob = scope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                try {
+                    KeyboardLook.decodePhoto(this@VoxaKeyboard, w, h, look.position, look.soften, crop = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    Diag.log("look", "photo could not be decoded: ${t.javaClass.simpleName}")
+                    null
+                }
+            }
+            if (destroyed) return@launch
+            if (bmp == null) {
+                KeyboardLook.fallback(this@VoxaKeyboard, "photo decode")
+                if (panel === p) setInputView(onCreateInputView())
+                return@launch
+            }
+            val old = photo
+            photo = bmp
+            photoKey = key
+            if (old != null && old !== bmp) old.recycle()
+            panel?.takeIf { it.colors.photo }?.setPhoto(bmp)
+            Diag.memory("photo decoded ${bmp.width} x ${bmp.height} ${bmp.config}")
+        }
+    }
+
+    private fun releasePhoto() {
+        photoJob?.cancel()
+        photoJob = null
+        panel?.setPhoto(null)
+        photo?.recycle()
+        photo = null
+        photoKey = null
+    }
+
     // ── keys ─────────────────────────────────────────────────────────────────
 
     @SuppressLint("ClickableViewAccessibility")
@@ -503,7 +593,6 @@ class VoxaKeyboard : InputMethodService() {
 
     private fun render() {
         val p = panel ?: return
-        val c = p.colors
         val state = flow.state()
         val status = flow.status()
         val recording = state is FlowState.Recording
@@ -517,15 +606,16 @@ class VoxaKeyboard : InputMethodService() {
             status != null -> status
             else -> null
         }
+        val title: String
         var detail: String? = null
         var action: String? = null
         var closable = false
         val n = notice
         if (shown == null && n != null && state is FlowState.Idle) {
-            p.title.text = n.first
+            title = n.first
             detail = n.second
         } else if (shown != null) {
-            p.title.text = shown.title
+            title = shown.title
             detail = shown.detail
             // While listening the action is the big mic itself (Stop); the bar offers Cancel.
             action = shown.action.takeIf { !recording }
@@ -533,41 +623,32 @@ class VoxaKeyboard : InputMethodService() {
         } else {
             // Idle: the desktop home's one-line readiness.
             val signedOut = app.session.value == SessionState.EXPIRED
-            p.title.text = if (signedOut) "Sign in to ChatGPT to dictate" else "Ready to dictate"
+            title = if (signedOut) "Sign in to ChatGPT to dictate" else "Ready to dictate"
             if (signedOut) action = "Sign in"
         }
         if (done != null) {
             detail = null
             closable = false
         }
-        p.title.setTextColor(if (done != null) c.good else c.text)
-        p.dot.visibility = if (recording) View.VISIBLE else View.GONE
-        p.detail.text = detail ?: ""
-        p.detail.visibility = if (detail.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE
-        p.action.text = action ?: ""
-        p.action.visibility = if (action != null) View.VISIBLE else View.GONE
-        p.close.visibility = if (closable) View.VISIBLE else View.GONE
-        p.close.contentDescription = if (recording || state is FlowState.Transcribing) "Cancel" else "Close"
-        p.right.text = when {
-            recording -> ((SystemClock.elapsedRealtime() - recordingSince) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
-            done != null -> if (done.words == 1u) "1 word" else "${done.words} words"
-            else -> ""
-        }
-
-        // The stage: bars and the mic, the spinner while writing, or the green check.
-        p.bars.visibility = if (recording) View.VISIBLE else View.INVISIBLE
-        p.spinner.visibility = if (busy) View.VISIBLE else View.GONE
-        p.done.visibility = if (done != null) View.VISIBLE else View.GONE
-        p.mic.visibility = if (done != null) View.INVISIBLE else View.VISIBLE
-        p.saved.text = done?.let { savedLine(it.savedSecs.toInt()) } ?: ""
-        p.saved.visibility = if (p.saved.text.isEmpty()) View.GONE else View.VISIBLE
-        p.mic.icon = getDrawable(if (recording) R.drawable.ic_stop else R.drawable.ic_mic)?.mutate()?.apply { setTint(c.onAccent) }
-        p.mic.contentDescription = if (recording) "Stop" else "Talk"
-        val micOff = busy || password
-        p.mic.alpha = if (micOff) 0.4f else 1f
-        p.mic.isEnabled = !micOff
-        p.spaceKey.text = if (recording) "Tap to stop" else "space"
-        p.spaceKey.contentDescription = if (recording) "Stop" else "Space"
+        p.show(
+            KeyboardPanel.State(
+                title = title,
+                detail = detail,
+                action = action,
+                closable = closable,
+                recording = recording,
+                transcribing = state is FlowState.Transcribing,
+                busy = busy,
+                done = done != null,
+                right = when {
+                    recording -> ((SystemClock.elapsedRealtime() - recordingSince) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
+                    done != null -> if (done.words == 1u) "1 word" else "${done.words} words"
+                    else -> ""
+                },
+                saved = done?.let { savedLine(it.savedSecs.toInt()) } ?: "",
+                micOff = busy || password,
+            ),
+        )
     }
 
     /** "That's 6 seconds of typing saved"; nothing when speaking wasn't faster. */
