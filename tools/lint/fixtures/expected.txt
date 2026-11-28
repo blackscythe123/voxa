@@ -21,6 +21,7 @@
 # 3. privacy
 3 privacy-log desktop/app/src/ui.rs
 2 privacy-log android/app/src/main/java/com/voxa/android/ui/HomeScreen.kt
+1 privacy-log desktop/app/src/win.rs                               # describe() reads the window title
 1 privacy-notify core/voxa-core/src/notices.rs
 1 privacy-notify android/app/src/main/java/com/voxa/android/notify/Notifier.kt
 
