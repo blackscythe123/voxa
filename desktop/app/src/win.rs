@@ -98,6 +98,23 @@ unsafe extern "system" fn no_activate_proc(
     const PBT_APMRESUMESUSPEND: usize = 0x0007;
     const PBT_APMPOWERSTATUSCHANGE: usize = 0x000A;
     const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
+    // GPUI answers a display change by showing (and activating) its windows, the hidden strip
+    // too: undo that at once and hand focus back, so nothing pops up and no app loses focus.
+    if msg == WM_DISPLAYCHANGE {
+        WOKE.store(true, std::sync::atomic::Ordering::Relaxed);
+        let was_visible = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) } != 0;
+        let fg = foreground();
+        let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+        if !was_visible && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd) } != 0 {
+            unsafe { ShowWindow(hwnd, SW_HIDE) };
+            log("display changed: GPUI showed the hidden strip; hid it again");
+        }
+        if foreground() == hwnd && !fg.is_null() && fg != hwnd {
+            unsafe { SetForegroundWindow(fg) };
+            log("display changed: gave focus back");
+        }
+        return r;
+    }
     let why = match (msg, wparam) {
         (WM_POWERBROADCAST, PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC) => Some("woke from sleep"),
         (WM_POWERBROADCAST, PBT_APMPOWERSTATUSCHANGE) => Some("power source changed"),
@@ -342,6 +359,30 @@ pub fn strip_rect() -> Option<(i32, i32, i32, i32)> {
     (!h.is_null() && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(h, &mut r) } != 0).then(|| (r.left, r.top, r.right - r.left, r.bottom - r.top))
 }
 
+/// Put the strip at the bottom centre of the main screen as it is now (resolution, scaling and
+/// monitors change while Voxa runs). Keeps its size; never shows or activates it.
+pub fn place_strip() {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint};
+    let Some((_, _, w, h)) = strip_rect() else { return };
+    let hw = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
+    unsafe {
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY), &mut mi) == 0 {
+            return;
+        }
+        let m = mi.rcMonitor;
+        let scale = windows_sys::Win32::UI::HiDpi::GetDpiForWindow(hw) as f32 / 96.0;
+        // Same spot as at startup: 64 px (logical) above the bottom edge, centred.
+        let inner_h = (84.0 * scale).round() as i32;
+        let frame = ((h - inner_h) / 2).max(0);
+        let x = m.left + (m.right - m.left - w) / 2;
+        let y = m.bottom - (64.0 * scale).round() as i32 - inner_h - frame;
+        SetWindowPos(hw, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 /// Place the strip (physical pixels) without showing or activating it.
 pub fn move_strip(x: i32, y: i32, w: i32, h: i32) {
     let hw = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
@@ -358,6 +399,9 @@ fn instance_suffix() -> String {
 pub fn strip_visible(show: bool) {
     let h = STRIP.load(std::sync::atomic::Ordering::Relaxed) as HWND;
     if h.is_null() { return; }
+    if show && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h) } == 0 {
+        place_strip();
+    }
     unsafe { ShowWindow(h, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
     log(&format!("strip {}; foreground = {}", if show { "shown (no activate)" } else { "hidden" }, describe(foreground())));
 }

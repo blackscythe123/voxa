@@ -41,6 +41,12 @@ pub fn strip_text(flow: &Flow) -> Option<StripText> {
         State::Blocked(Blocker::MicMissing) => {
             text("No microphone found", s("Connect one and try again"), s("Open settings"), true)
         }
+        State::Blocked(Blocker::MicStopped) => {
+            text("The microphone stopped", s("Nothing was recorded. Press your shortcut to try again"), None, true)
+        }
+        State::Blocked(Blocker::CantSave) => {
+            text("Can't save the recording", s("Your disk may be full. Free some space and try again"), None, true)
+        }
         State::Recording { offline: true, .. } => text("Offline, keeping it", None, s("Stop"), false),
         State::Recording { .. } => text("Listening", None, s("Stop"), false),
         State::Transcribing { .. } => text("Writing it out", None, None, false),

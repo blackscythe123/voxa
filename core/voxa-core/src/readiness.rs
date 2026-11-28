@@ -22,6 +22,10 @@ pub enum Mic {
     Granted,
     Denied,
     Missing,
+    /// The mic stream stopped delivering sound (device reset, unplugged mid-take).
+    Stopped,
+    /// The recording couldn't be saved (disk full, data folder locked or unavailable).
+    CantSave,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +46,8 @@ impl Default for Readiness {
 pub enum Blocker {
     MicDenied,
     MicMissing,
+    MicStopped,
+    CantSave,
     SignedOut,
 }
 
@@ -50,6 +56,8 @@ impl Readiness {
         match (self.mic, self.session) {
             (Mic::Denied, _) => Some(Blocker::MicDenied),
             (Mic::Missing, _) => Some(Blocker::MicMissing),
+            (Mic::Stopped, _) => Some(Blocker::MicStopped),
+            (Mic::CantSave, _) => Some(Blocker::CantSave),
             (_, Session::Expired) => Some(Blocker::SignedOut),
             _ => None,
         }

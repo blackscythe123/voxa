@@ -26,6 +26,8 @@ pub enum MicError {
     NoDevice,
     /// The device refused to open (most often: Windows microphone privacy is off).
     Blocked(#[allow(dead_code)] String),
+    /// The recording file couldn't be created (disk full, data folder locked or unavailable).
+    Disk(#[allow(dead_code)] String),
 }
 
 type Writer = hound::WavWriter<std::io::BufWriter<std::fs::File>>;
@@ -35,6 +37,34 @@ struct Shared {
     writer: Mutex<Option<Writer>>,
     peak: AtomicU32,
     reset: AtomicBool,
+    /// Audio callbacks since the current take started (0 = the stream delivers nothing).
+    callbacks: AtomicU32,
+    /// The stream reported an error (device reset, unplugged): rebuild before the next take.
+    dead: AtomicBool,
+    /// Writing the WAV failed during the take (disk full).
+    disk_error: AtomicBool,
+}
+
+impl Shared {
+    fn new() -> Self {
+        Self {
+            writer: Mutex::new(None),
+            peak: AtomicU32::new(0),
+            reset: AtomicBool::new(true),
+            callbacks: AtomicU32::new(0),
+            dead: AtomicBool::new(false),
+            disk_error: AtomicBool::new(false),
+        }
+    }
+}
+
+/// What went wrong with a take's audio, for the log and the strip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Trouble {
+    /// No sound arrived at all, or the stream died mid-take.
+    MicStopped,
+    /// The WAV couldn't be written.
+    Disk,
 }
 
 pub struct Mic {
@@ -88,7 +118,17 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
     let mut pos = 0.0f64;
     let mut prev = 0.0f32;
 
+    let errs = shared.clone();
+    // The stream's own errors used to go to eprintln (invisible): now they mark it dead and are logged.
+    let make_err = move || {
+        let s = errs.clone();
+        move |e: cpal::StreamError| {
+            crate::os::log(&format!("mic stream error: {e}"));
+            s.dead.store(true, Ordering::Relaxed);
+        }
+    };
     let mut on_samples = move |mono: &mut dyn Iterator<Item = f32>| {
+        shared.callbacks.fetch_add(1, Ordering::Relaxed);
         if shared.reset.swap(false, Ordering::Relaxed) {
             pos = 0.0;
             prev = 0.0;
@@ -120,18 +160,20 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
         if let Ok(mut g) = shared.writer.lock() {
             if let Some(wr) = g.as_mut() {
                 for v in out {
-                    let _ = wr.write_sample(v);
+                    if wr.write_sample(v).is_err() {
+                        shared.disk_error.store(true, Ordering::Relaxed);
+                        break;
+                    }
                 }
             }
         }
     };
 
-    let err = |e| eprintln!("mic stream error: {e}");
     let stream = match config.sample_format() {
         SampleFormat::F32 => device.build_input_stream(
             &config.into(),
             move |data: &[f32], _| on_samples(&mut data.chunks(channels).map(|f| f.iter().sum::<f32>() / channels as f32)),
-            err,
+            make_err(),
             None,
         ),
         SampleFormat::I16 => device.build_input_stream(
@@ -139,7 +181,7 @@ fn build(device: &cpal::Device, shared: Arc<Shared>) -> Result<Stream, MicError>
             move |data: &[i16], _| {
                 on_samples(&mut data.chunks(channels).map(|f| f.iter().map(|&x| x as f32 / i16::MAX as f32).sum::<f32>() / channels as f32))
             },
-            err,
+            make_err(),
             None,
         ),
         other => return Err(MicError::Blocked(format!("unsupported sample format {other:?}"))),
@@ -158,7 +200,7 @@ impl Mic {
 
     pub fn with_preferred(preferred: Option<String>) -> Result<Self, MicError> {
         let (device, device_name) = pick_device(preferred.as_deref())?;
-        let shared = Arc::new(Shared { writer: Mutex::new(None), peak: AtomicU32::new(0), reset: AtomicBool::new(true) });
+        let shared = Arc::new(Shared::new());
         let stream = build(&device, shared.clone())?;
         Ok(Self { stream, device_name, preferred, shared, path: None })
     }
@@ -175,7 +217,12 @@ impl Mic {
     /// Start writing to `path`. Rebuilds first if the default microphone changed.
     pub fn start(&mut self, path: &Path) -> Result<(), MicError> {
         let (device, name) = pick_device(self.preferred.as_deref())?;
-        if name != self.device_name {
+        // A different mic, or the old stream died (device reset, Bluetooth reconnect): rebuild.
+        let dead = self.shared.dead.swap(false, Ordering::Relaxed);
+        if name != self.device_name || dead {
+            if dead {
+                crate::os::log("  mic stream had stopped: rebuilding it");
+            }
             self.stream = build(&device, self.shared.clone())?;
             self.device_name = name;
         }
@@ -183,9 +230,11 @@ impl Mic {
             let _ = std::fs::create_dir_all(dir);
         }
         let spec = hound::WavSpec { channels: 1, sample_rate: RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-        let writer = hound::WavWriter::create(path, spec).map_err(|e| MicError::Blocked(e.to_string()))?;
+        let writer = hound::WavWriter::create(path, spec).map_err(|e| MicError::Disk(e.to_string()))?;
         *self.shared.writer.lock().unwrap() = Some(writer);
         self.shared.peak.store(0f32.to_bits(), Ordering::Relaxed);
+        self.shared.callbacks.store(0, Ordering::Relaxed);
+        self.shared.disk_error.store(false, Ordering::Relaxed);
         self.shared.reset.store(true, Ordering::Relaxed);
         self.path = Some(path.to_path_buf());
         if let Err(e) = self.stream.play() {
@@ -196,11 +245,39 @@ impl Mic {
         Ok(())
     }
 
+    /// True when, well into a take, the stream has delivered nothing or reported an error.
+    pub fn stalled(&self) -> bool {
+        self.shared.dead.load(Ordering::Relaxed) || self.shared.callbacks.load(Ordering::Relaxed) == 0
+    }
+
+    /// Rebuild the stream and keep recording into the same file (nothing is shown on screen).
+    pub fn revive(&mut self) -> Result<(), MicError> {
+        let (device, name) = pick_device(self.preferred.as_deref())?;
+        self.stream = build(&device, self.shared.clone())?;
+        self.device_name = name;
+        self.shared.dead.store(false, Ordering::Relaxed);
+        self.stream.play().map_err(|e| MicError::Blocked(e.to_string()))
+    }
+
+    /// What went wrong with the take that just finished, if anything.
+    pub fn trouble(&self) -> Option<Trouble> {
+        if self.shared.disk_error.load(Ordering::Relaxed) {
+            Some(Trouble::Disk)
+        } else if self.shared.callbacks.load(Ordering::Relaxed) == 0 || self.shared.dead.load(Ordering::Relaxed) {
+            Some(Trouble::MicStopped)
+        } else {
+            None
+        }
+    }
+
     /// Stop and finalise the WAV. Returns the loudest RMS seen.
     pub fn finish(&mut self) -> f32 {
         let _ = self.stream.pause();
         if let Some(w) = self.shared.writer.lock().unwrap().take() {
-            let _ = w.finalize();
+            if let Err(e) = w.finalize() {
+                crate::os::log(&format!("  couldn't finish the recording file: {e}"));
+                self.shared.disk_error.store(true, Ordering::Relaxed);
+            }
         }
         LEVEL.store(0f32.to_bits(), Ordering::Relaxed);
         self.path = None;

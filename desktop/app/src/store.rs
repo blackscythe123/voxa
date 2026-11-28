@@ -55,20 +55,65 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(tmp, path)
 }
 
+/// Read a JSON file: Ok(None) when it doesn't exist, Err when it exists but can't be read or
+/// parsed (locked by antivirus or OneDrive, offline, corrupt). A corrupt file is copied aside first.
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("can't read {}: {e}", path.display())),
+    };
+    serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+        let backup = path.with_extension(format!("broken-{}.json", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)));
+        let _ = std::fs::write(&backup, &bytes);
+        format!("{} is damaged ({e}); a copy was kept as {}", path.display(), backup.display())
+    })
+}
+
 pub struct History {
     path: PathBuf,
     /// Oldest first.
     pub entries: Vec<Entry>,
+    /// history.json exists but couldn't be read: don't save over it until it can be (then merge).
+    unreadable: bool,
 }
 
 impl History {
     pub fn load(dir: &Path) -> Self {
         let path = dir.join("history.json");
-        let entries = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { path, entries }
+        match read_json::<Vec<Entry>>(&path) {
+            Ok(entries) => Self { path, entries: entries.unwrap_or_default(), unreadable: false },
+            Err(e) if e.contains("is damaged") => {
+                // The broken file is kept aside; start fresh rather than lose new dictations.
+                crate::os::log(&format!("FAIL {e}"));
+                Self { path, entries: Vec::new(), unreadable: false }
+            }
+            Err(e) => {
+                crate::os::log(&format!("FAIL {e}: not saving history until it can be read"));
+                Self { path, entries: Vec::new(), unreadable: true }
+            }
+        }
     }
 
-    pub fn save(&self) {
+    pub fn save(&mut self) {
+        if self.unreadable {
+            // Try again: once the file is readable, keep both what's in it and what's new.
+            match read_json::<Vec<Entry>>(&self.path) {
+                Ok(on_disk) => {
+                    let mut merged = on_disk.unwrap_or_default();
+                    for e in std::mem::take(&mut self.entries) {
+                        if !merged.iter().any(|m| m.id == e.id) {
+                            merged.push(e);
+                        }
+                    }
+                    merged.sort_by_key(|e| e.id);
+                    self.entries = merged;
+                    self.unreadable = false;
+                    crate::os::log("history file readable again: merged");
+                }
+                Err(_) => return,
+            }
+        }
         if let Ok(bytes) = serde_json::to_vec_pretty(&self.entries) {
             let _ = write_atomic(&self.path, &bytes);
         }
@@ -173,8 +218,19 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Settings, or the defaults if they can't be read (logged). Use `try_load` where a failed
+    /// read must not act like defaults (pruning, importing, saving).
     pub fn load(dir: &Path) -> Self {
-        std::fs::read(dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        match Self::try_load(dir) {
+            Ok(s) => s.unwrap_or_default(),
+            Err(e) => {
+                crate::os::log(&format!("FAIL reading settings: {e}"));
+                Self::default()
+            }
+        }
+    }
+    pub fn try_load(dir: &Path) -> Result<Option<Self>, String> {
+        read_json(&dir.join("settings.json"))
     }
     pub fn save(&self, dir: &Path) {
         if let Ok(bytes) = serde_json::to_vec_pretty(self) {

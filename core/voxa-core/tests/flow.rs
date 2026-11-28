@@ -322,3 +322,14 @@ fn a_duplicate_result_never_unpastes_a_dictation() {
     f.handle(Event::Transcribed { job, result: Ok("hello again".into()) });
     assert_eq!(f.job(job).unwrap().state, JobState::Delivered("hello".into()));
 }
+
+#[test]
+fn a_stopped_mic_or_full_disk_blocks_with_its_own_words() {
+    let mut f = Flow::new(Readiness { mic: Mic::Stopped, ..ready() });
+    f.handle(Event::Hotkey { target: whatsapp() });
+    assert_eq!(f.state(), &State::Blocked(Blocker::MicStopped));
+    assert_eq!(strip_text(&f).unwrap().title, "The microphone stopped");
+    let mut f = Flow::new(Readiness { mic: Mic::CantSave, ..ready() });
+    f.handle(Event::Hotkey { target: whatsapp() });
+    assert_eq!(strip_text(&f).unwrap().title, "Can't save the recording");
+}

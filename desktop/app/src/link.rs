@@ -39,6 +39,8 @@ impl Live {
             Mic::Granted => "granted",
             Mic::Denied => "denied",
             Mic::Missing => "missing",
+            Mic::Stopped => "stopped",
+            Mic::CantSave => "cantsave",
         };
         (session.into(), r.network == Network::Up, mic.into())
     }
@@ -54,6 +56,8 @@ impl Live {
             mic: match self.mic.as_str() {
                 "denied" => Mic::Denied,
                 "missing" => Mic::Missing,
+                "stopped" => Mic::Stopped,
+                "cantsave" => Mic::CantSave,
                 _ => Mic::Granted,
             },
         }

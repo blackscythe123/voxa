@@ -129,6 +129,8 @@ pub(crate) struct Voxa {
     /// The job state last written to History, so an entry is only rewritten when its dictation
     /// moves on (otherwise the user's edits and deletes would be undone by the next event).
     job_synced: HashMap<JobId, voxa_core::JobState>,
+    /// What went wrong with a take's audio (mic stopped, disk), decided when it stops.
+    trouble: HashMap<JobId, audio::Trouble>,
     /// When the shortcut was paused for picking a new one (resumed if the window goes quiet).
     hotkey_paused_at: Option<Instant>,
     /// Draw nothing in the strip (while a rebuilt strip paints its first frame unseen).
@@ -158,6 +160,10 @@ pub(crate) struct Voxa {
     esc_bound: bool,
     mic: Option<audio::Mic>,
     mic_on: bool,
+    /// The stalled-mic watchdog already restarted the stream for this take.
+    mic_revived: bool,
+    /// Settings were read from disk without error (else never prune, import or overwrite them).
+    settings_ok: bool,
     audio_paths: HashMap<JobId, PathBuf>,
     peaks: HashMap<JobId, f32>,
     pub(crate) levels: VecDeque<f32>,
@@ -186,13 +192,23 @@ impl Voxa {
             }
         };
         let flow = Flow::new(Readiness { session, network: Network::Up, mic });
-        let mut settings = Settings::load(&data_dir());
+        // A settings file that exists but can't be read must not turn into defaults that then
+        // prune history, re-run the import or overwrite the user's file.
+        let (mut settings, settings_ok) = match Settings::try_load(&data_dir()) {
+            Ok(s) => (s.unwrap_or_default(), true),
+            Err(e) => {
+                os::log(&format!("FAIL reading settings ({e}): using defaults for now, not saving or pruning"));
+                (Settings::default(), false)
+            }
+        };
         let mut history = History::load(&data_dir());
-        if let Some(n) = import::run_once(&electron_dir(), &data_dir(), &mut history, &mut settings) {
-            os::log(&format!("imported {n} dictations from the old Voxa"));
-        }
-        if history.prune(settings.keep_days, now_ms()) > 0 {
-            history.save();
+        if settings_ok {
+            if let Some(n) = import::run_once(&electron_dir(), &data_dir(), &mut history, &mut settings) {
+                os::log(&format!("imported {n} dictations from the old Voxa"));
+            }
+            if history.prune(settings.keep_days, now_ms()) > 0 {
+                history.save();
+            }
         }
         let apps: std::collections::HashSet<String> = history.entries.iter().map(|e| e.via.clone().unwrap_or_else(|| e.app.clone())).collect();
         os::refresh_site_icons_once();
@@ -217,7 +233,9 @@ impl Voxa {
                 if fallback.id() != main_key.id() && hotkeys.register(fallback).is_ok() {
                     main_key = fallback;
                     settings.hotkey = Settings::default().hotkey;
-                    settings.save(&data_dir());
+                    if settings_ok {
+                        settings.save(&data_dir());
+                    }
                 }
             }
         }
@@ -242,6 +260,18 @@ impl Voxa {
             cx.background_executor().timer(Duration::from_millis(40)).await;
             let alive = this
                 .update(cx, |v, cx| {
+                    // A take whose mic delivers nothing 0.7 s in: restart the stream once (no UI).
+                    if v.mic_on && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
+                        if let Some(m) = v.mic.as_mut() {
+                            if m.stalled() {
+                                v.mic_revived = true;
+                                os::log("  mic delivered no sound: restarting the stream");
+                                if let Err(e) = m.revive() {
+                                    os::log(&format!("  mic restart failed: {e:?}"));
+                                }
+                            }
+                        }
+                    }
                     if v.hotkey_paused && v.hotkey_paused_at.is_some_and(|t| t.elapsed() > Duration::from_secs(30)) {
                         os::log("shortcut picking stopped answering: resuming the shortcut");
                         v.pause_hotkey(false);
@@ -321,7 +351,7 @@ impl Voxa {
                             }
                             // The mic was missing or refused (at startup, or one failed start):
                             // look again now, so plugging it in or allowing it works without a restart.
-                            if matches!(v.flow.readiness().mic, Mic::Missing | Mic::Denied) && !fake_mode() {
+                            if !matches!(v.flow.readiness().mic, Mic::Granted) && !fake_mode() {
                                 match audio::Mic::with_preferred(v.settings.mic_device.clone()) {
                                     Ok(m) => {
                                         os::log(&format!("microphone found again: {}", m.device_name()));
@@ -404,6 +434,7 @@ impl Voxa {
             mic_testing: false,
             job_entries: HashMap::new(),
             job_synced: HashMap::new(),
+            trouble: HashMap::new(),
             hotkey_paused_at: None,
             strip_blank: false,
             strip_window: None,
@@ -425,6 +456,8 @@ impl Voxa {
             esc_bound: false,
             mic: built.ok(),
             mic_on: false,
+            mic_revived: false,
+            settings_ok,
             audio_paths: HashMap::new(),
             peaks: HashMap::new(),
             levels: VecDeque::new(),
@@ -531,12 +564,17 @@ impl Voxa {
                         os::log(&format!("  recording to {}", path.display()));
                         self.audio_paths.insert(job, path);
                         self.mic_on = true;
+                        self.mic_revived = false;
                     }
                     Err(e) => {
                         // The mic would not open: undo the recording and show the blocker instead.
                         os::log(&format!("  mic failed: {e:?}"));
                         let target = self.flow.job(job).map(|j| j.target.clone());
-                        let mic = if matches!(e, audio::MicError::NoDevice) { Mic::Missing } else { Mic::Denied };
+                        let mic = match e {
+                            audio::MicError::NoDevice => Mic::Missing,
+                            audio::MicError::Disk(_) => Mic::CantSave,
+                            audio::MicError::Blocked(_) => Mic::Denied,
+                        };
                         self.handle(Event::Cancel, cx);
                         let r = Readiness { mic, ..self.flow.readiness() };
                         self.handle(Event::Readiness(r), cx);
@@ -553,6 +591,10 @@ impl Voxa {
                     let peak = m.finish();
                     os::log(&format!("  recording stopped, peak rms {peak:.4}"));
                     self.peaks.insert(job, peak);
+                    if let Some(t) = m.trouble() {
+                        os::log(&format!("  recording trouble: {t:?}"));
+                        self.trouble.insert(job, t);
+                    }
                 }
             }
             Effect::DiscardCapture { .. } => {
@@ -562,6 +604,21 @@ impl Voxa {
                 }
             }
             Effect::Transcribe { job } if !fake_mode() => {
+                // The mic gave nothing or the file couldn't be written: say so (never "no speech").
+                if let Some(t) = self.trouble.remove(&job).filter(|_| self.peaks.get(&job).is_none_or(|p| *p < SILENCE)) {
+                    let mic = match t {
+                        audio::Trouble::Disk => Mic::CantSave,
+                        audio::Trouble::MicStopped => Mic::Stopped,
+                    };
+                    let target = self.flow.job(job).map(|j| j.target.clone());
+                    self.handle(Event::Cancel, cx);
+                    let r = Readiness { mic, ..self.flow.readiness() };
+                    self.handle(Event::Readiness(r), cx);
+                    if let Some(target) = target {
+                        self.handle(Event::Hotkey { target }, cx);
+                    }
+                    return;
+                }
                 if self.peaks.get(&job).is_some_and(|p| *p < SILENCE) {
                     os::log("  silence: not sending");
                     self.handle(Event::Transcribed { job, result: Ok(String::new()) }, cx);
@@ -803,7 +860,17 @@ impl Voxa {
             }
             PauseHotkey(p) => self.pause_hotkey(p),
             ReloadSettings => {
-                self.settings = Settings::load(&data_dir());
+                match Settings::try_load(&data_dir()) {
+                    Ok(s) => {
+                        self.settings = s.unwrap_or_default();
+                        self.settings_ok = true;
+                    }
+                    Err(e) => {
+                        os::log(&format!("FAIL reading settings ({e}): keeping the current ones"));
+                        self.publish();
+                        return;
+                    }
+                }
                 if let Some(m) = self.mic.as_mut() {
                     m.set_preferred(self.settings.mic_device.clone());
                 }
@@ -1453,6 +1520,7 @@ async fn rebuild_strip(voxa: &gpui::Entity<Voxa>, old: Option<gpui::AnyWindowHan
     if let Some((x, y, w, h)) = rect {
         os::move_strip(x, y, w, h);
     }
+    os::place_strip();
     let wanted = voxa.update(cx, |v, _| !matches!(v.flow.state(), State::Idle)).unwrap_or(false);
     if wanted {
         os::strip_visible(true);

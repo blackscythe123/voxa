@@ -214,6 +214,7 @@ impl Flow {
         match self.state.clone() {
             State::Blocked(Blocker::SignedOut) => fx.push(Effect::OpenSignIn),
             State::Blocked(Blocker::MicDenied | Blocker::MicMissing) => fx.push(Effect::OpenMicSettings),
+            State::Blocked(Blocker::MicStopped | Blocker::CantSave) => {}
             State::NeedsYou(p) => match p.clone() {
                 Problem::SignInToSend { .. } => fx.push(Effect::OpenSignIn),
                 Problem::Unreachable { job } => self.retry(job, fx),
