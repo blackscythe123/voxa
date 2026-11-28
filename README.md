@@ -1,5 +1,7 @@
 # Voxa
 
+<p align="center"><img src="docs/brand/hero.gif" width="720" alt="The Voxa strip writing as someone talks, over a chat app"></p>
+
 **Talk instead of typing, in any app.** Press a shortcut, say what you want to write, and Voxa
 turns it into text with your own ChatGPT account and pastes it where your cursor is: chats, email,
 documents, code, Claude Code, anywhere.
