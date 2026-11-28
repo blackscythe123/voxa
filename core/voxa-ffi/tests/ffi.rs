@@ -234,7 +234,8 @@ impl LogSink for Collect {
 #[test]
 fn diagnostics_log_events_but_never_the_transcript() {
     let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    set_log_sink(Box::new(Collect(lines.clone())), false);
+    // Even with the debug build's preview asked for, no transcript text is logged.
+    set_log_sink(Box::new(Collect(lines.clone())), true);
     let flow = VoxaFlow::new(tmp("diag"), ready());
     let (job, _) = start(&flow, mic("Signal", 9));
     flow.handle(FlowEvent::Stop);
@@ -243,4 +244,85 @@ fn diagnostics_log_events_but_never_the_transcript() {
     assert!(log.contains("MicPressed") && log.contains("StartCapture"), "{log}");
     assert!(log.contains("<26 chars>"), "{log}");
     assert!(!log.contains("secret"), "transcript text must never reach the log");
+}
+
+#[test]
+fn pause_and_resume_keep_one_take_and_history_entry() {
+    let dir = tmp("pause");
+    let flow = VoxaFlow::new(dir.clone(), ready());
+    let (job, pcm) = start(&flow, mic("Notes", 1));
+    assert_eq!(pause_key_label(false), "Pause");
+    assert_eq!(flow.handle(FlowEvent::Pause), vec![FlowEffect::PauseCapture { job }]);
+    assert_eq!(flow.state(), FlowState::Recording { job, offline: false, paused: true });
+    let st = flow.status().unwrap();
+    assert_eq!((st.title.as_str(), st.detail.as_deref(), st.dismissable), ("Paused", Some("The microphone is off"), false));
+    assert_eq!(pause_key_label(true), "Resume");
+    let core = VoxaCore::new(dir.clone());
+    assert_eq!(core.history(String::new())[0].status, EntryStatus::Waiting("Recording".into()), "kept while paused");
+    assert!(flow.handle(FlowEvent::Pause).is_empty());
+    assert_eq!(flow.handle(FlowEvent::Resume), vec![FlowEffect::ResumeCapture { job }]);
+    flow.handle(FlowEvent::Pause);
+    let fx = flow.handle(FlowEvent::Stop);
+    assert!(fx.contains(&FlowEffect::StopCapture { job }));
+    assert!(fx.iter().any(|e| matches!(e, FlowEffect::Transcribe { job: j, pcm_path, .. } if *j == job && *pcm_path == pcm)));
+    assert_eq!(core.history(String::new()).len(), 1);
+}
+
+#[test]
+fn incognito_audio_goes_when_the_take_ends_off_screen_and_after_a_process_death() {
+    let dir = tmp("private-ready");
+    let flow = VoxaFlow::new(dir.clone(), ready());
+    let (job, pcm) = start(&flow, FlowEvent::MicPressed { target: target("Chrome", 3), private: true });
+    std::fs::write(&pcm, [1u8; 64]).unwrap();
+    flow.handle(FlowEvent::Stop);
+    // Finished while the user is elsewhere: Ready, never delivered.
+    flow.handle(FlowEvent::Focus { target: target("Other", 4) });
+    flow.handle(FlowEvent::Transcribed { job, text: "secret".into() });
+    assert!(!std::path::Path::new(&pcm).exists(), "a ready incognito take keeps no audio");
+
+    // A process that died mid incognito take leaves audio no entry keeps: swept at next start.
+    drop(flow);
+    let dying = VoxaFlow::new(dir.clone(), ready());
+    let (_, pcm2) = start(&dying, FlowEvent::MicPressed { target: target("Chrome", 3), private: true });
+    std::fs::write(&pcm2, [1u8; 64]).unwrap();
+    let other = VoxaFlow::new(dir.clone(), ready());
+    let (_, kept) = start(&other, mic("Notes", 1));
+    std::fs::write(&kept, [1u8; 64]).unwrap();
+    drop(dying);
+    let _next = VoxaFlow::new(dir.clone(), ready());
+    assert!(!std::path::Path::new(&pcm2).exists(), "orphaned incognito audio is deleted");
+    assert!(std::path::Path::new(&kept).exists(), "audio a History entry keeps stays");
+}
+
+#[test]
+fn a_take_cut_off_while_being_written_out_waits_for_the_background_send() {
+    let dir = tmp("recover-writing");
+    {
+        let flow = VoxaFlow::new(dir.clone(), ready());
+        let (_, pcm) = start(&flow, mic("Notes", 1));
+        std::fs::write(&pcm, [1u8; 3200]).unwrap();
+        flow.handle(FlowEvent::Stop);
+        // The process dies while it is being written out.
+    }
+    let _next = VoxaFlow::new(dir.clone(), ready());
+    let core = VoxaCore::new(dir);
+    assert_eq!(core.history(String::new())[0].status, EntryStatus::Waiting("Sends when you're back online".into()));
+    assert_eq!(core.waiting_for_network().len(), 1);
+}
+
+#[test]
+fn a_cancelled_take_has_no_entry_to_notify_about_and_only_live_takes_are_owned() {
+    let dir = tmp("owns");
+    let flow = VoxaFlow::new(dir.clone(), ready());
+    let (job, _) = start(&flow, mic("Notes", 1));
+    let entry = flow.entry_for_job(job).expect("kept");
+    assert!(flow.owns(entry));
+    flow.handle(FlowEvent::Stop);
+    assert!(flow.owns(entry), "being written out");
+    flow.handle(FlowEvent::TranscribeFailed { job, error: TranscribeFailure::Timeout });
+    assert!(!flow.owns(entry), "a failed take may be retried from a notification");
+    flow.handle(FlowEvent::Dismiss);
+    let (job2, _) = start(&flow, mic("Notes", 1));
+    flow.handle(FlowEvent::Cancel);
+    assert_eq!(flow.entry_for_job(job2), None);
 }

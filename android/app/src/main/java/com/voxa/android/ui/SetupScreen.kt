@@ -97,7 +97,7 @@ fun SetupScreen(activity: MainActivity) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Box(Modifier.fillMaxWidth().height(232.dp).clip(RoundedCornerShape(24.dp)).background(c.surface), contentAlignment = Alignment.Center) {
                 when (step) {
-                    0 -> SignInArt(name, signedIn)
+                    0 -> SignInArt(name, signedIn, account?.image ?: "")
                     1 -> MicArt(mic)
                     2 -> KeyboardArt()
                     else -> Box(Modifier.padding(24.dp)) {
@@ -146,10 +146,10 @@ fun SetupScreen(activity: MainActivity) {
 
 /** A small card: the account, checked once signed in. */
 @Composable
-private fun SignInArt(name: String?, signedIn: Boolean) {
+private fun SignInArt(name: String?, signedIn: Boolean, image: String) {
     val c = vx
     Row(Modifier.width(232.dp).vcard(c, 16.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Avatar(name ?: "", 40.dp)
+        Avatar(name ?: "", 40.dp, image = image)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(if (signedIn) name ?: "Signed in" else "ChatGPT", style = Type.SBold, color = c.text, maxLines = 1)

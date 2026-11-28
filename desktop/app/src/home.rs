@@ -17,7 +17,8 @@ use crate::remote::Backend as Voxa;
 use voxa_core::{Blocker, Network, Session};
 
 const TEXT: u32 = 0x1A1A1A;
-const MUTED: u32 = 0x5F5F5F;
+/// Secondary text at AAA: 7.2:1 on the page (#FBFAF8).
+const MUTED: u32 = 0x555555;
 const PAGE_BG: u32 = 0xFBFAF8;
 const NAV_BG: u32 = 0xF1EEEA;
 const CARD_BORDER: u32 = 0x0000000F;
@@ -350,7 +351,7 @@ fn section(title: impl Into<SharedString>) -> gpui::Div {
 }
 
 fn wbtn(id: impl Into<gpui::ElementId>, label: impl Into<SharedString>, accent: bool) -> gpui::Stateful<gpui::Div> {
-    let (bg, fg, hover) = if accent { (INK, 0xFFFFFF, 0x7C4125) } else { (0xFFFFFF, TEXT, 0xF6F4F1) };
+    let (bg, fg, hover) = if accent { (INK, 0xFFFFFF, 0x66341C) } else { (0xFFFFFF, TEXT, 0xF6F4F1) };
     div()
         .id(id.into())
         .flex()
@@ -612,7 +613,7 @@ impl Home {
             .rounded(px(4.))
             .bg(rgb(0xFFFFFF))
             .border_1()
-            .border_color(rgba(if self.search_active { 0x8F4C2CFF } else { 0x00000014 }))
+            .border_color(rgba(if self.search_active { 0x7A3F22FF } else { 0x00000014 }))
             .border_b_2()
             .text_size(px(14.))
             .cursor_text()
@@ -806,7 +807,7 @@ impl Home {
             .justify_center()
             .rounded(px(4.))
             .cursor_pointer()
-            .text_color(rgb(if danger { 0xC42B1C } else { 0x3D3D3D }))
+            .text_color(rgb(if danger { 0xB3241B } else { 0x3D3D3D }))
             .hover(|s| s.bg(rgba(0x0000000F)))
             .tooltip(move |_, cx| cx.new(|_| Tip(tip)).into())
             .child(icon(glyph, 13.))
@@ -1489,7 +1490,7 @@ impl Home {
                 .justify_end()
                 .cursor_pointer()
                 .rounded(px(4.))
-                .hover(|s| s.bg(rgba(0x8F4C2C0D)))
+                .hover(|s| s.bg(rgba(0x7A3F220D)))
                 .tooltip(move |_, cx| cx.new(|_| BarTip { value: tip.0.clone(), period: tip.1.clone(), extra: tip.2.clone() }).into())
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.chart_pick = if this.chart_pick == Some(i) { None } else { Some(i) };

@@ -102,6 +102,10 @@ fun SettingsScreen(activity: MainActivity) {
                     },
                 )
             }
+            val lookLabel = remember(tick) { com.voxa.android.ime.KeyboardLook.label(com.voxa.android.ime.KeyboardLook.load(activity)) }
+            OptionRow(R.drawable.ic_palette, "Keyboard look", onClick = { activity.go(Route.KeyboardLook) }) {
+                OptionValue(lookLabel)
+            }
             OptionRow(R.drawable.ic_hand, "Hold to talk", onClick = { save(settings.copy(holdToTalk = !settings.holdToTalk)) }) {
                 VSwitch(settings.holdToTalk) { save(settings.copy(holdToTalk = it)) }
             }
@@ -110,6 +114,11 @@ fun SettingsScreen(activity: MainActivity) {
             }
             OptionRow(R.drawable.ic_vibrate, "Vibrate on tap", onClick = { save(settings.copy(haptics = !settings.haptics)) }) {
                 VSwitch(settings.haptics) { save(settings.copy(haptics = it)) }
+            }
+            // Android's own page for Voxa's notifications (sign-in, dictations).
+            val notifyOn = remember(tick) { com.voxa.android.notify.Notifier.allowed(activity) }
+            OptionRow(R.drawable.ic_bell, "Notifications", onClick = { activity.openNotificationSettings() }) {
+                OptionValue(if (notifyOn) "On" else "Off")
             }
             val theme = ThemePref.current.value
             val ctx = androidx.compose.ui.platform.LocalContext.current

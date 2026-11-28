@@ -19,6 +19,7 @@ pub mod error;
 pub mod flow;
 pub mod greeting;
 pub mod job;
+pub mod notices;
 pub mod readiness;
 pub mod splash;
 pub mod svgpath;

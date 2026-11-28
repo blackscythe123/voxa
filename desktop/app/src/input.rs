@@ -595,7 +595,7 @@ impl Render for TextInput {
             .rounded(px(4.))
             .bg(rgb(0xFFFFFF))
             .border_1()
-            .border_color(if focused { rgba(0x8F4C2CFF) } else { rgba(0x00000020) })
+            .border_color(if focused { rgba(0x7A3F22FF) } else { rgba(0x00000020) })
             .text_size(px(14.))
             .line_height(px(20.))
             .overflow_hidden()

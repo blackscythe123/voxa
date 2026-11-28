@@ -115,7 +115,11 @@ fun DetailScreen(activity: MainActivity, id: ULong) {
                 ActionTile(if (written) "Write again" else "Send now", R.drawable.ic_refresh, enabled = e.hasAudio && !sending, busy = sending) {
                     sending = true
                     scope.launch {
-                        withContext(Dispatchers.IO) { app.core.resend(e.id) }
+                        // The keyboard or the background send may be sending it right now: never twice.
+                        val busy = withContext(Dispatchers.IO) {
+                            if (app.keyboardOwns(e.id) || app.core.isSending(e.id)) true else app.core.resend(e.id) == null && app.core.isSending(e.id)
+                        }
+                        if (busy) Toast.makeText(activity, "It's being sent already", Toast.LENGTH_SHORT).show()
                         sending = false
                         app.historyChanged()
                     }

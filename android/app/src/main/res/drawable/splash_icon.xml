@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ system splash icon: the Voxa tile (warm near-black, subtle rim) with the nib, the
+     launcher tile's proportions (92-unit tile, 22-unit corners). Sized to show as a 96 dp tile: measured
+     on the API 35 emulator, the splash draws this 108 grid at about 286 dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#3F342D" android:pathData="M44.534,35.856H63.466A8.678,8.678 0 0 1 72.144,44.534V63.466A8.678,8.678 0 0 1 63.466,72.144H44.534A8.678,8.678 0 0 1 35.856,63.466V44.534A8.678,8.678 0 0 1 44.534,35.856Z"/>
+    <path android:fillColor="#211B17" android:pathData="M44.534,36.329H63.466A8.204,8.204 0 0 1 71.671,44.534V63.466A8.204,8.204 0 0 1 63.466,71.671H44.534A8.204,8.204 0 0 1 36.329,63.466V44.534A8.204,8.204 0 0 1 44.534,36.329Z"/>
+    <group android:scaleX="0.39443" android:scaleY="0.39443" android:translateX="42.167" android:translateY="42.167">
+        <!-- The nib, minus the collar line and the ink hole + zigzag slit (even-odd), clipped to the nib. -->
+        <clip-path android:pathData="M14,4H46V16C46,30 38,42 30,57C22,42 14,30 14,16Z"/>
+        <path android:fillColor="#FFD99366" android:fillType="evenOdd"
+            android:pathData="M14,4H46V16C46,30 38,42 30,57C22,42 14,30 14,16Z M10,11H50V13.6H10Z M28.49,28.133L25.431,34.432A1.3,1.3 0 0 0 25.74,35.975L31.595,41.141L26.599,47.171A1.3,1.3 0 0 0 26.336,48.303L29.436,61.221L31.964,60.614L29.016,48.329L34.401,41.829A1.3,1.3 0 0 0 34.26,40.025L28.201,34.679L31.355,28.186A4.4,4.4 0 1 0 28.49,28.133Z"/>
+    </group>
+</vector>

@@ -2,6 +2,7 @@ package com.voxa.android.ime
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
@@ -18,17 +19,21 @@ import android.view.inputmethod.InputMethodManager
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.voxa.android.MainActivity
-import com.voxa.android.R
 import com.voxa.android.diag.Diag
+import com.voxa.android.notify.Notifier
 import com.voxa.android.voxa
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.voxa.android.notify.VoxaJobs
 import uniffi.voxa_ffi.DeliveryResult
+import uniffi.voxa_ffi.EntryStatus
 import uniffi.voxa_ffi.FfiTarget
 import uniffi.voxa_ffi.FieldKind
 import uniffi.voxa_ffi.FlowEffect
@@ -40,6 +45,7 @@ import uniffi.voxa_ffi.TranscribeFailure
 import uniffi.voxa_ffi.VoxaFlow
 import uniffi.voxa_ffi.fieldKind
 import uniffi.voxa_ffi.passwordFieldText
+import uniffi.voxa_ffi.pauseKeyLabel
 
 /**
  * The Voxa voice keyboard. A thin shell around the core's dictation flow (voxa-core via voxa-ffi):
@@ -53,6 +59,16 @@ class VoxaKeyboard : InputMethodService() {
     private lateinit var flow: VoxaFlow
     private lateinit var recorder: Recorder
     private var panel: KeyboardPanel? = null
+    /** What the panel's colours were built from ([KeyboardLook.stamp]); a new stamp on show rebuilds it. */
+    private var builtStamp: String? = null
+    /** The navigation bar under the keyboard, px (the panel's bottom padding). */
+    private var navInset = 0
+
+    /** The decoded photo of the Keyboard look, kept here (not in the panel) so a rebuilt panel
+     *  doesn't decode it again; keyed by file, modification time, size, position and soften. */
+    private var photo: Bitmap? = null
+    private var photoKey: String? = null
+    private var photoJob: Job? = null
 
     /** The field in front now, or null when no field is bound. */
     private var target: FfiTarget? = null
@@ -60,13 +76,21 @@ class VoxaKeyboard : InputMethodService() {
     private var editorInfo: EditorInfo? = null
     /** A finished text that arrived while no field was bound; the next field decides. */
     private var pendingPaste: FlowEffect.Paste? = null
+    /** When the mic last went live in this take (start or resume). */
     private var recordingSince = 0L
+    /** Talking time before the current stretch, in ms (paused time is left out). */
+    private var talkedMs = 0L
     private var haptics = true
     /** Settings, "Hold to talk": a press held past [HOLD_MS] stops on release. Off: taps only. */
     private var holdToTalk = true
 
     // Mic key: press-and-hold over 400 ms then release stops (hold to talk); a quick tap stays on.
     private var pressStarted = false
+    /** A finger is on the mic key now. */
+    private var pressActive = false
+    /** A rebuild of the keyboard view waits until no take is live and no key is held: a rebuild
+     *  removes the mic view, and the release of a hold-to-talk press would never arrive. */
+    private var rebuildPending = false
 
     /** Set first thing in onDestroy: nothing may use the Rust flow after that. */
     private var destroyed = false
@@ -75,20 +99,31 @@ class VoxaKeyboard : InputMethodService() {
     private var notice: Pair<String, String>? = null
     private val clearNotice = Runnable { notice = null; render() }
 
+    /** Shown instead of the paused detail when Resume was refused (on a call); the bar's usual
+     *  notices only show while idle. Cleared when the take leaves the paused state. */
+    private var pausedNotice: String? = null
+
     private val timerTick = object : Runnable {
         override fun run() {
             val p = panel ?: return
-            val secs = (SystemClock.elapsedRealtime() - recordingSince) / 1000
+            val secs = talkedSecs()
             p.right.text = "%d:%02d".format(secs / 60, secs % 60)
             main.postDelayed(this, 500)
         }
     }
 
+    private fun isPaused(): Boolean = (flow.state() as? FlowState.Recording)?.paused == true
+
+    /** Talking time of the take on screen, frozen while paused. */
+    private fun talkedSecs(): Long =
+        (talkedMs + if (isPaused()) 0L else SystemClock.elapsedRealtime() - recordingSince) / 1000
+
     override fun onCreate() {
         super.onCreate()
         Diag.log("ime", "onCreate")
         flow = VoxaFlow(filesDir.path, app.readiness())
-        recorder = Recorder(this, onLevel = { panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
+        app.keyboardFlow = flow
+        recorder = Recorder(this, onLevel = { if (!destroyed && !isPaused()) panel?.bars?.level(if (debugLevels) syntheticLevel() else it) }, onInterrupted = { onMicInterrupted() })
         app.historyChanged()
         scope.launch {
             combine(app.session, app.online) { _, _ -> }.collect { pushReadiness() }
@@ -109,23 +144,42 @@ class VoxaKeyboard : InputMethodService() {
         destroyed = true
         if (recorder.isRecording) recorder.stop()
         scope.cancel()
+        releasePhoto()
         main.removeCallbacksAndMessages(null)
         // super.onDestroy() calls onFinishInputView (which checks the flow): destroy the flow after it.
         super.onDestroy()
+        app.keyboardFlow = null
+        Notifier.keyboardShowing = false
         flow.destroy()
     }
 
     override fun onEvaluateFullscreenMode() = false
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // The photo is decoded again (off the main thread) the next time the keyboard shows.
+        if (level >= TRIM_MEMORY_RUNNING_LOW && !isInputViewShown && photo != null) {
+            Diag.log("look", "photo released (trim level $level)")
+            releasePhoto()
+        }
+    }
+
     override fun onCreateInputView(): View {
         Diag.log("ime", if (panel == null) "panel created" else "panel recreated")
-        val p = KeyboardPanel(this)
+        val colors = KbColors.of(this)
+        builtStamp = KeyboardLook.stamp(this)
+        val p = KeyboardPanel(this, colors)
         panel = p
+        if (colors.photo) attachPhoto(p) else releasePhoto()
+        // A rebuilt panel gets no new insets until they change: start from the last ones.
+        p.bottomInset(navInset)
         ViewCompat.setOnApplyWindowInsetsListener(p) { v, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            navInset = nav.bottom
             (v as KeyboardPanel).bottomInset(nav.bottom)
             insets
         }
+        ViewCompat.requestApplyInsets(p)
         wire(p)
         render()
         return p
@@ -157,7 +211,16 @@ class VoxaKeyboard : InputMethodService() {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         Diag.log("ime", "shown (onStartInputView ${info.packageName}, restarting $restarting)")
+        // A Keyboard look or Appearance change (or new phone colours) since the view was built:
+        // build it again, so the change shows now and not only after the keyboard restarts.
+        val p = panel
+        if (p != null && KeyboardLook.stamp(this) != builtStamp) {
+            rebuildWhenQuiet("look changed")
+        } else if (p != null && p.colors.photo && !p.hasPhoto && photoJob?.isActive != true) {
+            attachPhoto(p)
+        }
         Diag.memory("keyboard shown")
+        Notifier.keyboardShowing = true
         val s = app.core.settings()
         haptics = s.haptics
         holdToTalk = s.holdToTalk
@@ -177,8 +240,26 @@ class VoxaKeyboard : InputMethodService() {
     override fun onWindowHidden() {
         Diag.log("ime", "onWindowHidden")
         Diag.memory("keyboard hidden")
+        Notifier.keyboardShowing = false
         stopIfRecording("window hidden")
         super.onWindowHidden()
+    }
+
+    /** Rebuild the keyboard view now, or once the take on screen is over and no key is held. */
+    private fun rebuildWhenQuiet(why: String) {
+        if (busyForRebuild()) {
+            if (!rebuildPending) Diag.log("look", "$why: keyboard view rebuilt after this take")
+            rebuildPending = true
+            return
+        }
+        rebuildPending = false
+        Diag.log("look", "$why: keyboard view rebuilt")
+        setInputView(onCreateInputView())
+    }
+
+    private fun busyForRebuild(): Boolean = pressActive || when (flow.state()) {
+        is FlowState.Recording, is FlowState.Transcribing, is FlowState.Delivering -> true
+        else -> false
     }
 
     private fun stopIfRecording(why: String) {
@@ -218,6 +299,7 @@ class VoxaKeyboard : InputMethodService() {
         for (e in effects) run(e)
         app.historyChanged()
         render()
+        if (rebuildPending && !busyForRebuild()) main.post { if (!destroyed && rebuildPending && !busyForRebuild()) rebuildWhenQuiet("deferred") }
     }
 
     private fun run(effect: FlowEffect) {
@@ -236,6 +318,28 @@ class VoxaKeyboard : InputMethodService() {
                 Diag.memory("recording stopped")
                 main.removeCallbacks(timerTick)
                 flow.setRecordingSecs(effect.job, secs)
+            }
+            is FlowEffect.PauseCapture -> {
+                talkedMs += SystemClock.elapsedRealtime() - recordingSince
+                recorder.pause()
+                main.removeCallbacks(timerTick)
+                panel?.bars?.reset()
+                Diag.log("mic", "paused: %.1f s talked, %d bytes".format(recorder.talkingSecs(), recorder.bytesWritten))
+            }
+            is FlowEffect.ResumeCapture -> {
+                val err = recorder.resume()
+                if (err == null) {
+                    recordingSince = SystemClock.elapsedRealtime()
+                    main.removeCallbacks(timerTick)
+                    main.post(timerTick)
+                    Diag.log("mic", "resumed")
+                } else {
+                    // Like an interruption: finish and send what was recorded. The clock restarts
+                    // now so the timer doesn't count the pause for the moment before the stop.
+                    recordingSince = SystemClock.elapsedRealtime()
+                    Diag.log("mic", "resume failed: $err; sending what was recorded")
+                    main.post { if (!destroyed && flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop) }
+                }
             }
             is FlowEffect.DiscardCapture -> {
                 recorder.discard()
@@ -262,6 +366,7 @@ class VoxaKeyboard : InputMethodService() {
             Diag.log("mic", "started")
             Diag.memory("recording started")
             recordingSince = SystemClock.elapsedRealtime()
+            talkedMs = 0L
             main.removeCallbacks(timerTick)
             main.post(timerTick)
             panel?.bars?.reset()
@@ -282,6 +387,8 @@ class VoxaKeyboard : InputMethodService() {
     private fun transcribe(effect: FlowEffect.Transcribe) {
         val job = effect.job
         scope.launch {
+            // A cold start reads the saved sign-in off the main thread: wait for it.
+            app.awaitSession()
             val event = withContext(Dispatchers.IO) {
                 try {
                     val canned = app.debugTranscript
@@ -303,7 +410,31 @@ class VoxaKeyboard : InputMethodService() {
                 }
                 if (event.error is TranscribeFailure.Blocked) app.blocked.value = true
             }
+            // Not the dictation on screen (sent when the network came back): it finishes unseen.
+            if (destroyed) return@launch
+            val current = (flow.state() as? FlowState.Transcribing)?.job == job
             dispatch(event)
+            if (!current && !destroyed) notifyBackground(job, event)
+        }
+    }
+
+    /** A2 / A3 for a dictation that finished off screen, by what History now says (a take the user
+     *  cancelled meanwhile has no entry, so nothing is posted). Never for incognito takes. A3 comes
+     *  only after the core's three tries, never for Cloudflare blocking, and its Retry sends this
+     *  entry again (it is added to the Retry list). */
+    private fun notifyBackground(job: ULong, event: FlowEvent) {
+        val entry = flow.entryForJob(job) ?: return
+        val unreachable = event is FlowEvent.TranscribeFailed && (event.error is TranscribeFailure.Timeout || event.error is TranscribeFailure.Server)
+        if (event !is FlowEvent.Transcribed && !unreachable) return
+        scope.launch {
+            val e = withContext(Dispatchers.IO) { app.core.entry(entry) } ?: return@launch
+            when {
+                event is FlowEvent.Transcribed && e.status is EntryStatus.Ready -> Notifier.ready(this@VoxaKeyboard, listOf(entry), e.app)
+                unreachable && e.status is EntryStatus.Failed -> {
+                    VoxaJobs.addFailed(this@VoxaKeyboard, listOf(entry))
+                    Notifier.notSent(this@VoxaKeyboard, 1)
+                }
+            }
         }
     }
 
@@ -314,6 +445,17 @@ class VoxaKeyboard : InputMethodService() {
             // No field bound (keyboard closed): nothing is inserted; the next field decides.
             Diag.log("insert", "no field bound; waiting for the next field")
             pendingPaste = effect
+            // The keyboard went away (a paused take stopped when the user switched apps): if no
+            // field comes back soon, say it's ready in History.
+            main.postDelayed({
+                if (!destroyed && pendingPaste === effect && !Notifier.keyboardShowing) {
+                    val entry = flow.entryForJob(effect.job) ?: return@postDelayed
+                    scope.launch {
+                        val e = withContext(Dispatchers.IO) { app.core.entry(entry) } ?: return@launch
+                        if (e.status is EntryStatus.Ready && pendingPaste === effect) Notifier.ready(this@VoxaKeyboard, listOf(entry), e.app)
+                    }
+                }
+            }, PASTE_GRACE_MS)
             return
         }
         val result = if (now == effect.target) {
@@ -342,6 +484,58 @@ class VoxaKeyboard : InputMethodService() {
         startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN, open).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // ── the Keyboard look's photo ────────────────────────────────────────────
+
+    /** Decodes the photo off the main thread (once per file and size) and hands it to [p]. Any
+     *  failure, out of memory included, falls back to the Voxa look instead of crashing. */
+    private fun attachPhoto(p: KeyboardPanel) {
+        val look = p.colors.look
+        val m = resources.displayMetrics
+        val w = m.widthPixels
+        val h = (Photo.PANEL_DP * m.density).toInt()
+        val file = KeyboardLook.photoFile(this)
+        val key = "${file.path}:${file.lastModified()}:$w:$h:${look.position}:${look.soften}"
+        val have = photo
+        if (key == photoKey && have != null && !have.isRecycled) {
+            p.setPhoto(have, cropped = true)
+            return
+        }
+        photoJob?.cancel()
+        photoJob = scope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                try {
+                    KeyboardLook.decodePhoto(this@VoxaKeyboard, w, h, look.position, look.soften, crop = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    Diag.log("look", "photo could not be decoded: ${t.javaClass.simpleName}")
+                    null
+                }
+            }
+            if (destroyed) return@launch
+            if (bmp == null) {
+                KeyboardLook.fallback(this@VoxaKeyboard, "photo decode")
+                if (panel === p) rebuildWhenQuiet("photo could not be decoded")
+                return@launch
+            }
+            val old = photo
+            photo = bmp
+            photoKey = key
+            if (old != null && old !== bmp) old.recycle()
+            panel?.takeIf { it.colors.photo }?.setPhoto(bmp, cropped = true)
+            Diag.memory("photo decoded ${bmp.width} x ${bmp.height} ${bmp.config}")
+        }
+    }
+
+    private fun releasePhoto() {
+        photoJob?.cancel()
+        photoJob = null
+        panel?.setPhoto(null)
+        photo?.recycle()
+        photo = null
+        photoKey = null
+    }
+
     // ── keys ─────────────────────────────────────────────────────────────────
 
     @SuppressLint("ClickableViewAccessibility")
@@ -352,6 +546,7 @@ class VoxaKeyboard : InputMethodService() {
                     // Only the circle itself, not its glow.
                     if (!p.mic.hit(ev.x, ev.y) || !v.isEnabled) return@setOnTouchListener false
                     v.isPressed = true
+                    pressActive = true
                     tap(v)
                     // Only a press that starts the recording can be a hold-to-talk press; a tap
                     // while recording always stops it (on release).
@@ -365,6 +560,7 @@ class VoxaKeyboard : InputMethodService() {
                 }
                 MotionEvent.ACTION_UP -> {
                     v.isPressed = false
+                    pressActive = false
                     // From the touch itself, not from when it is handled: starting the mic can
                     // block the main thread for a few hundred ms, which must not turn a tap into a hold.
                     val held = ev.eventTime - ev.downTime
@@ -374,7 +570,19 @@ class VoxaKeyboard : InputMethodService() {
                     if (stop) dispatch(FlowEvent.Stop)
                     v.performClick()
                 }
-                MotionEvent.ACTION_CANCEL -> v.isPressed = false
+                MotionEvent.ACTION_CANCEL -> {
+                    // The press was taken away (the view went, or a parent took the touch): a
+                    // hold-to-talk press ends as if released, so the mic never keeps recording.
+                    v.isPressed = false
+                    pressActive = false
+                    val held = ev.eventTime - ev.downTime
+                    if (pressStarted && holdToTalk && held > HOLD_MS && flow.state() is FlowState.Recording) {
+                        Diag.log("ime", "mic press cancelled after $held ms: stop")
+                        dispatch(FlowEvent.Stop)
+                    } else if (rebuildPending && !busyForRebuild()) {
+                        main.post { if (!destroyed && rebuildPending && !busyForRebuild()) rebuildWhenQuiet("deferred") }
+                    }
+                }
             }
             true
         }
@@ -396,10 +604,14 @@ class VoxaKeyboard : InputMethodService() {
             getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             true
         }
-        // While listening the wide key reads "Tap to stop" and stops; otherwise it is space.
+        // During a take the wide key pauses and resumes (the big mic is Stop); otherwise it is space.
         p.spaceKey.setOnClickListener {
             tap(it)
-            if (flow.state() is FlowState.Recording) dispatch(FlowEvent.Stop) else currentInputConnection?.commitText(" ", 1)
+            when {
+                isPaused() -> onResumePressed()
+                flow.state() is FlowState.Recording -> dispatch(FlowEvent.Pause)
+                else -> currentInputConnection?.commitText(" ", 1)
+            }
         }
         p.enterKey.setOnClickListener { tap(it); enter() }
         repeating(p.backspaceKey) { backspace() }
@@ -417,6 +629,18 @@ class VoxaKeyboard : InputMethodService() {
         }
         notice = null
         dispatch(FlowEvent.MicPressed(t, field == FieldKind.PRIVATE))
+    }
+
+    /** Resume, unless a call owns the microphone now: then stay paused and say so. */
+    private fun onResumePressed() {
+        if (inCall()) {
+            Diag.log("ime", "resume refused: in a call (audio mode ${audioMode()})")
+            pausedNotice = "You're on a call. Resume when it ends"
+            render()
+            return
+        }
+        pausedNotice = null
+        dispatch(FlowEvent.Resume)
     }
 
     private fun audioMode(): Int = getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
@@ -437,7 +661,8 @@ class VoxaKeyboard : InputMethodService() {
     /** The system took the microphone mid-take (a call started, another app grabbed it). Keep
      *  what was said; if nothing was heard at all, drop the empty take and say why. */
     private fun onMicInterrupted() {
-        if (destroyed || flow.state() !is FlowState.Recording) return
+        // Paused, the mic is already released: nothing of ours was interrupted.
+        if (destroyed || flow.state() !is FlowState.Recording || isPaused()) return
         if (recorder.peakLevel <= 0.001f) {
             Diag.log("ime", "mic taken with nothing recorded: cancelling (audio mode ${audioMode()})")
             dispatch(FlowEvent.Cancel)
@@ -503,10 +728,11 @@ class VoxaKeyboard : InputMethodService() {
 
     private fun render() {
         val p = panel ?: return
-        val c = p.colors
         val state = flow.state()
         val status = flow.status()
         val recording = state is FlowState.Recording
+        val paused = (state as? FlowState.Recording)?.paused == true
+        if (!paused) pausedNotice = null
         val busy = state is FlowState.Transcribing || state is FlowState.Delivering
         val done = if (state is FlowState.Delivered) flow.delivered() else null
         val password = field == FieldKind.PASSWORD && state is FlowState.Idle
@@ -517,57 +743,51 @@ class VoxaKeyboard : InputMethodService() {
             status != null -> status
             else -> null
         }
+        val title: String
         var detail: String? = null
         var action: String? = null
         var closable = false
         val n = notice
         if (shown == null && n != null && state is FlowState.Idle) {
-            p.title.text = n.first
+            title = n.first
             detail = n.second
         } else if (shown != null) {
-            p.title.text = shown.title
-            detail = shown.detail
+            title = shown.title
+            detail = pausedNotice.takeIf { paused } ?: shown.detail
             // While listening the action is the big mic itself (Stop); the bar offers Cancel.
             action = shown.action.takeIf { !recording }
             closable = shown.dismissable || recording || state is FlowState.Transcribing
         } else {
             // Idle: the desktop home's one-line readiness.
             val signedOut = app.session.value == SessionState.EXPIRED
-            p.title.text = if (signedOut) "Sign in to ChatGPT to dictate" else "Ready to dictate"
+            title = if (signedOut) "Sign in to ChatGPT to dictate" else "Ready to dictate"
             if (signedOut) action = "Sign in"
         }
         if (done != null) {
             detail = null
             closable = false
         }
-        p.title.setTextColor(if (done != null) c.good else c.text)
-        p.dot.visibility = if (recording) View.VISIBLE else View.GONE
-        p.detail.text = detail ?: ""
-        p.detail.visibility = if (detail.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE
-        p.action.text = action ?: ""
-        p.action.visibility = if (action != null) View.VISIBLE else View.GONE
-        p.close.visibility = if (closable) View.VISIBLE else View.GONE
-        p.close.contentDescription = if (recording || state is FlowState.Transcribing) "Cancel" else "Close"
-        p.right.text = when {
-            recording -> ((SystemClock.elapsedRealtime() - recordingSince) / 1000).let { "%d:%02d".format(it / 60, it % 60) }
-            done != null -> if (done.words == 1u) "1 word" else "${done.words} words"
-            else -> ""
-        }
-
-        // The stage: bars and the mic, the spinner while writing, or the green check.
-        p.bars.visibility = if (recording) View.VISIBLE else View.INVISIBLE
-        p.spinner.visibility = if (busy) View.VISIBLE else View.GONE
-        p.done.visibility = if (done != null) View.VISIBLE else View.GONE
-        p.mic.visibility = if (done != null) View.INVISIBLE else View.VISIBLE
-        p.saved.text = done?.let { savedLine(it.savedSecs.toInt()) } ?: ""
-        p.saved.visibility = if (p.saved.text.isEmpty()) View.GONE else View.VISIBLE
-        p.mic.icon = getDrawable(if (recording) R.drawable.ic_stop else R.drawable.ic_mic)?.mutate()?.apply { setTint(c.onAccent) }
-        p.mic.contentDescription = if (recording) "Stop" else "Talk"
-        val micOff = busy || password
-        p.mic.alpha = if (micOff) 0.4f else 1f
-        p.mic.isEnabled = !micOff
-        p.spaceKey.text = if (recording) "Tap to stop" else "space"
-        p.spaceKey.contentDescription = if (recording) "Stop" else "Space"
+        p.show(
+            KeyboardPanel.State(
+                title = title,
+                detail = detail,
+                action = action,
+                closable = closable,
+                recording = recording,
+                transcribing = state is FlowState.Transcribing,
+                busy = busy,
+                done = done != null,
+                right = when {
+                    recording -> talkedSecs().let { "%d:%02d".format(it / 60, it % 60) }
+                    done != null -> if (done.words == 1u) "1 word" else "${done.words} words"
+                    else -> ""
+                },
+                saved = done?.let { savedLine(it.savedSecs.toInt()) } ?: "",
+                micOff = busy || password,
+                paused = recording && paused,
+                wideKey = if (recording) pauseKeyLabel(paused) else null,
+            ),
+        )
     }
 
     /** "That's 6 seconds of typing saved"; nothing when speaking wasn't faster. */
@@ -583,5 +803,8 @@ class VoxaKeyboard : InputMethodService() {
         const val HOLD_MS = 400L
         /** How long "Pasted in X" stays before the keyboard is back to idle. */
         const val DONE_MS = 1500L
+        /** How long a finished text waits for a field after the keyboard went away before the
+         *  "ready" notification says it's in History. */
+        const val PASTE_GRACE_MS = 3000L
     }
 }

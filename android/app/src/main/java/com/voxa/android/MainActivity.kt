@@ -33,10 +33,13 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.voxa.android.diag.Diag
+import com.voxa.android.notify.Notifier
+import com.voxa.android.ui.NotifyAskSheet
 import com.voxa.android.ui.BottomSheet
 import com.voxa.android.ui.DetailScreen
 import com.voxa.android.ui.HistoryScreen
 import com.voxa.android.ui.HomeScreen
+import com.voxa.android.ui.KeyboardLookScreen
 import com.voxa.android.ui.LaunchOverlay
 import com.voxa.android.ui.SettingsScreen
 import com.voxa.android.ui.SetupScreen
@@ -54,6 +57,7 @@ sealed interface Route {
     data class Detail(val id: ULong) : Route
     data object SignIn : Route
     data object Setup : Route
+    data object KeyboardLook : Route
 }
 
 /** The companion app: setup, Home, History, Words and Settings. */
@@ -71,6 +75,12 @@ class MainActivity : ComponentActivity() {
         Diag.log("permission", "microphone ${if (granted) "granted" else "denied"}")
         tick.intValue++
     }
+    private val notifyPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        Diag.log("permission", "notifications ${if (granted) "allowed" else "not allowed"}")
+        tick.intValue++
+    }
+    /** Sign-in was opened because the session ended (the keyboard or the A1 notification). */
+    private var signInAfterExpiry = false
     private val stack = mutableStateListOf<Route>()
     /** The written splash is on screen; Home's doodle waits for it. */
     var splashShowing by mutableStateOf(false)
@@ -121,13 +131,24 @@ class MainActivity : ComponentActivity() {
      *  stores a dummy session (ChatGPT rejects it, so nothing is ever transcribed with it). */
     private fun debugSeams(intent: Intent) {
         if (!BuildConfig.DEBUG) return
+        val prefs = getSharedPreferences("debug", MODE_PRIVATE)
+        // --es debug_check valid|expired|"": session checks answer this instead of asking ChatGPT;
+        // --el debug_confirm_ms N: wait N ms (not 2 minutes) before confirming an expiry.
+        // First, so a check started by the seams below already uses the new answer.
+        if (intent.hasExtra("debug_check")) {
+            val v = intent.getStringExtra("debug_check").orEmpty()
+            prefs.edit().apply { if (v.isEmpty()) remove("check") else putString("check", v) }.commit()
+        }
+        if (intent.hasExtra("debug_send_unreachable")) prefs.edit().putBoolean("send_unreachable", intent.getBooleanExtra("debug_send_unreachable", false)).apply()
+        if (intent.hasExtra("debug_confirm_ms")) prefs.edit().putLong("confirm_ms", intent.getLongExtra("debug_confirm_ms", 120_000L)).apply()
         if (intent.getBooleanExtra("debug_fake_session", false)) {
             Diag.log("debug", "dummy session stored for testing")
             voxa.signedIn("voxa-debug=1", android.webkit.WebSettings.getDefaultUserAgent(this))
+            // --ez debug_signin_done true: as if the sign-in screen had just captured this session.
+            if (intent.getBooleanExtra("debug_signin_done", false) && stack.lastOrNull() == Route.SignIn) signInDone()
         }
         // --ez debug_ready true|false: treat the session as good (no ChatGPT check).
         // --es debug_transcript "text": the keyboard pastes this instead of transcribing ("" to stop).
-        val prefs = getSharedPreferences("debug", MODE_PRIVATE)
         if (intent.hasExtra("debug_ready")) {
             prefs.edit().putBoolean("ready", intent.getBooleanExtra("debug_ready", false)).apply()
             voxa.checkSession(force = true)
@@ -145,6 +166,7 @@ class MainActivity : ComponentActivity() {
             stack.clear()
             stack.add(
                 when {
+                    r == "keyboard-look" -> Route.KeyboardLook
                     r == "setup" -> Route.Setup.also { getSharedPreferences("ui", MODE_PRIVATE).edit().putInt("setup_step", 0).apply() }
                     r.startsWith("detail:") -> Route.Detail(r.removePrefix("detail:").toULong())
                     else -> Route.Tabbed(Tab.entries.firstOrNull { it.name.equals(r, true) } ?: Tab.Home)
@@ -156,8 +178,14 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Diag.log("app", "screen shown")
+        Notifier.activityResumed = true
         tick.intValue++
         voxa.checkSession()
+    }
+
+    override fun onPause() {
+        Notifier.activityResumed = false
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -169,6 +197,8 @@ class MainActivity : ComponentActivity() {
 
     fun go(route: Route) {
         sheet = null
+        // History or a dictation is on screen: the dictations notification has done its job.
+        if (route is Route.Detail || route == Route.Tabbed(Tab.History)) Notifier.clearDictations(this)
         if (route is Route.Tabbed) {
             // A fresh visit to History starts without the last search.
             if (route.tab == Tab.History) getSharedPreferences("ui", MODE_PRIVATE).edit().remove("history_query").apply()
@@ -182,6 +212,15 @@ class MainActivity : ComponentActivity() {
 
     fun back() {
         if (stack.size > 1) stack.removeAt(stack.lastIndex)
+    }
+
+    /** The sign-in screen captured a session. */
+    private fun signInDone() {
+        back()
+        // Signed back in after an expiry: the first moment to offer notifications.
+        // Never during onboarding.
+        if (signInAfterExpiry && voxa.core.settings().onboarded && Notifier.shouldAsk(this)) showSheet { NotifyAskSheet(this@MainActivity) }
+        signInAfterExpiry = false
     }
 
     /** Setup finished (or skipped): Home. */
@@ -225,6 +264,23 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent.createChooser(send, "Share diagnostics"))
     }
 
+    /** Android 13+: the system's notification prompt (or Voxa's page in settings after a "Don't allow"). */
+    fun requestNotifications() {
+        val prefs = getSharedPreferences("ui", MODE_PRIVATE)
+        if (android.os.Build.VERSION.SDK_INT < 33) return openNotificationSettings()
+        val askedBefore = prefs.getBoolean("notify_asked", false)
+        if (askedBefore && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+            openNotificationSettings()
+        } else {
+            prefs.edit().putBoolean("notify_asked", true).apply()
+            notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    fun openNotificationSettings() {
+        startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+    }
+
     fun shareText(text: String) {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
     }
@@ -243,7 +299,11 @@ class MainActivity : ComponentActivity() {
         openRequest?.let {
             openRequest = null
             when (it) {
-                OPEN_SIGN_IN -> if (stack.lastOrNull() != Route.SignIn) go(Route.SignIn)
+                OPEN_SIGN_IN -> {
+                    signInAfterExpiry = voxa.session.value == uniffi.voxa_ffi.SessionState.EXPIRED
+                    if (stack.lastOrNull() != Route.SignIn) go(Route.SignIn)
+                }
+                OPEN_HISTORY -> go(Route.Tabbed(Tab.History))
                 OPEN_MIC -> {
                     if (stack.lastOrNull() == Route.SignIn) back()
                     requestMic()
@@ -252,6 +312,7 @@ class MainActivity : ComponentActivity() {
                     stack.clear()
                     stack.add(Route.Tabbed(Tab.Settings))
                 }
+                else -> if (it.startsWith(OPEN_ENTRY)) it.removePrefix(OPEN_ENTRY).toULongOrNull()?.let { id -> go(Route.Detail(id)) }
             }
         }
         val route = stack.lastOrNull() ?: Route.Tabbed(Tab.Home)
@@ -269,8 +330,9 @@ class MainActivity : ComponentActivity() {
                             Tab.Settings -> SettingsScreen(this@MainActivity)
                         }
                         is Route.Detail -> DetailScreen(this@MainActivity, route.id)
-                        Route.SignIn -> SignInScreen(onDone = { back() }, onClose = { back() })
+                        Route.SignIn -> SignInScreen(onDone = { signInDone() }, onClose = { back() })
                         Route.Setup -> SetupScreen(this@MainActivity)
+                        Route.KeyboardLook -> KeyboardLookScreen(this@MainActivity)
                     }
                 } }
                 if (route is Route.Tabbed) TabBar(route.tab) { go(Route.Tabbed(it)) }
@@ -288,6 +350,9 @@ class MainActivity : ComponentActivity() {
         const val OPEN_SIGN_IN = "sign-in"
         const val OPEN_MIC = "mic"
         const val OPEN_STORAGE = "storage"
+        const val OPEN_HISTORY = "history"
+        /** Followed by a History entry id. */
+        const val OPEN_ENTRY = "entry:"
 
         /** The launch animation plays once per process (a cold start). */
     }

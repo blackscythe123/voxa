@@ -16,6 +16,11 @@ pub struct StripText {
     pub dismissable: bool,
 }
 
+/// Label of the secondary button while recording (desktop strip, Android wide key).
+pub const PAUSE_LABEL: &str = "Pause";
+/// Label of the secondary button while paused.
+pub const RESUME_LABEL: &str = "Resume";
+
 fn text(title: impl Into<String>, detail: Option<String>, action: Option<String>, dismissable: bool) -> StripText {
     StripText { title: title.into(), detail, action, dismissable }
 }
@@ -46,6 +51,10 @@ pub fn strip_text(flow: &Flow) -> Option<StripText> {
         }
         State::Blocked(Blocker::CantSave) => {
             text("Can't save the recording", s("Your disk is full or Voxa's folder is locked"), s("Free up space"), true)
+        }
+        // Paused wins over offline: the mic is off either way, and Stop still sends (or keeps) it.
+        State::Recording { paused: true, .. } => {
+            text("Paused", s("The microphone is off"), s("Stop"), false)
         }
         State::Recording { offline: true, .. } => text("Offline, keeping it", None, s("Stop"), false),
         State::Recording { .. } => text("Listening", None, s("Stop"), false),

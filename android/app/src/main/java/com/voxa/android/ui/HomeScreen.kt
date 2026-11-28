@@ -78,6 +78,13 @@ fun HomeScreen(activity: MainActivity) {
     val problems = rememberProblems(activity)
     var recent by remember { mutableStateOf(emptyList<HistoryEntry>()) }
     var week by remember { mutableStateOf<WeekStats?>(null) }
+    // The second notifications ask: once the first dictation has worked (Android 13+, at most twice).
+    var askNotify by remember { mutableStateOf(false) }
+    val tick = activity.tick.intValue
+    LaunchedEffect(version, tick) {
+        askNotify = com.voxa.android.notify.Notifier.shouldAsk(activity) && !com.voxa.android.notify.Notifier.homeCardDismissed(activity) &&
+            withContext(Dispatchers.IO) { app.core.history("").any { it.status is uniffi.voxa_ffi.EntryStatus.Pasted } }
+    }
     LaunchedEffect(version) {
         withContext(Dispatchers.IO) {
             val offset = ZoneId.systemDefault().rules.getOffset(java.time.Instant.now()).totalSeconds / 60
@@ -91,6 +98,7 @@ fun HomeScreen(activity: MainActivity) {
             // The doodle band, the greeting, and a notice only while something is wrong.
             HomeHeader(activity, account, problems)
             Spacer(Modifier.height(24.dp))
+            if (askNotify) NotifyHomeCard(activity) { askNotify = false }
             StatsCard(week)
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

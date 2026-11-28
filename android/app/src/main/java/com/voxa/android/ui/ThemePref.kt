@@ -21,6 +21,8 @@ object ThemePref {
     fun set(c: Context, value: String) {
         c.getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putString(KEY, value).apply()
         current.value = value
+        // The keyboard rebuilds its view on its next show.
+        com.voxa.android.ime.KeyboardLook.bump(c)
     }
 
     fun label(value: String) = when (value) {

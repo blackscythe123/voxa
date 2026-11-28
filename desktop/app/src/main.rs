@@ -7,8 +7,11 @@ mod home;
 mod input;
 mod import;
 mod link;
+mod notify;
 mod prepare;
+mod redact;
 mod remote;
+mod talk;
 mod store;
 mod audio;
 mod stand_in;
@@ -23,6 +26,7 @@ mod os;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
@@ -43,7 +47,8 @@ use voxa_core::flow::Delivery;
 use voxa_chatgpt::{ChatGpt, Session as GptSession};
 use voxa_core::{Effect, Event, Flow, JobId, Mic, Network, Problem, Readiness, Session, State, Target, TranscribeError};
 
-pub(crate) const INK: u32 = 0x8F4C2C;
+/// The 1.0 sepia: 8.2:1 with white, 7.7:1 on the strip.
+pub(crate) const INK: u32 = 0x7A3F22;
 /// Below this peak RMS a recording is treated as silence and never sent. Measured: soft speech
 /// peaked at 0.0156, a silent take at 0.0079, so the cutoff sits well under soft speech.
 const SILENCE: f32 = 0.003;
@@ -55,6 +60,33 @@ fn invented_for_silence(text: &str, peak: f32) -> bool {
     peak < QUIET && SILENCE_PHRASES.contains(&text.trim().to_lowercase().as_str())
 }
 const RECHECK: Duration = Duration::from_secs(600);
+/// A check that finds the session ended is repeated this much later before Voxa says so: a
+/// false "signed out" is worse than a late one.
+const CONFIRM_EXPIRY: Duration = Duration::from_secs(120);
+
+/// Test only (with a separate VOXA_DATA folder): VOXA_TEST_SESSION=valid,expired,expired makes
+/// the next session checks answer that, in order, without asking ChatGPT, and
+/// VOXA_TEST_CONFIRM_SECS shortens the confirmation wait. Used to test the sign-in toast.
+fn test_session_answer() -> Option<Session> {
+    static SEQ: std::sync::Mutex<Option<VecDeque<String>>> = std::sync::Mutex::new(None);
+    std::env::var_os("VOXA_DATA")?;
+    let mut g = SEQ.lock().unwrap_or_else(|e| e.into_inner());
+    let q = g.get_or_insert_with(|| std::env::var("VOXA_TEST_SESSION").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
+    match q.pop_front()?.as_str() {
+        "valid" => Some(Session::Valid),
+        "expired" => Some(Session::Expired),
+        _ => None,
+    }
+}
+
+/// Test only (VOXA_TEST_RECHECK_SECS, with VOXA_DATA): check the session more often than every 10 minutes.
+fn recheck_every() -> Duration {
+    std::env::var("VOXA_TEST_RECHECK_SECS").ok().filter(|_| std::env::var_os("VOXA_DATA").is_some()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(RECHECK)
+}
+
+fn confirm_after() -> Duration {
+    std::env::var("VOXA_TEST_CONFIRM_SECS").ok().filter(|_| std::env::var_os("VOXA_DATA").is_some()).and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(CONFIRM_EXPIRY)
+}
 
 fn fake_mode() -> bool {
     std::env::var("VOXA_FAKE").is_ok_and(|v| !v.is_empty())
@@ -108,12 +140,61 @@ fn save_account(a: &voxa_chatgpt::Account) {
     }
 }
 
-fn now_ms() -> u64 {
+/// Goes up on every sign-in and sign-out. Work that started under an older value (a session
+/// check, an upload that can take minutes) never writes the session back, in memory or on disk.
+static SESSION_GEN: AtomicU64 = AtomicU64::new(0);
+
+fn session_gen() -> u64 {
+    SESSION_GEN.load(Ordering::SeqCst)
+}
+
+fn lock_session_file() -> std::sync::MutexGuard<'static, ()> {
+    voxa_chatgpt::SESSION_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Ask ChatGPT whether the saved session is good: (session, readiness, network, definite).
+/// `definite`: ChatGPT's own session call answered with no token (not a 401 or 403, which may be
+/// a rate limit; not "nothing saved", not Cloudflare, not offline), the only answer that may
+/// lead to a "signed out" toast. `generation`: [`session_gen`] when the check was asked for.
+fn ask_session(gpt: &ChatGpt, generation: u64) -> (Option<GptSession>, Session, Network, bool) {
+    let dir = data_dir();
+    // Carry an Electron sign-in over once, unless the user signed out here. Never for a test copy
+    // (VOXA_DATA): it must not pick up the real account and send a test take with it.
+    let carry_over = !dir.join("signed-out").exists() && std::env::var_os("VOXA_DATA").is_none();
+    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if carry_over { GptSession::from_electron_dir(&electron_dir()) } else { None });
+    if let (Some(s), Some(answer)) = (saved.clone(), test_session_answer()) {
+        os::log(&format!("test: session check answers {answer:?}"));
+        return (Some(s), answer, Network::Up, answer == Session::Expired);
+    }
+    use voxa_chatgpt::SessionAnswer;
+    match saved {
+        None => (None, Session::Expired, Network::Up, false),
+        Some(s) => match gpt.check(&s) {
+            SessionAnswer::Valid(a) => {
+                if session_gen() == generation {
+                    save_account(&a);
+                }
+                let s = keep_refreshed_cookies(gpt, s, generation);
+                (Some(s), Session::Valid, Network::Up, false)
+            }
+            SessionAnswer::NoToken => (Some(s), Session::Expired, Network::Up, true),
+            SessionAnswer::Failed(TranscribeError::SessionExpired | TranscribeError::SignedOut) => (Some(s), Session::Expired, Network::Up, false),
+            SessionAnswer::Failed(TranscribeError::Offline) => (Some(s), Session::Unknown, Network::Down, false),
+            SessionAnswer::Failed(_) => (Some(s), Session::Unknown, Network::Up, false),
+        },
+    }
+}
+
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// Where the current (Electron) Voxa saved its session. Used once, to carry a user's sign-in over.
 fn electron_dir() -> PathBuf {
+    // A test copy (VOXA_DATA) must never see the real old app: no sign-in, no History carried over.
+    if let Some(d) = std::env::var_os("VOXA_DATA") {
+        return PathBuf::from(d).join("no-old-app");
+    }
     app_data_root().join(if cfg!(target_os = "macos") { "Voxa" } else { "voxa" })
 }
 
@@ -151,7 +232,12 @@ pub(crate) struct Voxa {
     holding: Option<Instant>,
     menu_open: MenuId,
     menu_quit: MenuId,
+    /// When the mic last went live in this take (start or resume), for the stalled-mic watchdog.
     rec_started: Instant,
+    /// Talking time in this take; paused time is left out, also when stopped while paused.
+    talk: talk::TalkClock,
+    /// History entries being resent now, so one recording is never uploaded twice at once.
+    sending: std::collections::HashSet<u64>,
     frame: u64,
     tray: Option<TrayIcon>,
     hotkeys: GlobalHotKeyManager,
@@ -170,6 +256,12 @@ pub(crate) struct Voxa {
     gpt: Arc<ChatGpt>,
     session: Option<GptSession>,
     last_check: Instant,
+    /// Toasts (docs/notifications.md).
+    notifier: notify::Notifier,
+    /// What the last session check said for certain (never from a failed transcription).
+    session_known: Option<Session>,
+    /// A second check is due to confirm an expiry.
+    confirming: bool,
 }
 
 impl Voxa {
@@ -264,7 +356,8 @@ impl Voxa {
             let alive = this
                 .update(cx, |v, cx| {
                     // A take whose mic delivers nothing 0.7 s in: restart the stream once (no UI).
-                    if v.mic_on && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
+                    // Never while paused; after a resume it judges the time since the resume.
+                    if v.mic_on && !v.paused() && !v.mic_revived && v.rec_started.elapsed() > Duration::from_millis(700) {
                         if let Some(m) = v.mic.as_mut() {
                             if m.stalled() {
                                 v.mic_revived = true;
@@ -285,6 +378,7 @@ impl Voxa {
                         } else if ev.id == v.menu_quit {
                             os::log("quit from tray");
                             v.mic_test(false, cx);
+                            v.keep_unfinished_takes(cx);
                             cx.quit();
                         }
                     }
@@ -295,6 +389,9 @@ impl Voxa {
                     }
                     for cmd in link::take_commands() {
                         v.on_command(cmd, cx);
+                    }
+                    for click in notify::take_clicks() {
+                        v.on_notification(click, cx);
                     }
                     if os::OPEN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         os::log("another launch asked to open the window");
@@ -339,19 +436,7 @@ impl Voxa {
                             // The strip's graphics may be gone (sleep, charger, display change):
                             // build a fresh one now, hidden and without taking focus; it replaces
                             // the old one as this dictation's strip.
-                            if os::take_woke() {
-                                let me = cx.entity();
-                                let old = v.strip_window;
-                                cx.spawn(async move |_, cx| {
-                                    match rebuild_strip(&me, old, cx).await {
-                                        Some(h) => {
-                                            let _ = me.update(cx, |v, _| v.strip_window = Some(h));
-                                        }
-                                        None => os::log("FAIL rebuilding the strip"),
-                                    }
-                                })
-                                .detach();
-                            }
+                            v.rebuild_strip_if_woke(cx);
                             // The mic was missing or refused (at startup, or one failed start):
                             // look again now, so plugging it in or allowing it works without a restart.
                             if !matches!(v.flow.readiness().mic, Mic::Granted) && !fake_mode() {
@@ -391,7 +476,7 @@ impl Voxa {
                             v.handle(Event::Cancel, cx);
                         }
                     }
-                    if matches!(v.flow.state(), State::Recording { .. }) {
+                    if matches!(v.flow.state(), State::Recording { paused: false, .. }) {
                         let raw = if fake_mode() { stand_in::level(v.frame as f32 * 0.35) } else { audio::level() };
                         // Rises at once with the voice, settles over ~0.3 s, so the ink doesn't flicker.
                         let last = v.levels.back().copied().unwrap_or(0.0);
@@ -412,12 +497,13 @@ impl Voxa {
                         }
                     }
                     let offline = v.flow.readiness().network == Network::Down;
-                    let every = if offline { Duration::from_secs(5) } else { RECHECK };
+                    let every = if offline { Duration::from_secs(5) } else { recheck_every() };
                     let quiet = matches!(v.flow.state(), State::Idle | State::NeedsYou(_));
                     if !fake_mode() && v.last_check.elapsed() > every && quiet {
                         v.check_session(cx);
                     }
-                    if matches!(v.flow.state(), State::Recording { .. } | State::Transcribing { .. } | State::Delivering { .. }) {
+                    // Paused: the ink line and the timer hold still.
+                    if matches!(v.flow.state(), State::Recording { paused: false, .. } | State::Transcribing { .. } | State::Delivering { .. }) {
                         v.frame += 1;
                         cx.notify();
                     }
@@ -451,6 +537,8 @@ impl Voxa {
             menu_open: open_item.id().clone(),
             menu_quit: quit_item.id().clone(),
             rec_started: Instant::now(),
+            talk: talk::TalkClock::default(),
+            sending: std::collections::HashSet::new(),
             frame: 0,
             tray,
             hotkeys,
@@ -467,6 +555,9 @@ impl Voxa {
             gpt: Arc::new(ChatGpt::new()),
             session: None,
             last_check: Instant::now(),
+            notifier: notify::Notifier::new(),
+            session_known: None,
+            confirming: false,
         };
         if !fake_mode() {
             me.check_session(cx);
@@ -478,30 +569,17 @@ impl Voxa {
     fn check_session(&mut self, cx: &mut Context<Self>) {
         self.last_check = Instant::now();
         let gpt = self.gpt.clone();
+        let generation = session_gen();
         cx.spawn(async move |this, cx| {
-            let (session, state, network) = cx
-                .background_executor()
-                .spawn(async move {
-                    let dir = data_dir();
-                    // Carry an Electron sign-in over once, unless the user signed out here.
-                    let saved = GptSession::from_voxa_dir(&dir).or_else(|| if dir.join("signed-out").exists() { None } else { GptSession::from_electron_dir(&electron_dir()) });
-                    match saved {
-                        None => (None, Session::Expired, Network::Up),
-                        Some(s) => match gpt.account(&s) {
-                            Ok(a) => {
-                                save_account(&a);
-                                (Some(s), Session::Valid, Network::Up)
-                            }
-                            Err(TranscribeError::SignedOut | TranscribeError::SessionExpired) => (Some(s), Session::Expired, Network::Up),
-                            Err(TranscribeError::Offline) => (Some(s), Session::Unknown, Network::Down),
-                            Err(_) => (Some(s), Session::Unknown, Network::Up),
-                        },
-                    }
-                })
-                .await;
+            let (session, state, network, definite) = cx.background_executor().spawn(async move { ask_session(&gpt, generation) }).await;
             let _ = this.update(cx, |v, cx| {
+                if session_gen() != generation {
+                    os::log("session check outlived a sign-in or sign-out: ignored");
+                    return;
+                }
                 os::log(&format!("session check: {state:?}, network {network:?}"));
                 v.session = session;
+                v.watch_expiry(state, definite, cx);
                 let r = Readiness { session: state, network, ..v.flow.readiness() };
                 if r != v.flow.readiness() {
                     v.handle(Event::Readiness(r), cx);
@@ -511,14 +589,128 @@ impl Voxa {
         .detach();
     }
 
+    /// D1: say "You're signed out" only for a definite answer (ChatGPT's session call returned no
+    /// token, not Cloudflare, not a failed transcription), after the session was known good, and
+    /// once a second check 2 minutes later says the same. Once per expiry episode.
+    fn watch_expiry(&mut self, state: Session, definite: bool, cx: &mut Context<Self>) {
+        match state {
+            Session::Valid => {
+                if self.session_known == Some(Session::Expired) {
+                    // Signed back in after an expiry: the moment macOS may ask to notify.
+                    self.notifier.ask_permission();
+                }
+                self.session_known = Some(Session::Valid);
+                self.notifier.clear_signin();
+            }
+            Session::Expired if definite => {
+                let was_valid = self.session_known == Some(Session::Valid);
+                self.session_known = Some(Session::Expired);
+                if was_valid && !self.confirming {
+                    self.confirming = true;
+                    let wait = confirm_after();
+                    os::log(&format!("session ended: checking again in {} s before saying so", wait.as_secs()));
+                    let gpt = self.gpt.clone();
+                    let generation = session_gen();
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(wait).await;
+                        let (_, again, _, definite) = cx.background_executor().spawn(async move { ask_session(&gpt, generation) }).await;
+                        let _ = this.update(cx, |v, cx| {
+                            v.confirming = false;
+                            if session_gen() != generation {
+                                return;
+                            }
+                            os::log(&format!("session check (confirming): {again:?}, definite {definite}"));
+                            if again == Session::Expired && definite && v.session_known == Some(Session::Expired) {
+                                let waiting = v.history.entries.iter().filter(|e| matches!(&e.status, Status::Waiting(r) if r == "Sign in to send")).count() as u32;
+                                let looking = v.user_is_looking();
+                                v.notifier.signed_out(waiting, looking);
+                            } else if again == Session::Valid {
+                                v.watch_expiry(again, definite, cx);
+                            }
+                        });
+                    })
+                    .detach();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The strip shows a live take, or Voxa's window is in front: a toast waits until then. A
+    /// paused take, or a needs-you strip the user left up, does not count: they are elsewhere.
+    fn user_is_looking(&self) -> bool {
+        let strip = match self.flow.state() {
+            State::Idle | State::NeedsYou(_) => false,
+            State::Recording { paused, .. } => !paused,
+            _ => true,
+        };
+        strip || os::is_own_window(os::foreground())
+    }
+
+    fn on_notification(&mut self, click: notify::Click, cx: &mut Context<Self>) {
+        match click {
+            notify::Click::SignIn => self.sign_in(cx),
+            notify::Click::Open => self.open_home(Some(Page::History), cx),
+            notify::Click::Copy(id) => {
+                if let Some(e) = self.history.get(id).filter(|e| !e.text.is_empty()) {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(e.text.clone()));
+                    os::log("notification: dictation copied");
+                }
+                self.notifier.clear_dictations();
+            }
+            notify::Click::SendNow => {
+                self.notifier.clear_dictations();
+                // A dictation of this run that failed is retried by the flow; older ones are resent.
+                let failed = self.job_entries.keys().copied().find(|j| self.flow.job(*j).is_some_and(|j| matches!(j.state, voxa_core::JobState::Failed(_))));
+                if let Some(job) = failed {
+                    self.handle(Event::Retry { job }, cx);
+                }
+                self.resend_all(cx);
+            }
+        }
+    }
+
+    /// D2 / D3: a dictation that wasn't on screen finished. Ready: it waits in History, ready to
+    /// copy. Failed (not for sign-in, not "no speech"): it couldn't be sent.
+    fn notify_background(&mut self, job: JobId) {
+        use voxa_core::JobState;
+        let Some(j) = self.flow.job(job) else { return };
+        let Some(&id) = self.job_entries.get(&job) else { return };
+        let looking = self.user_is_looking();
+        match &j.state {
+            JobState::Ready(t) if !t.trim().is_empty() => {
+                let app = self.history.get(id).map(|e| e.app.clone()).unwrap_or_else(|| j.target.app.clone());
+                self.notifier.ready(id, &app, looking);
+            }
+            // Never for Cloudflare blocking: that stays on the strip and the Home bar.
+            JobState::Failed(e) if !e.needs_sign_in() && *e != TranscribeError::Server(204) && *e != TranscribeError::Blocked => self.notifier.not_sent(looking),
+            _ => {}
+        }
+    }
+
     fn handle(&mut self, event: Event, cx: &mut Context<Self>) {
-        os::log(&format!("event {event:?}"));
+        os::log(&format!("event {}", redact::event(&event)));
+        // A dictation finishing while another (or none) is on the strip: written in the background.
+        let background = match &event {
+            Event::Transcribed { job, .. } => Some(*job).filter(|j| !matches!(self.flow.state(), State::Transcribing { job: on } if on == j)),
+            _ => None,
+        };
+        if matches!(event, Event::Delivered { result: Delivery::Pasted, .. }) {
+            // The first dictation worked: the other moment macOS may ask to notify (once).
+            self.notifier.ask_permission();
+        }
         let effects = self.flow.handle(event);
-        os::log(&format!("  -> {:?} | effects {effects:?}", self.flow.state()));
+        os::log(&format!("  -> {:?} | effects {}", self.flow.state(), redact::effects(&effects)));
         for e in effects {
             self.run(e, cx);
         }
         self.sync_history();
+        if let Some(job) = background {
+            self.notify_background(job);
+        }
+        // A toast held back while the user was looking goes out once they aren't.
+        let looking = self.user_is_looking();
+        self.notifier.flush(looking);
         self.publish();
         self.sync_esc();
         self.sync_tray();
@@ -547,6 +739,7 @@ impl Voxa {
                 }
                 self.job_entries.insert(job, now_ms());
                 self.rec_started = Instant::now();
+                self.talk.start(self.rec_started);
                 self.frame = 0;
                 self.levels.clear();
                 if fake_mode() {
@@ -588,7 +781,7 @@ impl Voxa {
                 }
             }
             Effect::StopCapture { job } => {
-                self.job_secs.insert(job, self.rec_started.elapsed().as_secs_f32());
+                self.job_secs.insert(job, self.talk.stop(Instant::now()).as_secs_f32());
                 if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
                     self.mic_on = false;
                     let peak = m.finish();
@@ -597,6 +790,34 @@ impl Voxa {
                     if let Some(t) = m.trouble() {
                         os::log(&format!("  recording trouble: {t:?}"));
                         self.trouble.insert(job, t);
+                    }
+                }
+            }
+            Effect::PauseCapture { .. } => {
+                self.talk.pause(Instant::now());
+                if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                    m.pause();
+                    os::log(&format!("  mic paused after {:.1} s of talking", self.talk.total(Instant::now()).as_secs_f32()));
+                }
+            }
+            Effect::ResumeCapture { .. } => {
+                self.mic_revived = false;
+                // The PC may have slept during the pause: the strip's graphics can be gone.
+                self.rebuild_strip_if_woke(cx);
+                if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                    match m.resume() {
+                        Ok(()) => {
+                            // Counted from when the mic is really back (reopening can take
+                            // half a second), for the talking time and the watchdog.
+                            self.rec_started = Instant::now();
+                            self.talk.resume(self.rec_started);
+                            os::log("  mic resumed");
+                        }
+                        Err(e) => {
+                            // Like an interruption: finish and send what was recorded.
+                            os::log(&format!("  mic resume failed: {e:?}; sending what was recorded"));
+                            self.handle(Event::Stop, cx);
+                        }
                     }
                 }
             }
@@ -632,12 +853,13 @@ impl Voxa {
                 let app = self.flow.job(job).map(|j| j.target.app.clone()).unwrap_or_default();
                 let session = self.session.clone();
                 let gpt = self.gpt.clone();
+                let generation = session_gen();
                 cx.spawn(async move |this, cx| {
-                    let result = cx
+                    let (result, refreshed) = cx
                         .background_executor()
                         .spawn(async move {
-                            let Some(session) = session else { return Err(TranscribeError::SignedOut) };
-                            let Some(audio) = path.and_then(|p| prepare::audio_for_upload(&p)) else { return Err(TranscribeError::Server(0)) };
+                            let Some(session) = session else { return (Err(TranscribeError::SignedOut), None) };
+                            let Some(audio) = path.and_then(|p| prepare::audio_for_upload(&p)) else { return (Err(TranscribeError::Server(0)), None) };
                             // A dropped connection is common on flaky Wi-Fi: try twice more before
                             // calling it offline.
                             let mut result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
@@ -657,12 +879,18 @@ impl Voxa {
                                 std::thread::sleep(Duration::from_millis(wait));
                                 result = gpt.transcribe(&session, audio.clone(), "recording.wav", "audio/wav");
                             }
-                            result.map(|t| prepare::finish_text(t, &data_dir(), &app))
+                            let sent = session.cookie_header.clone();
+                            let kept = keep_refreshed_cookies(&gpt, session, generation);
+                            let refreshed = (kept.cookie_header != sent).then_some((sent, kept));
+                            (result.map(|t| prepare::finish_text(t, &data_dir(), &app)), refreshed)
                         })
                         .await;
+                    if let Some((sent, kept)) = refreshed {
+                        let _ = this.update(cx, |v, _| v.adopt_refreshed(generation, &sent, kept));
+                    }
                     let result = match result {
                         Ok(t) if invented_for_silence(&t, peak) => {
-                            os::log(&format!("  dropped {t:?}: near-silent take (peak {peak:.4})"));
+                            os::log(&format!("  dropped {}: near-silent take (peak {peak:.4})", redact::text(&t)));
                             Ok(String::new())
                         }
                         other => other,
@@ -749,7 +977,7 @@ impl Voxa {
             }
             Effect::SaveJob { job } => {
                 if let Some(j) = self.flow.job(job) {
-                    os::log(&format!("  job {:?} for {} -> {:?}", j.id, j.target.app, j.state));
+                    os::log(&format!("  job {:?} for {} -> {}", j.id, j.target.app, redact::job_state(&j.state)));
                 }
             }
         }
@@ -812,6 +1040,43 @@ impl Voxa {
         }
     }
 
+    /// Quitting mid-take (a paused take can sit for hours): finish the recording file and keep
+    /// the take in History as "Not sent", ready for Send now, instead of losing it.
+    fn keep_unfinished_takes(&mut self, cx: &mut Context<Self>) {
+        use voxa_core::JobState;
+        if matches!(self.flow.state(), State::Recording { .. }) {
+            if let Some(m) = self.mic.as_mut().filter(|_| self.mic_on) {
+                self.mic_on = false;
+                m.finish();
+            }
+        }
+        let jobs: Vec<voxa_core::Job> = self.flow.jobs().cloned().collect();
+        let mut kept = 0;
+        for job in jobs {
+            if !matches!(job.state, JobState::Recording | JobState::Transcribing) {
+                continue;
+            }
+            let (Some(&id), Some(audio)) = (self.job_entries.get(&job.id), self.audio_paths.get(&job.id).cloned()) else { continue };
+            let secs = self.job_secs.get(&job.id).copied().unwrap_or_else(|| self.talk.total(Instant::now()).as_secs_f32());
+            self.history.upsert(Entry {
+                id,
+                app: job.target.app.clone(),
+                text: String::new(),
+                secs,
+                status: Status::Waiting("Not sent".into()),
+                audio: Some(audio),
+                started_in: job.started_in.as_ref().map(|t| t.app.clone()),
+                via: None,
+            });
+            kept += 1;
+        }
+        if kept > 0 {
+            self.history.save();
+            os::log(&format!("quit mid-take: {kept} kept in History as not sent"));
+        }
+        cx.notify();
+    }
+
     /// Whether a history entry belongs to a dictation the core is still handling.
     pub(crate) fn is_live(&self, id: u64) -> bool {
         use voxa_core::JobState;
@@ -829,6 +1094,11 @@ impl Voxa {
         if page == Some(Page::Settings) {
             c.arg("--page=settings");
         }
+        if page == Some(Page::History) {
+            c.arg("--page=history");
+        }
+        // The user is looking at Voxa now: its dictations notification has done its job.
+        self.notifier.clear_dictations();
         if page.is_none() && !self.settings.onboarded {
             c.arg("--tour");
         }
@@ -843,6 +1113,7 @@ impl Voxa {
         let (session, online, mic) = link::Live::from_readiness(self.flow.readiness());
         let live_ids = self.job_entries.values().copied().filter(|id| self.is_live(*id)).collect();
         let state = match self.flow.state() {
+            State::Recording { paused: true, .. } => "paused",
             State::Recording { .. } => "recording",
             State::Transcribing { .. } | State::Delivering { .. } => "writing",
             State::Delivered { .. } => "pasted",
@@ -860,7 +1131,11 @@ impl Voxa {
 
     fn on_command(&mut self, cmd: link::Command, cx: &mut Context<Self>) {
         use link::Command::*;
-        os::log(&format!("window asks: {}", match &cmd { SetHotkey(_) => "SetHotkey".into(), c => format!("{c:?}") }));
+        os::log(&format!("window asks: {}", match &cmd {
+            SetHotkey(_) => "SetHotkey".into(),
+            EditEntry(id, text) => format!("EditEntry({id}, {})", redact::text(text)),
+            c => format!("{c:?}"),
+        }));
         match cmd {
             SignIn => self.sign_in(cx),
             SignOut => self.sign_out(cx),
@@ -916,19 +1191,41 @@ impl Voxa {
     }
 
     pub(crate) fn sign_in(&mut self, cx: &mut Context<Self>) {
-        let _ = std::fs::remove_file(data_dir().join("signed-out"));
+        {
+            let _g = lock_session_file();
+            // Nothing refreshed for the session before this sign-in may be saved after it.
+            SESSION_GEN.fetch_add(1, Ordering::SeqCst);
+            self.gpt.clear_refreshed();
+            let _ = std::fs::remove_file(data_dir().join("signed-out"));
+        }
         self.run(Effect::OpenSignIn, cx);
+    }
+
+    /// An upload or check refreshed the sign-in: use it in memory too, unless the user signed
+    /// out or in since it started, or the session changed meanwhile.
+    fn adopt_refreshed(&mut self, generation: u64, sent: &str, refreshed: GptSession) {
+        if session_gen() == generation && self.session.as_ref().is_some_and(|s| s.cookie_header == sent) {
+            self.session = Some(refreshed);
+        }
     }
 
     pub(crate) fn sign_out(&mut self, cx: &mut Context<Self>) {
         let dir = data_dir();
+        let g = lock_session_file();
+        // Checks and uploads still running must never write this session back.
+        SESSION_GEN.fetch_add(1, Ordering::SeqCst);
+        self.gpt.clear_refreshed();
         let _ = std::fs::remove_file(dir.join("session.json"));
         // The sign-in window's cookies too, so the next sign-in really asks.
         let _ = std::fs::remove_dir_all(dir.join("webview"));
         let _ = std::fs::write(dir.join("signed-out"), b"");
+        drop(g);
         let _ = std::fs::remove_file(dir.join("account.json"));
         let _ = std::fs::remove_file(dir.join("avatar.png"));
         self.session = None;
+        // On purpose: never a "signed out" toast, and any showing one goes.
+        self.session_known = None;
+        self.notifier.clear_signin();
         os::log("signed out");
         let r = Readiness { session: Session::Expired, ..self.flow.readiness() };
         self.handle(Event::Readiness(r), cx);
@@ -992,20 +1289,33 @@ impl Voxa {
             self.sign_in(cx);
             return;
         };
+        if !self.sending.insert(id) {
+            os::log(&format!("resend {id}: already being sent"));
+            return;
+        }
         self.history.upsert(Entry { status: Status::Waiting("Writing it out".into()), ..entry.clone() });
         cx.notify();
         let gpt = self.gpt.clone();
         let app = entry.app.clone();
+        let generation = session_gen();
         cx.spawn(async move |this, cx| {
-            let result = cx
+            let (result, refreshed) = cx
                 .background_executor()
                 .spawn(async move {
-                    let bytes = prepare::audio_for_upload(&audio).ok_or(TranscribeError::Server(0))?;
+                    let Some(bytes) = prepare::audio_for_upload(&audio) else { return (Err(TranscribeError::Server(0)), None) };
                     let (name, mime) = if audio.extension().is_some_and(|e| e == "webm") { ("recording.webm", "audio/webm") } else { ("recording.wav", "audio/wav") };
-                    gpt.transcribe(&session, bytes, name, mime).map(|t| prepare::finish_text(t, &data_dir(), &app))
+                    let r = gpt.transcribe(&session, bytes, name, mime);
+                    let sent = session.cookie_header.clone();
+                    let kept = keep_refreshed_cookies(&gpt, session, generation);
+                    let refreshed = (kept.cookie_header != sent).then_some((sent, kept));
+                    (r.map(|t| prepare::finish_text(t, &data_dir(), &app)), refreshed)
                 })
                 .await;
             let _ = this.update(cx, |v, cx| {
+                v.sending.remove(&id);
+                if let Some((sent, kept)) = refreshed {
+                    v.adopt_refreshed(generation, &sent, kept);
+                }
                 os::log(&format!("resend {id}: {}", if result.is_ok() { "ok" } else { "failed" }));
                 let next = match result {
                     Ok(t) if !t.trim().is_empty() => Entry { text: t, status: Status::Ready, ..entry },
@@ -1043,7 +1353,7 @@ impl Voxa {
             .history
             .entries
             .iter()
-            .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && e.audio.as_ref().is_some_and(|a| a.exists()) && !self.is_live(e.id))
+            .filter(|e| matches!(e.status, Status::Waiting(_) | Status::Failed(_)) && e.audio.as_ref().is_some_and(|a| a.exists()) && !self.is_live(e.id) && !self.sending.contains(&e.id))
             .map(|e| e.id)
             .collect();
         for id in ids {
@@ -1082,9 +1392,37 @@ impl Voxa {
         cx.notify();
     }
 
-    /// Esc is bound only while recording, so Voxa never steals Esc from other apps.
+    fn paused(&self) -> bool {
+        matches!(self.flow.state(), State::Recording { paused: true, .. })
+    }
+
+    /// Talking time in this take: paused time is left out.
+    fn talk_time(&self) -> Duration {
+        self.talk.total(Instant::now())
+    }
+
+    /// After sleep, a charger or a display change the strip's graphics may be gone: build a fresh
+    /// one now, hidden and without taking focus; it replaces the old one as this dictation's strip.
+    fn rebuild_strip_if_woke(&mut self, cx: &mut Context<Self>) {
+        if os::take_woke() {
+            let me = cx.entity();
+            let old = self.strip_window;
+            cx.spawn(async move |_, cx| {
+                match rebuild_strip(&me, old, cx).await {
+                    Some(h) => {
+                        let _ = me.update(cx, |v, _| v.strip_window = Some(h));
+                    }
+                    None => os::log("FAIL rebuilding the strip"),
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// Esc is bound only while recording, so Voxa never steals Esc from other apps. Not while
+    /// paused: the user is working elsewhere then, and Esc would throw the whole take away.
     fn sync_esc(&mut self) {
-        let want = matches!(self.flow.state(), State::Recording { .. });
+        let want = matches!(self.flow.state(), State::Recording { paused: false, .. });
         if want != self.esc_bound {
             let r = if want { self.hotkeys.register(self.esc_key) } else { self.hotkeys.unregister(self.esc_key) };
             self.esc_bound = want && r.is_ok();
@@ -1094,6 +1432,7 @@ impl Voxa {
 
     fn sync_tray(&self) {
         let dot = match self.flow.state() {
+            State::Recording { paused: true, .. } => Some([0x8A, 0x8A, 0x8A]),
             State::Recording { .. } => Some([0xE5, 0x48, 0x3D]),
             State::Blocked(_) | State::NeedsYou(_) => Some([0xC9, 0x8A, 0x16]),
             _ if self.flow.readiness().blocker().is_some() => Some([0xC9, 0x8A, 0x16]),
@@ -1148,6 +1487,7 @@ fn button(id: &'static str, label: impl Into<gpui::SharedString>, primary: bool)
 fn glyph(state: &State, frame: u64) -> AnyElement {
     let ink: Hsla = rgb(INK).into();
     let (kind, color) = match state {
+        State::Recording { paused: true, .. } => ("pause", 0x8A8A8A),
         State::Recording { .. } => ("dot", 0xE5483D),
         State::Transcribing { .. } | State::Delivering { .. } => ("spin", INK),
         State::Delivered { .. } => ("check", 0x0F7B0F),
@@ -1170,6 +1510,18 @@ fn glyph(state: &State, frame: u64) -> AnyElement {
                         if i == 0 { p.move_to(q) } else { p.line_to(q) }
                     }
                     if let Ok(p) = p.build() { window.paint_path(p, color) }
+                }
+                "pause" => {
+                    for dx in [-3.5f32, 1.5] {
+                        let mut p = PathBuilder::fill();
+                        let (x, y) = (c.x + px(dx), c.y - px(5.));
+                        p.move_to(point(x, y));
+                        p.line_to(point(x + px(2.5), y));
+                        p.line_to(point(x + px(2.5), y + px(10.)));
+                        p.line_to(point(x, y + px(10.)));
+                        p.close();
+                        if let Ok(p) = p.build() { window.paint_path(p, color) }
+                    }
                 }
                 "spin" => {
                     let mut p = PathBuilder::stroke(px(2.));
@@ -1340,23 +1692,45 @@ impl Voxa {
         let text = strip_text(&self.flow);
 
         match &state {
-            State::Recording { job, .. } => {
+            State::Recording { job, paused, .. } => {
+                let paused = *paused;
                 let app = self.flow.job(*job).map(|j| j.target.app.clone()).unwrap_or_default();
-                let secs = self.rec_started.elapsed().as_secs();
-                row.push(div().text_size(px(12.)).text_color(rgb(0x5F5F5F)).child(app).into_any_element());
+                let secs = self.talk_time().as_secs();
+                row.push(div().text_size(px(12.)).text_color(rgb(0x555555)).child(app).into_any_element());
                 // This pass's levels: the last (tick + 1) ticks.
                 let tick = self.frame as usize % QUILL_CYCLE;
                 let pass: Vec<f32> = self.levels.iter().skip(self.levels.len().saturating_sub(tick + 1)).copied().collect();
-                row.push(ink_line(pass, tick));
+                if paused {
+                    // Frozen where it stopped, and faded: nothing is being heard.
+                    row.push(div().opacity(0.35).child(ink_line_faded(pass, tick, false)).into_any_element());
+                } else {
+                    row.push(ink_line(pass, tick));
+                }
                 row.push(div().w(px(36.)).child(format!("{}:{:02}", secs / 60, secs % 60)).into_any_element());
                 if let Some(t) = &text {
-                    if t.title != "Listening" {
+                    if paused {
+                        let mut col = div().flex().flex_col().text_size(px(12.)).child(div().child(t.title.clone()));
+                        if let Some(d) = t.detail.clone() {
+                            col = col.child(div().text_color(rgb(0x555555)).child(d));
+                        }
+                        row.push(col.into_any_element());
+                    } else if t.title != "Listening" {
                         row.push(div().text_size(px(12.)).text_color(rgb(0x7A5100)).child(t.title.clone()).into_any_element());
                     }
                 }
                 row.push(
                     button("cancel", "Cancel", false)
                         .on_click(cx.listener(|v, _: &ClickEvent, _, cx| v.handle(Event::Cancel, cx)))
+                        .into_any_element(),
+                );
+                let (id, label, ev) = if paused {
+                    ("resume", voxa_core::copy::RESUME_LABEL, Event::Resume)
+                } else {
+                    ("pause", voxa_core::copy::PAUSE_LABEL, Event::Pause)
+                };
+                row.push(
+                    button(id, label, false)
+                        .on_click(cx.listener(move |v, _: &ClickEvent, _, cx| v.handle(ev.clone(), cx)))
                         .into_any_element(),
                 );
                 row.push(
@@ -1369,7 +1743,7 @@ impl Voxa {
                 if let Some(t) = text {
                     let mut col = div().flex().flex_col().child(div().child(t.title.clone()));
                     if let Some(d) = t.detail.clone() {
-                        col = col.child(div().text_size(px(12.)).text_color(rgb(0x5F5F5F)).child(d));
+                        col = col.child(div().text_size(px(12.)).text_color(rgb(0x555555)).child(d));
                     }
                     row.push(col.into_any_element());
                     if matches!(state, State::Transcribing { .. }) {
@@ -1420,6 +1794,9 @@ impl Voxa {
 
 /// `voxa-desktop --window`: just the Voxa window. Exits when the window closes, returning its
 /// memory; the tray process keeps running.
+/// The display face, embedded once for both processes.
+static FRAUNCES: &[u8] = include_bytes!("../assets/Fraunces.ttf");
+
 fn run_window(tour: bool) {
     if !os::single_window_instance() {
         return; // already open: it was asked to come to the front
@@ -1427,7 +1804,7 @@ fn run_window(tour: bool) {
     Application::new().run(move |cx: &mut App| {
         os::show_in_dock();
         input::bind_keys(cx);
-        let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
+        let _ = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(FRAUNCES)]);
         let backend = cx.new(Backend::new);
         let start_tour = tour || !backend.read(cx).settings.onboarded;
         let mut first = Page::Home;
@@ -1581,13 +1958,49 @@ impl log::Log for GpuiLog {
     }
     fn log(&self, r: &log::Record) {
         if self.enabled(r.metadata()) {
-            os::log(&format!("[{} {}] {}", r.level(), r.target(), r.args()));
+            let msg = r.args().to_string();
+            // GPUI's Windows backend logs these three every time a window is closed: it looks the
+            // closed window up once more ("window not found"), then RevokeDragDrop and
+            // DestroyWindow find the handle already gone (0x80040102, 0x80070578). Harmless.
+            if is_window_close_noise(&msg) {
+                return;
+            }
+            os::log(&format!("[{} {}] {msg}", r.level(), r.target()));
         }
     }
     fn flush(&self) {}
 }
 
 static GPUI_LOG: GpuiLog = GpuiLog;
+
+fn is_window_close_noise(msg: &str) -> bool {
+    msg == "window not found" || msg.contains("0x80040102") || msg.contains("0x80070578")
+}
+
+/// ChatGPT re-issues the sign-in (90 days from now) as it's used: save it, or the saved sign-in
+/// expires 90 days after the original sign-in however much Voxa is used. One critical section
+/// (take, check, save) under the session file lock: nothing is saved after a sign-out or a new
+/// sign-in (`generation` changed, or the signed-out marker exists), and a header never replaces
+/// a newer one saved meanwhile. Returns the session to use. Logs no values.
+fn keep_refreshed_cookies(gpt: &voxa_chatgpt::ChatGpt, s: GptSession, generation: u64) -> GptSession {
+    let _g = lock_session_file();
+    let Some(header) = gpt.take_refreshed(&s.cookie_header) else { return s };
+    let dir = data_dir();
+    if session_gen() != generation || dir.join("signed-out").exists() {
+        os::log("sign-in refreshed after a sign-out or a new sign-in: not saved");
+        return s;
+    }
+    if GptSession::from_voxa_dir(&dir).is_some_and(|saved| saved.cookie_header != s.cookie_header) {
+        os::log("sign-in refreshed, but a newer one is saved already: kept that one");
+        return s;
+    }
+    let s = GptSession { cookie_header: header, ..s };
+    match s.save_to_voxa_dir(&dir) {
+        Ok(()) => os::log("sign-in refreshed by ChatGPT: saved"),
+        Err(e) => os::log(&format!("FAIL saving the refreshed sign-in: {e}")),
+    }
+    s
+}
 
 fn main() {
     if log::set_logger(&GPUI_LOG).is_ok() {
@@ -1606,7 +2019,7 @@ fn main() {
     let _ = std::fs::remove_file(os::log_path());
     os::log("voxa-desktop starting");
     Application::new().run(move |cx: &mut App| {
-        let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/Fraunces.ttf").as_slice())]);
+        let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(FRAUNCES)]);
         os::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
         let options = strip_options(strip_origin(cx));
         let prev = os::foreground() as usize;
@@ -1670,7 +2083,80 @@ fn main() {
                     v.handle(Event::Cancel, cx);
                 });
             }
+            // Test only (VOXA_TEST_PAUSE=<s> or <talk>,<paused>,<resumed> in seconds, and only with a
+            // separate VOXA_DATA folder): a real take that talks, pauses and resumes, then is
+            // CANCELLED, so nothing is ever sent or pasted. Logs Esc, the talking time and the file.
+            let pause_secs: Option<Vec<f32>> = std::env::var("VOXA_TEST_PAUSE")
+                .ok()
+                .and_then(|s| s.split(',').map(|x| x.trim().parse::<f32>().ok()).collect::<Option<Vec<f32>>>())
+                .map(|v| if v.len() == 1 { vec![v[0]; 3] } else { v })
+                .filter(|v| v.len() == 3 && std::env::var_os("VOXA_DATA").is_some());
+            if let (Some(secs), Ok(handle)) = (pause_secs, opened.as_ref()) {
+                let wait = |i: usize| Duration::from_secs_f32(secs[i].max(0.0));
+                let report = |v: &Voxa, at: &str| {
+                    let written = v.mic.as_ref().filter(|_| v.mic_on).map(|m| m.written_secs()).unwrap_or(0.0);
+                    os::log(&format!(
+                        "test: {at}: state {:?}, Esc bound {}, talking {:.2} s, file {:.2} s",
+                        v.flow.state(),
+                        v.esc_bound,
+                        v.talk_time().as_secs_f32(),
+                        written
+                    ));
+                };
+                cx.background_executor().timer(Duration::from_millis(1500)).await;
+                let fg = os::foreground();
+                let target = Target { app: os::app_name(fg), window: fg as u64 };
+                os::log("test: starting a take to pause and resume (will be cancelled)");
+                let _ = handle.update(cx, |v, _, cx| {
+                    let r = Readiness { session: Session::Valid, ..v.flow.readiness() };
+                    v.handle(Event::Readiness(r), cx);
+                    v.handle(Event::Hotkey { target }, cx);
+                });
+                cx.background_executor().timer(wait(0)).await;
+                let _ = handle.update(cx, |v, _, cx| {
+                    report(v, "before pause");
+                    v.handle(Event::Pause, cx);
+                    report(v, "paused");
+                });
+                cx.background_executor().timer(wait(1)).await;
+                // VOXA_TEST_PAUSE_END=stop: Stop while still paused (no session in a test folder,
+                // so nothing is sent) and log the take's seconds, which must leave the pause out.
+                if std::env::var("VOXA_TEST_PAUSE_END").is_ok_and(|e| e == "stop") {
+                    let _ = handle.update(cx, |v, _, cx| {
+                        report(v, "end of pause");
+                        let job = match v.flow.state() {
+                            State::Recording { job, .. } => Some(*job),
+                            _ => None,
+                        };
+                        v.handle(Event::Stop, cx);
+                        let secs = job.and_then(|j| v.job_secs.get(&j).copied()).unwrap_or(-1.0);
+                        os::log(&format!("test: stopped while paused: take {secs:.2} s"));
+                    });
+                    return;
+                }
+                let _ = handle.update(cx, |v, _, cx| {
+                    report(v, "end of pause");
+                    v.handle(Event::Resume, cx);
+                    report(v, "resumed");
+                });
+                cx.background_executor().timer(wait(2)).await;
+                let _ = handle.update(cx, |v, _, cx| {
+                    report(v, "before cancel");
+                    v.handle(Event::Cancel, cx);
+                });
+            }
         })
         .detach();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_gpuis_window_close_messages_are_dropped() {
+        assert!(super::is_window_close_noise("window not found"));
+        assert!(super::is_window_close_noise(r#"Error { code: HRESULT(0x80040102), message: "Invalid window handle" }"#));
+        assert!(super::is_window_close_noise(r#"Error { code: HRESULT(0x80070578), message: "Invalid window handle." }"#));
+        assert!(!super::is_window_close_noise("DirectX device lost"));
+    }
 }

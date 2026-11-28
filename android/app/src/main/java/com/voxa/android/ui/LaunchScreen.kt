@@ -43,7 +43,7 @@ import uniffi.voxa_ffi.splashSpec
 const val VOICE_LINE = "M2,20H14L18,8L24,34L30,4L36,36L42,14L46,24L50,20H62"
 
 /** Voxa's sepia: the app icon is this colour in both themes. */
-val BrandSepia = Color(0xFF8F4C2C)
+val BrandSepia = Color(0xFF7A3F22)
 
 /** The icon's own colours for the dark splash: its tile, an off white ink and its light sepia nib
  *  (docs/ui-mocks/v7-home-greeting-and-splash.html, "Dark mode"). */

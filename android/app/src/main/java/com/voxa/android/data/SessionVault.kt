@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -34,13 +35,24 @@ class SessionVault(context: Context) {
         return gen.generateKey()
     }
 
+    /** Atomic: written to a temporary file of its own, synced to disk, then renamed over the vault,
+     *  so a reader never sees half of one save and half of another. Callers serialise saves (VoxaApp's lock). */
+    @Synchronized
     fun save(s: Saved) {
         val plain = JSONObject().put("cookie_header", s.cookieHeader).put("user_agent", s.userAgent).toString().toByteArray()
         val c = Cipher.getInstance(TRANSFORM).apply { init(Cipher.ENCRYPT_MODE, key()) }
         val sealed = c.iv + c.doFinal(plain)
-        val tmp = File(file.path + ".tmp")
-        tmp.writeBytes(sealed)
-        tmp.renameTo(file)
+        val tmp = File.createTempFile("session.bin.", ".tmp", file.parentFile)
+        try {
+            FileOutputStream(tmp).use { out ->
+                out.write(sealed)
+                out.flush()
+                out.fd.sync()
+            }
+            check(tmp.renameTo(file)) { "rename failed" }
+        } finally {
+            tmp.delete()
+        }
     }
 
     fun load(): Saved? = runCatching {
@@ -51,6 +63,7 @@ class SessionVault(context: Context) {
         Saved(json.getString("cookie_header"), json.getString("user_agent"))
     }.getOrNull()
 
+    @Synchronized
     fun clear() {
         file.delete()
     }

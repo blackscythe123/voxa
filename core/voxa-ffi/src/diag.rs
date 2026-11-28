@@ -1,7 +1,7 @@
 //! Diagnostics from the Rust side, written to the app's log through a sink Kotlin installs.
 //!
-//! Privacy: never cookies, tokens, headers or session JSON; transcript text only as its length
-//! (plus at most the first 20 characters when the app is a debug build).
+//! Privacy: never cookies, tokens, headers or session JSON; transcript text only as its length,
+//! in every build.
 
 use std::sync::RwLock;
 
@@ -13,16 +13,15 @@ pub trait LogSink: Send + Sync {
 
 struct Sink {
     sink: Box<dyn LogSink>,
-    text_preview: bool,
 }
 
 static SINK: RwLock<Option<Sink>> = RwLock::new(None);
 
-/// Install the log sink. `text_preview`: also log the first 20 characters of transcripts (debug
-/// builds only).
+/// Install the log sink. `_text_preview` is ignored: transcripts are never logged, not even a
+/// preview in debug builds (kept so the Kotlin call stays the same).
 #[uniffi::export]
-pub fn set_log_sink(sink: Box<dyn LogSink>, text_preview: bool) {
-    *SINK.write().unwrap_or_else(|e| e.into_inner()) = Some(Sink { sink, text_preview });
+pub fn set_log_sink(sink: Box<dyn LogSink>, _text_preview: bool) {
+    *SINK.write().unwrap_or_else(|e| e.into_inner()) = Some(Sink { sink });
 }
 
 pub(crate) fn log(line: impl FnOnce() -> String) {
@@ -31,15 +30,9 @@ pub(crate) fn log(line: impl FnOnce() -> String) {
     }
 }
 
-/// A transcript, safe to log: its length, and a short preview only when allowed.
+/// A transcript, safe to log: its length only.
 pub(crate) fn text(t: &str) -> String {
-    let preview = SINK.read().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.text_preview);
-    if preview {
-        let head: String = t.chars().take(20).collect();
-        format!("<{} chars: {:?}{}>", t.chars().count(), head, if t.chars().count() > 20 { "..." } else { "" })
-    } else {
-        format!("<{} chars>", t.chars().count())
-    }
+    format!("<{} chars>", t.chars().count())
 }
 
 pub(crate) fn event(e: &crate::FlowEvent) -> String {

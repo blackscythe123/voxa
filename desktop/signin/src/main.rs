@@ -73,7 +73,8 @@ fn main() {
                             "user_agent": ua,
                             "captured_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
                         });
-                        let tmp = dir.join("session.json.tmp");
+                        // Its own temporary name: the main app may be saving a refreshed sign-in at the same moment.
+                        let tmp = dir.join(format!("session.json.signin-{}.tmp", std::process::id()));
                         if std::fs::write(&tmp, serde_json::to_vec_pretty(&saved).unwrap()).is_ok()
                             && std::fs::rename(&tmp, dir.join("session.json")).is_ok()
                         {
