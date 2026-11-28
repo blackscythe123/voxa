@@ -17,6 +17,8 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 png = "0.17"
 unicode-segmentation = "1"
+# The Open source licences page: its data is embedded gzipped (flate2 is already in GPUI's tree).
+flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["ico", "png", "webp", "jpeg"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 cpal = "0.15"

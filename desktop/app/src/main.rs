@@ -6,6 +6,7 @@
 mod greet;
 mod home;
 mod input;
+mod licences;
 mod import;
 mod link;
 mod notify;
@@ -2104,7 +2105,7 @@ fn run_window(tour: bool, splash: bool) {
         let backend = cx.new(Backend::new);
         let start_tour = tour || !backend.read(cx).settings.onboarded;
         let mut first = Page::Home;
-        // Developer switch: VOXA_PAGE=words | history | insights | settings | detail (newest dictation).
+        // Developer switch: VOXA_PAGE=words | history | insights | settings | licences | detail (newest dictation).
         // The tray asks for a page with --page=<name> (e.g. "Free up space" opens Settings).
         let asked = std::env::args().find_map(|a| a.strip_prefix("--page=").map(str::to_string));
         if let Some(p) = asked.or_else(|| std::env::var("VOXA_PAGE").ok()) {
@@ -2113,6 +2114,7 @@ fn run_window(tour: bool, splash: bool) {
                 "history" => Page::History,
                 "insights" => Page::Insights,
                 "settings" => Page::Settings,
+                "licences" => Page::Licences,
                 "detail" => backend.read(cx).history.entries.last().map(|e| Page::Detail(e.id)).unwrap_or(Page::History),
                 _ => first,
             };

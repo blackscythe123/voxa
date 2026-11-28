@@ -7938,6 +7938,7 @@ dependencies = [
  "core-foundation 0.10.0",
  "core-graphics 0.24.0",
  "cpal",
+ "flate2",
  "global-hotkey",
  "gpui",
  "hound",

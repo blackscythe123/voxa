@@ -47,6 +47,7 @@ const I_POWER: char = '\u{E7E8}';
 const I_CLOSE: char = '\u{E711}';
 const I_CHECK: char = '\u{E73E}';
 const I_DOWN: char = '\u{E70D}';
+const I_UP: char = '\u{E70E}';
 const I_TEXT: char = '\u{E8D2}';
 const I_SEND: char = '\u{E724}';
 const I_PLAY: char = '\u{E768}';
@@ -65,6 +66,8 @@ pub enum Page {
     Words,
     /// One dictation, opened from History or Home.
     Detail(u64),
+    /// Settings, Open source licences.
+    Licences,
 }
 
 pub struct Home {
@@ -118,6 +121,8 @@ pub struct Home {
     greet: Option<greet_view::Greet>,
     /// The written splash, on a cold open of the window.
     splash: Option<greet_view::SplashRun>,
+    /// Open source licences: the libraries whose licence text is open.
+    licence_open: std::collections::HashSet<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -258,6 +263,7 @@ impl Home {
             drawn_with: None,
             greet: None,
             splash: None,
+            licence_open: Default::default(),
         };
         // The system switched light/dark: follow it (if Appearance says so).
         cx.observe_window_appearance(window, |this, window, cx| {
@@ -296,6 +302,9 @@ impl Home {
         }
         if page == Page::Home && self.page != Page::Home {
             self.greet = None; // picked again when Home opens
+        }
+        if page == Page::Licences && self.page != Page::Licences {
+            self.licence_open.clear();
         }
         self.page = page;
         cx.notify();
@@ -632,7 +641,8 @@ fn secs_label(secs: f32) -> String {
 
 impl Home {
     fn nav_item(&self, id: &'static str, glyph: char, label: &'static str, page: Page, cx: &mut Context<Self>) -> AnyElement {
-        let on = self.page == page;
+        // The licences page belongs to Settings.
+        let on = self.page == page || (page == Page::Settings && self.page == Page::Licences);
         div()
             .id(id)
             .relative()
@@ -2373,6 +2383,14 @@ impl Home {
         out.push(
             card()
                 .mb(px(3.))
+                .child(icon('\u{E8A5}', 18.).w(px(20.)))
+                .child(row_text("Open source licences", "Voxa's notice and the libraries, fonts and models it is built with".into()))
+                .child(wbtn("open-licences", "View", false).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::Licences, cx))))
+                .into_any_element(),
+        );
+        out.push(
+            card()
+                .mb(px(3.))
                 .child(icon('\u{E946}', 18.).w(px(20.)))
                 .child(row_text("Your data", "Your words go to ChatGPT only while you dictate. Everything else stays on this PC.".into()))
                 .child(wbtn("open-logs", "Open data folder", false).on_click(cx.listener(|_, _: &ClickEvent, _, _| {
@@ -2384,6 +2402,120 @@ impl Home {
         out
     }
 }
+
+impl Home {
+    /// Settings, Open source licences: Voxa's NOTICE, then each library with its licence; a click
+    /// on a library shows its licence text (docs/guardrails.md#11-licences).
+    fn licences_page(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut out: Vec<AnyElement> = vec![
+            div()
+                .id("licences-back")
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_size(px(13.))
+                .text_color(rgb(p().accent))
+                .cursor_pointer()
+                .child(icon(I_BACK, 12.))
+                .child("Settings")
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go(Page::Settings, cx)))
+                .into_any_element(),
+            div().mt(px(8.)).text_size(px(28.)).line_height(px(36.)).font_weight(FontWeight::SEMIBOLD).child("Open source licences").into_any_element(),
+        ];
+        let Some(n) = crate::licences::get() else {
+            out.push(
+                div()
+                    .mt(px(12.))
+                    .text_size(px(14.))
+                    .text_color(rgb(p().text))
+                    .child("The licences could not be read. They are also in THIRD_PARTY_NOTICES.txt with Voxa's source code.")
+                    .into_any_element(),
+            );
+            return out;
+        };
+        out.push(section("Voxa").into_any_element());
+        out.push(
+            div()
+                .id("voxa-notice")
+                .p(px(16.))
+                .bg(rgb(p().card))
+                .border_1()
+                .border_color(rgba(p().card_border_a))
+                .rounded(px(4.))
+                .text_size(px(13.))
+                .line_height(px(20.))
+                .text_color(rgb(p().text))
+                .child(n.notice.trim_end().to_string())
+                .into_any_element(),
+        );
+        out.push(section(format!("Built with {} open source components", n.libraries.len())).into_any_element());
+        out.push(div().mt(px(-4.)).mb(px(8.)).text_size(px(12.)).text_color(rgb(p().muted)).child("Select one to read its licence.").into_any_element());
+        let mut rows: Vec<AnyElement> = Vec::with_capacity(n.libraries.len());
+        for (i, lib) in n.libraries.iter().enumerate() {
+            let open = self.licence_open.contains(&i);
+            let title = if lib.version.is_empty() { lib.name.clone() } else { format!("{} {}", lib.name, lib.version) };
+            let mut row = div()
+                .id(SharedString::from(format!("lib-{i}")))
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .px(px(16.))
+                .py(px(8.))
+                .cursor_pointer()
+                .hover(|s| s.bg(rgb(p().hover)))
+                .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).line_height(px(20.)).text_color(rgb(p().text)).child(title))
+                .child(div().text_size(px(12.)).text_color(rgb(p().muted)).child(crate::licences::plain_licence(&lib.licence)))
+                .child(icon(if open { I_UP } else { I_DOWN }, 10.).text_color(rgb(p().muted)))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if !this.licence_open.remove(&i) {
+                        this.licence_open.insert(i);
+                    }
+                    cx.notify();
+                }));
+            if i > 0 {
+                row = row.border_t_1().border_color(rgba(p().card_border_a));
+            }
+            let mut block = div().flex().flex_col().child(row);
+            if open {
+                let mut body = div().px(px(16.)).pb(px(12.)).flex().flex_col().gap(px(8.));
+                let what = if lib.source.is_empty() { lib.kind.clone() } else { format!("{}, {}", lib.kind, lib.source) };
+                body = body.child(div().text_size(px(12.)).text_color(rgb(p().muted)).child(what));
+                if !lib.note.is_empty() {
+                    body = body.child(div().text_size(px(13.)).text_color(rgb(p().text)).child(lib.note.clone()));
+                }
+                for (k, &t) in lib.texts.iter().enumerate() {
+                    let text: &'static str = n.texts[t].as_str();
+                    let (head, more) = crate::licences::preview(text);
+                    body = body.child(div().p(px(12.)).bg(rgb(p().page)).rounded(px(4.)).text_size(px(12.)).line_height(px(18.)).text_color(rgb(p().text)).child(head));
+                    if more {
+                        let name = format!("{}-{}-{k}", lib.name, lib.version);
+                        body = body.child(
+                            wbtn(SharedString::from(format!("lib-full-{i}-{k}")), "Open full text", false)
+                                .on_click(move |_, _, _| crate::licences::open_full(&name, text)),
+                        );
+                    }
+                }
+                block = block.child(body);
+            }
+            rows.push(block.into_any_element());
+        }
+        out.push(
+            div()
+                .id("licences-list")
+                .flex()
+                .flex_col()
+                .bg(rgb(p().card))
+                .border_1()
+                .border_color(rgba(p().card_border_a))
+                .rounded(px(4.))
+                .children(rows)
+                .into_any_element(),
+        );
+        out.push(div().h(px(24.)).into_any_element());
+        out
+    }
+}
+
 
 fn fmt_thousands(n: usize) -> String {
     let s = n.to_string();
@@ -2415,6 +2547,7 @@ impl Render for Home {
             Page::Insights => self.insights(cx),
             Page::Words => self.words_page(cx),
             Page::Detail(id) => self.detail(id, cx),
+            Page::Licences => self.licences_page(cx),
             _ => self.settings(cx),
         };
         let nav = div()
@@ -2436,7 +2569,8 @@ impl Render for Home {
             .child(self.nav_item("nav-settings", I_SETTINGS, "Settings", Page::Settings, cx));
         root.flex().child(nav).child(
             div()
-                .id("page")
+                // The licences page scrolls on its own, so it opens at the top and Settings keeps its place.
+                .id(if self.page == Page::Licences { "page-licences" } else { "page" })
                 .flex_1()
                 // Without this the column grows to its widest row and runs off the window.
                 .min_w(px(0.))

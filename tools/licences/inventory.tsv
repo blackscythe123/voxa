@@ -1,6 +1,6 @@
 # Every library, font, model and native library Voxa ships: kind, name, version, licence (SPDX), apps.
 # Written by tools/licences/generate.py; never edit by hand. tools/lint checks each licence and the fingerprint.
-# fingerprint 6fa6b6228a12fb3d5acf614cd95ccbfd909b64ece6606a3f46d1d6c31b026981
+# fingerprint 72a8223470a798bba03810265918e2313318283223551a994c4f2c7a4e6fd241
 Rust crate	adler2	2.0.1	0BSD OR MIT OR Apache-2.0	windows,macos
 Rust crate	aho-corasick	1.1.5	Unlicense OR MIT	windows,macos
 Rust crate	aligned	0.4.3	MIT OR Apache-2.0	windows,macos
