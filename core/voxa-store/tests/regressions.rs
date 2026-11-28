@@ -101,3 +101,30 @@ fn a_damaged_history_turns_off_pruning_and_orphan_deletion() {
     assert!(!h.may_delete_unlisted_audio("4.pcm"), "recorded before the damage: its entry may be in the lost part");
     assert!(h.may_delete_unlisted_audio("9999999999999-1.pcm"), "recorded after the damage was found");
 }
+
+/// The keyboard queues its History changes for a writer thread (its main thread never waits for
+/// the disk), and any read after that sees them, in order.
+#[test]
+fn queued_history_changes_apply_in_order_before_any_read() {
+    let dir = tmp("later");
+    for i in 0..50u64 {
+        History::edit_later(&dir, move |h| h.upsert(entry(i % 5, &format!("v{i}"))));
+    }
+    let texts: Vec<String> = History::edit(&dir, |h| (false, h.entries.iter().map(|e| e.text.clone()).collect()));
+    assert_eq!(texts, ["v45", "v46", "v47", "v48", "v49"]);
+    History::edit_later(&dir, |h| h.remove(0));
+    History::flush();
+    assert_eq!(History::load(&dir).entries.len(), 4, "flush writes what was queued");
+}
+
+/// A damaged History read again and again keeps one copy, not one per read.
+#[test]
+fn a_damaged_history_is_copied_aside_once() {
+    let dir = tmp("one-copy");
+    std::fs::write(dir.join("history.json"), b"[{\"id\": 1, \"app").unwrap();
+    for _ in 0..5 {
+        let _ = History::load(&dir);
+    }
+    let copies = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("history.broken-")).count();
+    assert_eq!(copies, 1);
+}

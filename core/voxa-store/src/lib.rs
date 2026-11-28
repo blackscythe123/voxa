@@ -99,6 +99,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// so nothing is lost when Voxa starts again from what it could read.
 fn keep_broken_copy(path: &Path) -> Option<PathBuf> {
     let stem = path.file_stem()?.to_str()?;
+    // Read again while it stays damaged: one copy is enough.
+    let bytes = std::fs::read(path).ok()?;
+    let prefix = format!("{stem}.broken-");
+    if let Ok(files) = std::fs::read_dir(path.parent()?) {
+        for f in files.flatten() {
+            let same_name = f.file_name().to_str().is_some_and(|n| n.starts_with(&prefix));
+            if same_name && f.metadata().is_ok_and(|m| m.len() == bytes.len() as u64) && std::fs::read(f.path()).is_ok_and(|b| b == bytes) {
+                return Some(f.path());
+            }
+        }
+    }
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let copy = path.with_file_name(format!("{stem}.broken-{ms}.json"));
     std::fs::copy(path, &copy).ok()?;
@@ -122,6 +133,39 @@ fn salvage_entries(bytes: &[u8]) -> Vec<Entry> {
 /// One lock for every read-modify-write of history.json in this process (Android's keyboard and
 /// app screens share the file).
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
+
+/// A change to History queued with [`History::edit_later`]: returns whether it changed anything.
+type LaterEdit = Box<dyn FnOnce(&mut History) -> bool + Send>;
+
+/// Changes waiting for the writer thread, oldest first. Every [`History::edit`] applies them first
+/// (under [`HISTORY_LOCK`]), so a reader always sees every change queued before it, in order.
+static LATER: Mutex<std::collections::VecDeque<(PathBuf, LaterEdit)>> = Mutex::new(std::collections::VecDeque::new());
+static LATER_READY: std::sync::Condvar = std::sync::Condvar::new();
+static WRITER: std::sync::Once = std::sync::Once::new();
+
+/// Apply every queued change. Call with [`HISTORY_LOCK`] held. Consecutive changes to one folder
+/// share one load and one save.
+fn apply_later_locked() {
+    loop {
+        let batch: Vec<(PathBuf, LaterEdit)> = LATER.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect();
+        if batch.is_empty() {
+            return;
+        }
+        let mut open: Option<(PathBuf, History, bool)> = None;
+        for (dir, f) in batch {
+            if open.as_ref().is_some_and(|(d, _, _)| *d != dir) {
+                if let Some((_, h, true)) = open.take() {
+                    let _ = h.save();
+                }
+            }
+            let (_, h, changed) = open.get_or_insert_with(|| (dir.clone(), History::load(&dir), false));
+            *changed |= f(h);
+        }
+        if let Some((_, h, true)) = open {
+            let _ = h.save();
+        }
+    }
+}
 
 /// How history.json read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,15 +215,42 @@ impl History {
         write_atomic(&self.path, &bytes)
     }
 
-    /// Load, change and save under the process-wide lock. `f` returns (changed, result).
+    /// Load, change and save under the process-wide lock. `f` returns (changed, result). Changes
+    /// queued with [`History::edit_later`] are applied first.
     pub fn edit<R>(dir: &Path, f: impl FnOnce(&mut History) -> (bool, R)) -> R {
         let _g = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        apply_later_locked();
         let mut h = Self::load(dir);
         let (changed, r) = f(&mut h);
         if changed {
             let _ = h.save();
         }
         r
+    }
+
+    /// Queue a change for a writer thread, so the caller (the keyboard's main thread) never waits
+    /// for the disk. Changes apply in the order they were queued, and any [`History::edit`] in
+    /// this process applies what is queued before it reads. `f` returns whether it changed
+    /// anything.
+    pub fn edit_later(dir: &Path, f: impl FnOnce(&mut History) -> bool + Send + 'static) {
+        LATER.lock().unwrap_or_else(|e| e.into_inner()).push_back((dir.to_path_buf(), Box::new(f)));
+        WRITER.call_once(|| {
+            let _ = std::thread::Builder::new().name("voxa-history".into()).spawn(|| loop {
+                {
+                    let q = LATER.lock().unwrap_or_else(|e| e.into_inner());
+                    let _q = LATER_READY.wait_while(q, |q| q.is_empty()).unwrap_or_else(|e| e.into_inner());
+                }
+                let _g = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                apply_later_locked();
+            });
+        });
+        LATER_READY.notify_one();
+    }
+
+    /// Apply every change queued with [`History::edit_later`] now.
+    pub fn flush() {
+        let _g = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        apply_later_locked();
     }
 
     /// Whether a recording no entry lists may be deleted (`file_name` starts with the ms it was
