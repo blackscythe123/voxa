@@ -118,11 +118,12 @@ fails unless the label is Open or Sign in.
 ## 5. Android
 
 **Decision.** Size and lean. Android is a small, low-RAM voice keyboard on the Rust core: the release arm64 APK
-stays under 6.0 MB, no new dependencies without the owner's OK, and no WorkManager (JobScheduler only).
+stays under 6.0 MB, no new dependencies without the owner's OK, no WorkManager (JobScheduler only),
+and no exact alarms (the birthday wish uses an inexact window alarm, owner decision 2026-11-28).
 
 **Why.** project_android_small_lean: a keyboard is always resident; every library costs size and memory.
 
-**Check** (`android-size`, `android-deps`, `android-workmanager`, `android.py`).
+**Check** (`android-size`, `android-deps`, `android-workmanager`, `android-exact-alarm`, `android.py`).
 
 - Size: the APK at `android/app/build/outputs/apk/release/*arm64*.apk`, or `--apk PATH`; the size
   is printed, and over 6,000,000 bytes fails. CI does not build the APK, so there the check prints
@@ -132,6 +133,9 @@ stays under 6.0 MB, no new dependencies without the owner's OK, and no WorkManag
   on `ALLOWED_DEPS` / `ALLOWED_PLUGINS`. A new library means adding it there with its reason.
 - WorkManager: `androidx.work`, `work-runtime`, `WorkManager`, `CoroutineWorker`, work requests,
   anywhere in the Android build files or sources.
+- Exact alarms: `setExact*(` and `setAlarmClock(` calls, and the `SCHEDULE_EXACT_ALARM` /
+  `USE_EXACT_ALARM` permissions, anywhere in the Android sources and manifest. Use
+  `AlarmManager.setWindow` (as `notify/BirthdayWish.kt` does) or JobScheduler.
 
 ## 6. Isolation
 

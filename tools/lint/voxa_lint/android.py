@@ -5,6 +5,9 @@
   android-deps         every dependency in android/app/build.gradle.kts is on ALLOWED_DEPS, every plugin
                        on ALLOWED_PLUGINS. A new library is an owner decision: add it here with the reason.
   android-workmanager  no WorkManager (androidx.work): background work uses JobScheduler.
+  android-exact-alarm  no exact alarms: no setExact*/setAlarmClock calls and no SCHEDULE_EXACT_ALARM or
+                       USE_EXACT_ALARM permission. The birthday wish uses an inexact window alarm
+                       (owner decision, 2026-11-28; notify/BirthdayWish.kt).
 """
 
 from __future__ import annotations
@@ -38,6 +41,22 @@ ALLOWED_DEPS = {
 ALLOWED_PLUGINS = {"libs.plugins.android.application", "libs.plugins.kotlin.android", "libs.plugins.kotlin.compose"}
 
 WORKMANAGER = re.compile(r"androidx\.work\b|work-runtime|\bWorkManager\b|\bCoroutineWorker\b|\bListenableWorker\b|\b(OneTime|Periodic)WorkRequest")
+
+
+EXACT_ALARM = re.compile(r"\.setExact\w*\s*\(|\.setAlarmClock\s*\(|\bSCHEDULE_EXACT_ALARM\b|\bUSE_EXACT_ALARM\b")
+
+
+def check_exact_alarm(ctx: Ctx) -> list[Violation]:
+    out = []
+    for rel in S.files(ctx.root, "android/app/src/**/*.kt", "android/app/src/**/*.xml"):
+        text = (ctx.root / rel).read_text(encoding="utf-8", errors="replace")
+        code = S.lex(text, "kotlin")[0] if rel.endswith(".kt") else text
+        for m in EXACT_ALARM.finditer(code):
+            line = code.count("\n", 0, m.start()) + 1
+            out.append(Violation("android-exact-alarm", rel, line, f"{m.group(0).strip()!r}: Rule: no exact alarms and no exact-alarm "
+                                 "permission; use an inexact window alarm (AlarmManager.setWindow) or JobScheduler "
+                                 "(docs/guardrails.md#5-android)", key=m.group(0).strip()))
+    return out
 
 
 def check_size(ctx: Ctx) -> list[Violation]:
@@ -98,4 +117,4 @@ def check_workmanager(ctx: Ctx) -> list[Violation]:
 
 
 def check(ctx: Ctx) -> list[Violation]:
-    return check_size(ctx) + check_deps(ctx) + check_workmanager(ctx)
+    return check_size(ctx) + check_deps(ctx) + check_workmanager(ctx) + check_exact_alarm(ctx)
