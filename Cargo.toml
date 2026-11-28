@@ -5,7 +5,7 @@ members = ["core/voxa-core", "core/voxa-chatgpt", "core/voxa-vad", "core/voxa-st
 [workspace.package]
 edition = "2024"
 version = "1.0.0"
-license = "MIT"
+license = "Apache-2.0"
 publish = false
 
 # Android's libvoxa_ffi.so (cargo ndk ... --profile release-android): as small as possible.

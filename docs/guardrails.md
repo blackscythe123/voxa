@@ -183,6 +183,16 @@ messages are already checked by a hook.)
   final path; and every write-temp-then-rename function uses a unique temp name (process id plus a
   counter or time), so two writers never clobber one temp file.
 
+## 9. Licence
+
+**Decision (owner, 2026-11-28):** Voxa is licensed Apache-2.0, with a `NOTICE` crediting
+Simiyon Vinscent Samuel L that anyone redistributing Voxa must carry. Releases before 1.0.0
+contained HeliBoard and were GPL-3.0; the code that remains is the owner's own.
+
+**Check:** `licence-consistent` (tools/lint/voxa_lint/licence.py) fails if `LICENSE` is not the
+Apache License 2.0, `NOTICE` is missing or doesn't name the author, `Cargo.toml`'s workspace
+licence isn't `Apache-2.0`, or the README's License section doesn't start with Apache-2.0.
+
 ## Open items found when the guardrails were added
 
 These are on the allow-list with their reasons and should be fixed, then deleted from it:

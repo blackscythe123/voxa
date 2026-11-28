@@ -3,7 +3,7 @@
 
     python tools/lint/run.py                 every rule on the repo (exit 1 on any violation)
     python tools/lint/run.py --self-test     prove each rule still catches its fixture violations
-    python tools/lint/run.py --only copy     one group: contrast copy privacy focus android isolation release robust
+    python tools/lint/run.py --only copy     one group: contrast copy privacy focus android isolation release robust licence
     python tools/lint/run.py --apk PATH      also check this APK's size (else a built one is found, or skipped)
     python tools/lint/run.py --require-apk   fail when there is no APK to measure
     python tools/lint/run.py --keys          show each violation's allow-list key
@@ -23,7 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from voxa_lint import android, contrast, copy_rules, focus, isolation, privacy, release, robust  # noqa: E402
+from voxa_lint import android, contrast, copy_rules, focus, isolation, licence, privacy, release, robust  # noqa: E402
 from voxa_lint.core import Ctx, Violation  # noqa: E402
 
 GROUPS = {
@@ -35,6 +35,7 @@ GROUPS = {
     "isolation": isolation.check,
     "release": release.check,
     "robust": robust.check,
+    "licence": licence.check,
 }
 
 
@@ -111,7 +112,7 @@ def main_self_test() -> int:
     rules = {r for r, _ in expected}
     every = {"contrast", "copy-emoji", "copy-dash", "copy-case", "copy-occasion", "privacy-log", "privacy-notify", "focus-steal",
              "focus-notify", "android-size", "android-deps", "android-workmanager", "android-exact-alarm", "isolation-env", "isolation-test-hook",
-             "release-latest", "robust-case-slice", "robust-unwrap", "robust-atomic-write"}
+             "release-latest", "robust-case-slice", "robust-unwrap", "robust-atomic-write", "licence-consistent"}
     for r in sorted(every - rules):
         ok = False
         print(f"FAIL rule {r} has no fixture proving it catches a violation")

@@ -48,3 +48,9 @@
 1 robust-case-slice desktop/app/src/ui.rs
 2 robust-unwrap core/voxa-demo/src/lib.rs
 2 robust-atomic-write desktop/app/src/ui.rs                         # direct settings.json write, fixed temp name
+
+# 9. licence (fixture: GPL LICENSE, no NOTICE, MIT Cargo.toml, GPL README)
+1 licence-consistent LICENSE
+1 licence-consistent NOTICE
+1 licence-consistent Cargo.toml
+1 licence-consistent README.md

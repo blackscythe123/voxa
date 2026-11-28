@@ -99,4 +99,6 @@ The earlier Electron app is in git history (removed in `110ea43`).
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Copyright 2026 Simiyon Vinscent Samuel L. Releases before 1.0.0 contained HeliBoard and were GPL-3.0.
