@@ -5,8 +5,11 @@
 ;
 ; Automatic updates: the tray runs this installer with /VERYSILENT ... /VOXAUPDATE=<from version>
 ; /MERGETASKS="!removeold" once its install gate holds (desktop/app/src/update.rs). Then Setup waits
-; for Voxa to exit by itself (it never kills a take), never asks for UAC, and starts Voxa again
-; with --background --updated, after a success and after a rollback alike.
+; up to 20 s for Voxa to exit by itself, never asks for UAC, and starts Voxa again (--updated, in
+; the background unless /VOXAOPEN=1), after a success and after a rollback alike.
+;
+; Release builds refuse placeholder update keys: ISCC stops below unless /DAllowPlaceholderKeys is
+; given (a local test installer only; it can never install an update and says so in Settings).
 
 ; The version comes from Cargo.toml (CI passes /DAppVersion). This default must equal the
 ; workspace version; the lint release-version-sync checks it.
@@ -14,6 +17,26 @@
 #define AppVersion "1.0.0"
 #endif
 #define Bin "..\..\target\release"
+
+; B1: an installer built with the all-zero placeholder update keys could never update itself, so
+; every copy handed out would be stranded. Read core/voxa-update/src/keys.rs and stop the build.
+#define KeysFile AddBackslash(SourcePath) + "..\..\core\voxa-update\src\keys.rs"
+#define PlaceholderKeys 0
+#define KeysHandle FileOpen(KeysFile)
+#if !KeysHandle
+  #error Cannot read core\voxa-update\src\keys.rs to check the update keys.
+#endif
+#sub ScanKeysLine
+  #define KeysLine FileRead(KeysHandle)
+  #if Pos('_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000"', KeysLine) > 0
+    #define public PlaceholderKeys 1
+  #endif
+#endsub
+#for {0; !FileEof(KeysHandle); 0} ScanKeysLine
+#expr FileClose(KeysHandle)
+#if PlaceholderKeys && !Defined(AllowPlaceholderKeys)
+  #error The update keys in core\voxa-update\src\keys.rs are still placeholders: this installer could never update. Add the real keys (docs/update-keys.md), or pass /DAllowPlaceholderKeys for a local test installer.
+#endif
 
 [Setup]
 AppId={{6F1C2E3A-8B7D-4C55-9E21-5A0D7C9B4F31}
@@ -73,10 +96,14 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Voxa.exe"; Flags: runhidden;
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+; Staged updates, install logs and update.log (never user data; History lives in %APPDATA%).
+Type: filesandordirs; Name: "{localappdata}\Voxa\updates"
 
 [Code]
 const
   OldUninstaller = '{commonpf64}\Voxa\Uninstall Voxa.exe';
+  // Win32 SW_SHOWNOACTIVATE (Inno Setup has no constant for it).
+  ShowNoActivate = 4;
 var
   AutostartOn: Boolean;
 
@@ -96,8 +123,9 @@ begin
   Result := ExpandConstant('{param:VOXAUPDATE|}') <> '';
 end;
 
-// An automatic update: Voxa quits by itself once its gate holds. Wait up to 20 s for both of its
-// mutexes to go before falling back to taskkill, so a take is never cut off.
+// An automatic update: Voxa quits by itself once its gate holds (no take, no upload, the window
+// already closed). Wait up to 20 s for both of its mutexes to go; only then fall back to taskkill.
+// Should that ever cut off a take, Voxa recovers it as "Not sent" at the next start.
 procedure WaitForVoxaToExit;
 var
   I: Integer;
@@ -141,9 +169,13 @@ begin
     ShellExec('runas', ExpandConstant(OldUninstaller), '/S', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
-// An automatic update starts Voxa again in the background (no window, no focus), whether the
-// install succeeded or rolled back, so the hotkey always comes back. [Run]'s postinstall entry is
-// skipped in silent mode.
+// An automatic update starts Voxa again, whether the install succeeded or rolled back, so the
+// hotkey always comes back. [Run]'s postinstall entry is skipped in silent mode.
+//  - /VOXAOPEN=1 ("Restart and update", the user is waiting): with its window.
+//  - otherwise (idle, lock, sign-in): in the background, no window. The show value is
+//    SW_SHOWNOACTIVATE, never SW_HIDE: Windows applies it to Voxa's first ShowWindow, and a hide
+//    there leaves the strip blank later; a no-activate show never takes the foreground.
+// Voxa never installs again at a start Setup made (--updated), so a rollback can't loop.
 procedure DeinitializeSetup;
 var
   Code: Integer;
@@ -153,7 +185,12 @@ begin
     Exit;
   try
     if FileExists(ExpandConstant('{app}\Voxa.exe')) then
-      Exec(ExpandConstant('{app}\Voxa.exe'), '--background --updated', '', SW_HIDE, ewNoWait, Code);
+    begin
+      if ExpandConstant('{param:VOXAOPEN|}') <> '' then
+        Exec(ExpandConstant('{app}\Voxa.exe'), '--updated', '', SW_SHOWNORMAL, ewNoWait, Code)
+      else
+        Exec(ExpandConstant('{app}\Voxa.exe'), '--background --updated', '', ShowNoActivate, ewNoWait, Code);
+    end;
   except
     // {app} is unknown if Setup stopped before it was set; nothing to start then.
   end;

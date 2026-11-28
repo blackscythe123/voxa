@@ -92,6 +92,8 @@ pub struct UpdateState {
     /// The version an install was last started for, and how many times.
     pub target: String,
     pub attempts: u32,
+    /// When the last install attempt started (ms), for the wait before a second one.
+    pub last_attempt_ms: u64,
     pub last_error: String,
     pub from_version: String,
     pub last_idle_install_ms: u64,
@@ -108,8 +110,21 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
+    /// update.json, or the defaults when there is none. A damaged file is kept aside as
+    /// update.broken-<ms>.json and logged (it holds the anti-replay serial and the attempt count),
+    /// never silently reset.
     pub fn load(dir: &Path) -> Self {
-        std::fs::read(dir.join("update.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let path = dir.join("update.json");
+        let Ok(bytes) = std::fs::read(&path) else { return Self::default() };
+        match serde_json::from_slice(&bytes) {
+            Ok(st) => st,
+            Err(e) => {
+                let aside = dir.join(format!("update.broken-{}.json", crate::now_ms()));
+                let kept = replace_file(&path, &aside).is_ok();
+                ulog(dir, &format!("update.json was damaged (line {}), {}; starting from defaults", e.line(), if kept { "kept aside" } else { "could not keep it aside" }));
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self, dir: &Path) {
@@ -143,25 +158,99 @@ pub fn ulog(dir: &Path, msg: &str) {
 
 // ── the installer handoff ────────────────────────────────────────────────
 
+/// How Setup starts Voxa again after an automatic update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relaunch {
+    /// Tray "Quit Voxa": the user asked it to close, so it stays closed.
+    No,
+    /// An unattended install (idle, lock, sign-in): back in the background, no window, no focus.
+    Background,
+    /// "Restart and update": the user is waiting for it, so Voxa comes back with its window.
+    Window,
+}
+
 /// The installer's command line, exactly: silent, no restart prompt, no cancel, never the UAC
-/// "remove the old Voxa" task, logged next to the staged file. `relaunch: false` (tray Quit)
-/// tells Setup not to start Voxa again.
-pub fn installer_args(from: &str, version: &str, log: &Path, relaunch: bool) -> Vec<String> {
+/// "remove the old Voxa" task, logged next to the staged file, and how to start Voxa again.
+pub fn installer_args(from: &str, version: &str, log: &Path, relaunch: Relaunch) -> Vec<String> {
     let mut a: Vec<String> = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL", "/SP-"].iter().map(|s| s.to_string()).collect();
     a.push(format!("/VOXAUPDATE={from}"));
     a.push("/MERGETASKS=\"!removeold\"".into());
     a.push(format!("/LOG=\"{}\"", log.display()));
     let _ = version;
-    if !relaunch {
-        a.push("/VOXANORELAUNCH=1".into());
+    match relaunch {
+        Relaunch::No => a.push("/VOXANORELAUNCH=1".into()),
+        Relaunch::Window => a.push("/VOXAOPEN=1".into()),
+        Relaunch::Background => {}
     }
     a
+}
+
+/// "Restart and update" first asks the window to close itself (live.json `close_for_update`), so
+/// it never sits frozen while Setup waits and then force-closes it. Setup starts once the window
+/// is gone, or after this long at most.
+pub const RESTART_WAIT: Duration = Duration::from_secs(10);
+
+pub fn restart_ready(window_open: bool, waited: Duration) -> bool {
+    !window_open || waited >= RESTART_WAIT
+}
+
+/// Whether "Update automatically" is on. A settings file that exists but can't be read right now
+/// (antivirus, OneDrive) counts as OFF: an install the user turned off never happens by accident.
+/// No file at all is a fresh install: the default (on).
+pub fn auto_update_setting(load: &Result<Option<crate::store::Settings>, String>) -> bool {
+    match load {
+        Ok(Some(s)) => s.auto_update,
+        Ok(None) => crate::store::Settings::default().auto_update,
+        Err(_) => false,
+    }
+}
+
+/// An offer for this version or older (installed by hand meanwhile) is no offer: drop it and its
+/// staged file. True when something was dropped.
+pub fn drop_stale_offer(st: &mut UpdateState) -> bool {
+    let stale = st.offer.as_ref().is_some_and(|o| Version::parse(&o.version).is_none_or(|v| v <= current()));
+    if stale {
+        st.offer = None;
+        if let Some(p) = st.staged_path.take() {
+            let _ = std::fs::remove_file(p);
+        }
+        if st.last_result == "ready" || st.last_result == "available" || st.last_result == "manual_only" {
+            st.last_result = "up_to_date".into();
+        }
+    }
+    stale
+}
+
+/// Right before Setup starts: one quick conditional look at the feed. When the owner paused the
+/// feed (the kill switch) or replaced the release, the staged file is dropped and nothing installs.
+/// No network is fine: the staged file was verified against a signed feed.
+fn confirm_before_install(st: &mut UpdateState, dir: &Path) -> bool {
+    let Some(offer) = st.offer.clone() else { return false };
+    let (origin, keys) = origin_and_keys();
+    let Ok(client) = Client::quick(origin, env!("CARGO_PKG_VERSION"), PLATFORM) else { return true };
+    match client.confirm_offer(&keys, Channel::Desktop, &mut st.check, &offer) {
+        voxa_update::fetch::Confirm::Withdrawn => {
+            ulog(dir, &format!("not installing {}: the feed no longer offers it (paused or replaced)", offer.version));
+            st.offer = None;
+            if let Some(p) = st.staged_path.take() {
+                let _ = std::fs::remove_file(p);
+            }
+            st.last_result = "up_to_date".into();
+            st.save(dir);
+            false
+        }
+        voxa_update::fetch::Confirm::StillOffered => true,
+        voxa_update::fetch::Confirm::Unknown => {
+            ulog(dir, "couldn't reach the feed right before installing; the staged file is verified, going ahead");
+            true
+        }
+    }
 }
 
 /// The one place the installer is started. The gate must hold and the staged file must match
 /// the verified offer again right now (the folder is user-writable); then attempts go up before
 /// Setup starts, so a crash mid-install still counts.
-pub fn launch_installer(st: &mut UpdateState, dir: &Path, inputs: &Inputs, on_request: bool, relaunch: bool) -> Result<(), String> {
+pub fn launch_installer(st: &mut UpdateState, dir: &Path, inputs: &Inputs, on_request: bool, relaunch: Relaunch) -> Result<(), String> {
     let gate = if on_request { policy::can_install_on_request(inputs) } else { policy::can_install_now(inputs) };
     gate.map_err(|b| format!("waiting: {}", b.code()))?;
     let offer = st.offer.clone().ok_or("no offer")?;
@@ -179,9 +268,10 @@ pub fn launch_installer(st: &mut UpdateState, dir: &Path, inputs: &Inputs, on_re
         st.attempts = 0;
     }
     st.attempts += 1;
+    st.last_attempt_ms = crate::now_ms();
     st.from_version = from.clone();
     st.save(dir);
-    ulog(dir, &format!("installing {} over {from} (attempt {}, relaunch {relaunch})", offer.version, st.attempts));
+    ulog(dir, &format!("installing {} over {from} (attempt {}, relaunch {relaunch:?})", offer.version, st.attempts));
     os::spawn_detached(&path, &args).map_err(|e| format!("couldn't start the installer: {}", e.kind()))
 }
 
@@ -222,9 +312,11 @@ pub fn after_restart(st: &mut UpdateState, dir: &Path, running: &str) -> AfterRe
 
 /// At a `--background` start (Windows sign-in), before the shortcut is registered and before
 /// anything shows: install a verified staged update, if the gate allows. True: Setup was started
-/// and this process must exit now.
-pub fn apply_at_background_start() -> bool {
-    if !INSTALLS {
+/// and this process must exit now. `updated`: Setup itself started this process (`--updated`),
+/// after a success or a rollback; it never installs again straight away (a rollback would use up
+/// the second attempt a minute later).
+pub fn apply_at_background_start(updated: bool) -> bool {
+    if !INSTALLS || updated {
         return false;
     }
     let dir = updates_dir();
@@ -233,7 +325,8 @@ pub fn apply_at_background_start() -> bool {
     if Version::parse(&offer.version).is_none_or(|v| v <= current()) || st.staged_path.is_none() {
         return false;
     }
-    let settings = crate::store::Settings::load(&crate::data_dir());
+    // Unreadable settings count as "Update automatically" off.
+    let auto_update = auto_update_setting(&crate::store::Settings::try_load(&crate::data_dir()));
     let inputs = Inputs {
         moment: Moment::BackgroundStart,
         flow: policy::Flow::Idle,
@@ -244,20 +337,54 @@ pub fn apply_at_background_start() -> bool {
         window_open: os::window_process_running(),
         strip_visible: false,
         since_hotkey_ms: u64::MAX,
-        auto_update: settings.auto_update,
+        auto_update,
         paused: st.paused,
         auto_allowed: offer.auto,
         test_copy: std::env::var_os("VOXA_DATA").is_some(),
         installed_copy: installed_copy(),
         attempts: if st.target == offer.version { st.attempts } else { 0 },
+        since_attempt_ms: since_attempt(&st, &offer.version),
     };
-    match launch_installer(&mut st, &dir, &inputs, false, true) {
+    if let Err(b) = policy::can_install_now(&inputs) {
+        ulog(&dir, &format!("not installing at sign-in: waiting: {}", b.code()));
+        return false;
+    }
+    if !confirm_before_install(&mut st, &dir) {
+        return false;
+    }
+    match launch_installer(&mut st, &dir, &inputs, false, Relaunch::Background) {
         Ok(()) => true,
         Err(why) => {
             ulog(&dir, &format!("not installing at sign-in: {why}"));
             false
         }
     }
+}
+
+/// Setup writes install-<version>.log on every update; damaged state is kept as
+/// update.broken-<ms>.json. Keep the newest few of each so the folder never grows without end.
+pub fn prune_logs(dir: &Path, keep: usize) {
+    for prefix in ["install-", "update.broken-"] {
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+            .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+            .collect();
+        files.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, p) in files.into_iter().skip(keep) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+/// Milliseconds since the last install attempt at `version` (u64::MAX when there was none).
+fn since_attempt(st: &UpdateState, version: &str) -> u64 {
+    if st.target != version || st.attempts == 0 || st.last_attempt_ms == 0 {
+        return u64::MAX;
+    }
+    crate::now_ms().saturating_sub(st.last_attempt_ms)
 }
 
 /// Started at Windows sign-in (`--background`, also after an update with `--updated`): never
@@ -343,6 +470,8 @@ pub struct Updater {
     started: Instant,
     started_ms: u64,
     pub mac_access_bar: bool,
+    /// "Restart and update" was pressed: the window was asked to close; Setup starts once it has.
+    restart_requested: Option<Instant>,
 }
 
 /// An automatic check goes to the network only when this install's daily slot (or a backoff
@@ -364,8 +493,12 @@ impl Updater {
             AfterRestart::Failed { to, attempts } => ulog(&dir, &format!("the update to {to} didn't finish (attempt {attempts}); still on {}", env!("CARGO_PKG_VERSION"))),
             AfterRestart::Nothing => {}
         }
+        if drop_stale_offer(&mut state) {
+            ulog(&dir, "dropped an offer for this version or older (installed meanwhile)");
+        }
         let keep = state.staged_path.clone();
         stage::clean_except(&dir, keep.as_deref());
+        prune_logs(&dir, 3);
         #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
         let mut mac_access_bar = false;
         #[cfg(target_os = "macos")]
@@ -394,6 +527,7 @@ impl Updater {
             started: now,
             started_ms: crate::now_ms(),
             mac_access_bar,
+            restart_requested: None,
         }
     }
 
@@ -411,8 +545,10 @@ impl Updater {
         let offer = self.state.offer.as_ref();
         let gave_up = !self.state.target.is_empty() && policy::attempts_exhausted(self.state.attempts);
         let ready = self.state.last_result == "ready";
+        let status = if updates_off() { UPDATES_OFF.to_string() } else { status_line(&self.state, auto, self.checking, self.downloading.as_deref(), self.manual, crate::now_ms()) };
         UpdateView {
-            status: status_line(&self.state, auto, self.checking, self.downloading.as_deref(), self.manual, crate::now_ms()),
+            status,
+            close_for_update: self.restart_requested.is_some(),
             checking: self.checking,
             manual: self.manual,
             can_restart: INSTALLS && ready && !auto && !gave_up,
@@ -457,9 +593,36 @@ fn result_code(e: &UpdateError) -> &'static str {
     }
 }
 
+/// A build whose update keys are the all-zero placeholders can never verify a feed. It says so
+/// instead of showing "Couldn't check" forever, and never goes to the network. A test copy with a
+/// local TEST feed and key (test_hooks) still checks.
+pub fn updates_off() -> bool {
+    updates_off_when(keys::placeholders(), crate::test_hooks() && std::env::var_os("VOXA_TEST_UPDATE_FEED").is_some())
+}
+
+pub fn updates_off_when(placeholder_keys: bool, test_feed: bool) -> bool {
+    placeholder_keys && !test_feed
+}
+
+pub const UPDATES_OFF: &str = "Updates are off in this build. Download Voxa from its release page to get updates.";
+
 impl Voxa {
     /// From the tray's tick loop, about once a second.
     pub(crate) fn update_tick(&mut self, cx: &mut Context<Self>) {
+        // "Restart and update": the window was asked to close; start Setup once it has.
+        if let Some(asked) = self.updater.restart_requested {
+            if restart_ready(os::window_process_running(), asked.elapsed()) {
+                self.updater.restart_requested = None;
+                let inputs = self.gate_inputs(Moment::Quit);
+                if !self.install_update(inputs, true, Relaunch::Window, cx) {
+                    self.publish();
+                }
+            }
+            return;
+        }
+        if updates_off() {
+            return;
+        }
         if !self.updater.checking && self.updater.downloading.is_none() && should_check(&self.updater.state.check, crate::now_ms(), self.updater.started_ms) {
             self.check_for_updates(false, cx);
         }
@@ -487,7 +650,7 @@ impl Voxa {
         }
         if self.updater.debounce.feed(crate::now_ms(), gate.is_ok()) {
             self.updater.state.last_idle_install_ms = crate::now_ms();
-            self.install_update(inputs, false, true, cx);
+            self.install_update(inputs, false, Relaunch::Background, cx);
         }
     }
 
@@ -514,20 +677,27 @@ impl Voxa {
             window_open: os::window_process_running(),
             strip_visible: os::strip_shown(),
             since_hotkey_ms: self.updater.last_hotkey.map_or(u64::MAX, |t| t.elapsed().as_millis() as u64),
-            auto_update: self.settings.auto_update,
+            // Settings that couldn't be read count as "Update automatically" off.
+            auto_update: self.settings.auto_update && self.settings_ok,
             paused: self.updater.state.paused,
             auto_allowed: offer.is_some_and(|o| o.auto),
             test_copy: std::env::var_os("VOXA_DATA").is_some(),
             installed_copy: installed_copy(),
             attempts: if same_target { self.updater.state.attempts } else { 0 },
+            since_attempt_ms: offer.map_or(u64::MAX, |o| since_attempt(&self.updater.state, &o.version)),
         }
     }
 
-    /// Hand over to Setup: flush History, start the installer, quit. Only when the gate holds.
-    fn install_update(&mut self, inputs: Inputs, on_request: bool, relaunch: bool, cx: &mut Context<Self>) -> bool {
+    /// Hand over to Setup: flush History, start the installer, quit. Only when the gate holds and
+    /// the feed (one quick look) still offers the staged file.
+    fn install_update(&mut self, inputs: Inputs, on_request: bool, relaunch: Relaunch, cx: &mut Context<Self>) -> bool {
         let gate = if on_request { policy::can_install_on_request(&inputs) } else { policy::can_install_now(&inputs) };
         if let Err(b) = gate {
             ulog(&self.updater.dir, &format!("install waits: {}", b.code()));
+            return false;
+        }
+        if !confirm_before_install(&mut self.updater.state, &self.updater.dir.clone()) {
+            self.publish();
             return false;
         }
         self.keep_unfinished_takes(cx);
@@ -550,12 +720,21 @@ impl Voxa {
     pub(crate) fn update_on_quit(&mut self, cx: &mut Context<Self>) {
         if INSTALLS && self.updater.staged_ready() {
             let inputs = self.gate_inputs(Moment::Quit);
-            self.install_update(inputs, false, false, cx);
+            self.install_update(inputs, false, Relaunch::No, cx);
         }
     }
 
+    /// "Restart and update" (or the download it waited for is done): ask the window to close,
+    /// then update_tick starts Setup once it has.
+    fn request_restart(&mut self) {
+        ulog(&self.updater.dir, "restart and update: asking the window to close first");
+        self.updater.restart_requested = Some(Instant::now());
+        self.publish();
+    }
+
     pub(crate) fn check_for_updates(&mut self, manual: bool, cx: &mut Context<Self>) {
-        if self.updater.checking {
+        if self.updater.checking || updates_off() {
+            self.publish();
             return;
         }
         // Pressed again within a minute: show the last answer again, no network.
@@ -664,9 +843,9 @@ impl Voxa {
         u.state.save(&dir);
         if self.updater.install_after_download && self.updater.staged_ready() {
             self.updater.install_after_download = false;
-            let inputs = self.gate_inputs(Moment::Quit);
-            self.install_update(inputs, true, true, cx);
+            self.request_restart();
         }
+        let _ = cx;
         self.publish();
     }
 
@@ -677,8 +856,7 @@ impl Voxa {
             CheckForUpdates => self.check_for_updates(true, cx),
             InstallUpdateNow if INSTALLS => {
                 if self.updater.staged_ready() {
-                    let inputs = self.gate_inputs(Moment::Quit);
-                    self.install_update(inputs, true, true, cx);
+                    self.request_restart();
                 } else if let Some(o) = self.updater.state.offer.clone() {
                     self.updater.install_after_download = true;
                     self.start_download(o, cx);
@@ -747,13 +925,112 @@ mod tests {
             test_copy: false,
             installed_copy: true,
             attempts: 0,
+            since_attempt_ms: u64::MAX,
         }
+    }
+
+    #[test]
+    fn restart_and_update_closes_the_window_first_and_reopens_it() {
+        let log = Path::new(r"C:\x\install-1.0.1.log");
+        assert_eq!(installer_args("1.0.0", "1.0.1", log, Relaunch::Window).last().map(String::as_str), Some("/VOXAOPEN=1"));
+        // Setup starts once the window is gone, or after RESTART_WAIT at most, never at once.
+        assert!(!restart_ready(true, Duration::from_secs(1)));
+        assert!(restart_ready(false, Duration::ZERO));
+        assert!(restart_ready(true, RESTART_WAIT));
+        // The window closes on the request appearing while it is open, never on a stale one.
+        assert!(crate::remote::closes_for_update(false, true));
+        assert!(!crate::remote::closes_for_update(true, true), "left over from before the update");
+        assert!(!crate::remote::closes_for_update(false, false));
+        let remote = include_str!("remote.rs");
+        assert!(remote.contains("closes_for_update(was, b.live.update.close_for_update)") && remote.contains("cx.quit()"));
+        // The command goes through request_restart, never straight to Setup.
+        let src = include_str!("update.rs");
+        let cmd = &src[src.find("InstallUpdateNow if INSTALLS").unwrap()..];
+        let cmd = &cmd[..cmd.find("OpenReleaseNotes").unwrap()];
+        assert!(cmd.contains("self.request_restart()") && !cmd.contains("install_update("));
+        let iss = include_str!("../../windows/voxa.iss");
+        assert!(iss.contains("{param:VOXAOPEN|}") && iss.contains("'--updated', '', SW_SHOWNORMAL"));
+    }
+
+    #[test]
+    fn auto_update_counts_as_off_when_settings_cannot_be_read() {
+        assert!(!auto_update_setting(&Err("locked".into())), "an unreadable file never means on");
+        assert!(auto_update_setting(&Ok(None)), "no file yet: the default");
+        let off = crate::store::Settings { auto_update: false, ..Default::default() };
+        assert!(!auto_update_setting(&Ok(Some(off))));
+        // Both install paths use it: the sign-in start and the tray's gate.
+        let src = include_str!("update.rs");
+        assert!(src.contains("auto_update_setting(&crate::store::Settings::try_load("));
+        assert!(src.contains("auto_update: self.settings.auto_update && self.settings_ok"));
+    }
+
+    #[test]
+    fn a_start_by_setup_never_installs_again_at_once() {
+        // `--updated` (after a success or a rollback): no install at that start.
+        assert!(!apply_at_background_start(true));
+        let main = include_str!("main.rs");
+        assert!(main.contains("update::apply_at_background_start(updated)"));
+    }
+
+    #[test]
+    fn a_build_with_placeholder_keys_says_updates_are_off() {
+        assert!(updates_off_when(true, false));
+        assert!(!updates_off_when(true, true), "a test copy with a local test feed still checks");
+        assert!(!updates_off_when(false, false));
+        assert!(UPDATES_OFF.starts_with("Updates are off in this build.") && UPDATES_OFF.is_ascii() && !UPDATES_OFF.contains(" - "));
+        if keys::placeholders() && !crate::test_hooks() {
+            let u = test_updater();
+            assert_eq!(u.view(true).status, UPDATES_OFF);
+        }
+    }
+
+    #[test]
+    fn a_damaged_update_state_is_kept_aside_not_silently_reset() {
+        let dir = tmp("broken");
+        std::fs::write(dir.join("update.json"), b"{ not json").unwrap();
+        assert_eq!(UpdateState::load(&dir), UpdateState::default());
+        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert!(kept.iter().any(|n| n.starts_with("update.broken-") && n.ends_with(".json")), "{kept:?}");
+        assert!(std::fs::read_to_string(dir.join("update.log")).unwrap().contains("update.json was damaged"));
+    }
+
+    #[test]
+    fn an_offer_for_the_installed_version_or_older_is_dropped() {
+        let dir = tmp("stale");
+        let staged = dir.join(format!("Voxa-Setup-{}.exe", env!("CARGO_PKG_VERSION")));
+        std::fs::write(&staged, b"x").unwrap();
+        let mut st = UpdateState { offer: Some(offer_for(b"x", env!("CARGO_PKG_VERSION"))), staged_path: Some(staged.clone()), last_result: "ready".into(), ..Default::default() };
+        assert!(drop_stale_offer(&mut st));
+        assert!(st.offer.is_none() && st.staged_path.is_none() && !staged.exists());
+        assert_eq!(st.last_result, "up_to_date");
+        let mut newer = UpdateState { offer: Some(offer_for(b"x", "99.0.0")), ..Default::default() };
+        assert!(!drop_stale_offer(&mut newer));
+        assert!(newer.offer.is_some());
+    }
+
+    #[test]
+    fn install_logs_and_broken_state_files_are_capped() {
+        let dir = tmp("prune");
+        for i in 0..6 {
+            std::fs::write(dir.join(format!("install-1.0.{i}.log")), b"x").unwrap();
+            std::fs::write(dir.join(format!("update.broken-{i}.json")), b"x").unwrap();
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        std::fs::write(dir.join("update.json"), b"{}").unwrap();
+        prune_logs(&dir, 3);
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(names.iter().filter(|n| n.starts_with("install-")).count(), 3);
+        assert_eq!(names.iter().filter(|n| n.starts_with("update.broken-")).count(), 3);
+        assert!(names.contains(&"install-1.0.5.log".to_string()), "the newest are kept");
+        assert!(names.contains(&"update.json".to_string()));
+        let iss = include_str!("../../windows/voxa.iss");
+        assert!(iss.contains(r#"Name: "{localappdata}\Voxa\updates""#), "uninstall removes the updates folder");
     }
 
     #[test]
     fn installer_arguments_are_silent_and_skip_removeold() {
         let log = Path::new(r"C:\Users\A B\AppData\Local\Voxa\updates\install-1.0.1.log");
-        let a = installer_args("1.0.0", "1.0.1", log, true);
+        let a = installer_args("1.0.0", "1.0.1", log, Relaunch::Background);
         assert_eq!(
             a,
             vec![
@@ -767,7 +1044,7 @@ mod tests {
                 r#"/LOG="C:\Users\A B\AppData\Local\Voxa\updates\install-1.0.1.log""#,
             ]
         );
-        let quit = installer_args("1.0.0", "1.0.1", log, false);
+        let quit = installer_args("1.0.0", "1.0.1", log, Relaunch::No);
         assert_eq!(quit.last().map(String::as_str), Some("/VOXANORELAUNCH=1"), "Quit Voxa: no relaunch");
         // The script itself honours these: the silent removeold guard and the relaunch.
         let iss = include_str!("../../windows/voxa.iss");
@@ -791,7 +1068,7 @@ mod tests {
         bytes[10] ^= 1; // tampered after the download
         std::fs::write(&path, &bytes).unwrap();
         let mut st = UpdateState { offer: Some(o), staged_path: Some(path.clone()), ..Default::default() };
-        let r = launch_installer(&mut st, &dir, &ok_inputs(), false, true);
+        let r = launch_installer(&mut st, &dir, &ok_inputs(), false, Relaunch::Background);
         assert!(r.unwrap_err().contains("failed its check"));
         assert!(!path.exists(), "a tampered file is deleted, never launched");
         assert!(st.staged_path.is_none());
@@ -799,9 +1076,9 @@ mod tests {
         // And a blocked gate never even looks at the file.
         let mut st = UpdateState { offer: Some(offer_for(&data, "9.0.0")), staged_path: Some(path.clone()), ..Default::default() };
         let busy = Inputs { flow: policy::Flow::Recording { paused: true }, ..ok_inputs() };
-        assert_eq!(launch_installer(&mut st, &dir, &busy, false, true), Err("waiting: dictation".into()));
+        assert_eq!(launch_installer(&mut st, &dir, &busy, false, Relaunch::Background), Err("waiting: dictation".into()));
         let test_copy = Inputs { test_copy: true, ..ok_inputs() };
-        assert_eq!(launch_installer(&mut st, &dir, &test_copy, true, true), Err("waiting: test_copy".into()));
+        assert_eq!(launch_installer(&mut st, &dir, &test_copy, true, Relaunch::Window), Err("waiting: test_copy".into()));
     }
 
     #[test]
@@ -862,6 +1139,7 @@ mod tests {
             started: now,
             started_ms: 0,
             mac_access_bar: false,
+            restart_requested: None,
         }
     }
 

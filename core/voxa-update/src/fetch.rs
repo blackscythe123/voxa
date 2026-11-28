@@ -15,6 +15,16 @@ pub struct Client {
 impl Client {
     /// `version` and `platform` only ("1.0.0", "Windows"): nothing that identifies the user.
     pub fn new(origin: Origin, version: &str, platform: &str) -> Result<Self, UpdateError> {
+        Self::with_timeouts(origin, version, platform, Duration::from_secs(10), Duration::from_secs(30))
+    }
+
+    /// The last look at the feed right before an install: short timeouts, so nobody waits on a
+    /// dead network (3 s to connect, 6 s in all).
+    pub fn quick(origin: Origin, version: &str, platform: &str) -> Result<Self, UpdateError> {
+        Self::with_timeouts(origin, version, platform, Duration::from_secs(3), Duration::from_secs(6))
+    }
+
+    fn with_timeouts(origin: Origin, version: &str, platform: &str, connect: Duration, total: Duration) -> Result<Self, UpdateError> {
         let policy_origin = origin.clone();
         let policy = reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= MAX_REDIRECTS {
@@ -27,9 +37,9 @@ impl Client {
         });
         let http = reqwest::blocking::Client::builder()
             .user_agent(format!("Voxa/{version} ({platform})"))
-            .connect_timeout(Duration::from_secs(10))
+            .connect_timeout(connect)
             // Blocking reqwest applies this to the request and to each body read: 30 s idle.
-            .timeout(Duration::from_secs(30))
+            .timeout(total)
             .redirect(policy)
             .https_only(!origin.allow_plain_http)
             .referer(false)
@@ -110,6 +120,24 @@ impl Client {
         result
     }
 
+    /// Right before an install: one conditional request (a 304 when nothing changed) to confirm
+    /// the feed still offers the staged file. `Withdrawn` when the feed is paused (the kill
+    /// switch), names another file, or can't be confirmed as Voxa's; `Unknown` when the network
+    /// didn't answer (the staged file is verified, so the install may go ahead).
+    pub fn confirm_offer(&self, keys: &[(u8, [u8; 32])], channel: Channel, state: &mut CheckState, staged: &Offer) -> Confirm {
+        let result = self
+            .fetch_feed_cached(state)
+            .and_then(|(bytes, _)| verify_feed(&bytes, keys, channel, state.highest_serial, &self.origin));
+        match result {
+            Ok(m) => {
+                state.highest_serial = crate::policy::next_serial(state.highest_serial, m.serial);
+                if crate::policy::still_offered(&m, staged) { Confirm::StillOffered } else { Confirm::Withdrawn }
+            }
+            Err(e) if e.is_refusal() => Confirm::Withdrawn,
+            Err(_) => Confirm::Unknown,
+        }
+    }
+
     /// Fetch and verify the feed: the verified manifest, or why not.
     pub fn check(&self, keys: &[(u8, [u8; 32])], channel: Channel, highest_serial: u64) -> Result<Manifest, UpdateError> {
         let bytes = self.fetch_feed()?;
@@ -138,6 +166,14 @@ impl Client {
         }
         stage::stage_from(resp, dir, offer)
     }
+}
+
+/// What the last look at the feed before an install found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirm {
+    StillOffered,
+    Withdrawn,
+    Unknown,
 }
 
 fn read_feed(resp: reqwest::blocking::Response) -> Result<Vec<u8>, UpdateError> {
@@ -340,6 +376,88 @@ mod tests {
         assert!(off.check_with_state(&test_keys(), Channel::Desktop, &mut st2, 9_000, false).is_err());
         assert_eq!(st2.failures, 1);
         assert_eq!(st2.next_due_ms, 9_000 + crate::schedule::HOUR_MS);
+    }
+
+    /// Serves `feed` at /feed/desktop.json for every request.
+    fn feed_server(feed: Vec<u8>) -> String {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("{}://{}", "http", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for s in l.incoming().take(5) {
+                let Ok(mut s) = s else { continue };
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", feed.len());
+                let _ = s.write_all(&feed);
+            }
+        });
+        base
+    }
+
+    #[test]
+    fn a_paused_feed_stops_a_staged_install_at_the_last_check() {
+        let installer = vec![5u8; 64];
+        let staged_for = |base: &str| {
+            let m: Manifest = serde_json::from_value({
+                let mut p = desktop_payload("1.0.1", 7);
+                p["notes_url"] = format!("{base}/feed/notes").into();
+                p["assets"] = serde_json::json!({ "windows-x64": { "url": format!("{base}/feed/Voxa-Setup-1.0.1.exe"),
+                    "sha256": crate::stage::sha256_hex(&installer), "size": installer.len() } });
+                p
+            })
+            .unwrap();
+            crate::policy::offer(&m, crate::Version(1, 0, 0), crate::ASSET_WINDOWS).unwrap()
+        };
+        // The live feed still offers the file.
+        let live = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let b = format!("{}://{}", "http", l.local_addr().unwrap());
+            let feed = local_feed(&b, &installer);
+            std::thread::spawn(move || {
+                for s in l.incoming().take(3) {
+                    let Ok(mut s) = s else { continue };
+                    let mut buf = [0u8; 4096];
+                    let _ = s.read(&mut buf);
+                    let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", feed.len());
+                    let _ = s.write_all(&feed);
+                }
+            });
+            b
+        };
+        let c = Client::quick(origin(&live), "1.0.0", "Test").unwrap();
+        let mut st = CheckState::default();
+        assert_eq!(c.confirm_offer(&test_keys(), Channel::Desktop, &mut st, &staged_for(&live)), Confirm::StillOffered);
+        assert_eq!(st.highest_serial, 7);
+        // The owner published a paused feed: the staged install is withdrawn.
+        let paused = {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let b = format!("{}://{}", "http", l.local_addr().unwrap());
+            let mut p = desktop_payload("1.0.1", 8);
+            p["notes_url"] = format!("{b}/feed/notes").into();
+            p["paused"] = true.into();
+            p["assets"] = serde_json::json!({ "windows-x64": { "url": format!("{b}/feed/Voxa-Setup-1.0.1.exe"),
+                "sha256": crate::stage::sha256_hex(&installer), "size": installer.len() } });
+            let feed = sign(TEST_SEED_K1, 1, &serde_json::to_vec(&p).unwrap());
+            std::thread::spawn(move || {
+                for s in l.incoming().take(3) {
+                    let Ok(mut s) = s else { continue };
+                    let mut buf = [0u8; 4096];
+                    let _ = s.read(&mut buf);
+                    let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", feed.len());
+                    let _ = s.write_all(&feed);
+                }
+            });
+            b
+        };
+        let c = Client::quick(origin(&paused), "1.0.0", "Test").unwrap();
+        let mut st = CheckState::default();
+        assert_eq!(c.confirm_offer(&test_keys(), Channel::Desktop, &mut st, &staged_for(&paused)), Confirm::Withdrawn);
+        // A feed that isn't Voxa's withdraws it too; no network is only "unknown".
+        let forged = feed_server(sign(crate::feed::tests::TEST_SEED_OTHER, 1, b"{}"));
+        let c = Client::quick(origin(&forged), "1.0.0", "Test").unwrap();
+        assert_eq!(c.confirm_offer(&test_keys(), Channel::Desktop, &mut CheckState::default(), &staged_for(&forged)), Confirm::Withdrawn);
+        let off = Client::quick(Origin::test(&format!("{}://127.0.0.1:1/f/desktop.json", "http")).unwrap(), "1.0.0", "Test").unwrap();
+        assert_eq!(off.confirm_offer(&test_keys(), Channel::Desktop, &mut CheckState::default(), &staged_for(&live)), Confirm::Unknown);
     }
 
     #[test]

@@ -55,6 +55,9 @@ pub struct UpdateView {
     pub mac_available: Option<String>,
     /// macOS: the Accessibility grant must be given again (the app's signature changed).
     pub mac_accessibility_again: bool,
+    /// "Restart and update" was pressed: the window closes itself now (its edits are already
+    /// saved), so Setup never has to wait for it or force it closed. Voxa reopens it afterwards.
+    pub close_for_update: bool,
 }
 
 impl Live {

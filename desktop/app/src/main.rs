@@ -2214,6 +2214,13 @@ fn strip_options(origin: gpui::Point<gpui::Pixels>) -> WindowOptions {
     }
 }
 
+/// The strip at every tray start (sign-in, the relaunch after an update, a start by hand): created
+/// hidden, so GPUI never shows or activates it. It is then painted once empty and unseen with a
+/// no-activate show (os::strip_visible) and hidden, the same as a rebuilt strip.
+fn first_strip_options(origin: gpui::Point<gpui::Pixels>) -> WindowOptions {
+    WindowOptions { show: false, ..strip_options(origin) }
+}
+
 /// A fresh strip window for the same Voxa, replacing one whose graphics were lost (sleep, a
 /// charger change on a two-GPU laptop, a display change). Never takes focus: the window is
 /// created hidden, given the old strip's exact place, and shown without activation. Runs at a
@@ -2343,28 +2350,39 @@ fn main() {
         return;
     }
     let background = std::env::args().any(|a| a == "--background");
+    let updated = std::env::args().any(|a| a == "--updated");
     let _ = std::fs::create_dir_all(data_dir());
     // Never delete the log at start: the previous run's (a failed update, a crash) is kept aside.
     os::rotate_log();
-    os::log(&format!("voxa-desktop {} starting{}", env!("CARGO_PKG_VERSION"), if std::env::args().any(|a| a == "--updated") { " after an update" } else { "" }));
+    os::log(&format!("voxa-desktop {} starting{}", env!("CARGO_PKG_VERSION"), if updated { " after an update" } else { "" }));
     // At Windows sign-in, before the shortcut exists or anything shows: a verified, staged update
-    // installs now if its gate holds, and Setup starts Voxa again in the background.
-    if background && update::apply_at_background_start() {
+    // installs now if its gate holds, and Setup starts Voxa again in the background. Never when
+    // Setup itself just started this process (`--updated`, also after a rollback).
+    if background && update::apply_at_background_start(updated) {
         os::log("handing over to the update installer");
         return;
     }
     Application::new().run(move |cx: &mut App| {
         let fonts = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(FRAUNCES)]);
         os::log(&format!("fonts: {:?}; families with Fraunces: {:?}", fonts.err(), cx.text_system().all_font_names().into_iter().filter(|n| n.contains("Fraunces")).collect::<Vec<_>>()));
-        let options = strip_options(strip_origin(cx));
+        let options = first_strip_options(strip_origin(cx));
         let prev = os::foreground() as usize;
         let opened = cx.open_window(options, move |window, cx| {
             if let Some(h) = os::window_ptr(window) {
                 os::make_overlay(h);
                 os::STRIP.store(h as usize, std::sync::atomic::Ordering::Relaxed);
             }
-            cx.new(Voxa::new)
+            cx.new(|cx| {
+                let mut v = Voxa::new(cx);
+                // The first frame is painted empty (transparent), so nothing flashes at sign-in or
+                // after an update.
+                v.strip_blank = true;
+                v
+            })
         });
+        // Paint once, unseen and without activation, so the strip isn't blank later; hidden again
+        // below after the first frame.
+        os::strip_visible(true);
         if let Err(e) = &opened {
             os::log(&format!("FAIL open_window: {e}"));
         }
@@ -2393,6 +2411,12 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_millis(500)).await;
             os::strip_visible(false);
+            if let Ok(handle) = opened.as_ref() {
+                let _ = handle.update(cx, |v, _, cx| {
+                    v.strip_blank = false;
+                    cx.notify();
+                });
+            }
             if let (Some(preview), Ok(handle)) = (strip_preview(), opened.as_ref()) {
                 os::log("test: showing the strip preview (nothing records)");
                 let _ = handle.update(cx, |v, _, cx| {
@@ -2538,5 +2562,25 @@ mod tests {
         assert!(!o.focus, "the strip must open without focus");
         assert!(matches!(o.kind, gpui::WindowKind::PopUp));
         assert!(!o.is_movable && !o.is_resizable);
+    }
+
+    /// At sign-in and after an update the strip never flashes or takes the foreground: the first
+    /// strip opens hidden and unfocused, is painted empty, and main() uses exactly these options.
+    #[test]
+    fn the_strip_never_flashes_or_activates_at_start_or_after_an_update() {
+        let o = super::first_strip_options(gpui::point(gpui::px(0.), gpui::px(0.)));
+        assert!(!o.show && !o.focus, "hidden and unfocused at creation");
+        let src = include_str!("main.rs");
+        let main = &src[src.find("\nfn main()").unwrap()..];
+        let main = &main[..main.find("\n}").unwrap()];
+        assert!(main.contains("first_strip_options(strip_origin(cx))"), "main() opens the first strip hidden");
+        assert!(!main.contains("let options = strip_options("), "never the visible options at start");
+        assert!(main.contains("v.strip_blank = true"), "the first frame is painted empty");
+        // Setup relaunches with a no-activate show value, never SW_HIDE (that turns the first show
+        // into a hide and leaves the strip blank).
+        let iss = include_str!("../../windows/voxa.iss");
+        let relaunch = &iss[iss.find("procedure DeinitializeSetup").unwrap()..];
+        assert!(!relaunch.contains("SW_HIDE"), "the relaunch never passes SW_HIDE");
+        assert!(relaunch.contains("ShowNoActivate"), "the background relaunch passes SW_SHOWNOACTIVATE");
     }
 }

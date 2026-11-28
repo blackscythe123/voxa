@@ -148,7 +148,14 @@ pub struct Inputs {
     /// The running exe is the installed one (`{localappdata}\Programs\Voxa`).
     pub installed_copy: bool,
     pub attempts: u32,
+    /// Milliseconds since the last install attempt at this target (u64::MAX when never). After a
+    /// failed attempt the next one waits [`RETRY_BACKOFF_MS`], so a rollback never burns the
+    /// second attempt a minute later.
+    pub since_attempt_ms: u64,
 }
+
+/// The wait between two automatic install attempts at the same version.
+pub const RETRY_BACKOFF_MS: u64 = 6 * 60 * 60 * 1000;
 
 /// Why an install waits. Logged every time an install is deferred (no user data).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +174,8 @@ pub enum Blocked {
     TestCopy,
     NotInstalled,
     AttemptsExhausted,
+    /// A failed attempt was less than [`RETRY_BACKOFF_MS`] ago.
+    RetryLater,
     NotIdle,
 }
 
@@ -187,6 +196,7 @@ impl Blocked {
             Self::TestCopy => "test_copy",
             Self::NotInstalled => "not_installed",
             Self::AttemptsExhausted => "attempts_exhausted",
+            Self::RetryLater => "retry_later",
             Self::NotIdle => "not_idle",
         }
     }
@@ -236,6 +246,9 @@ pub fn can_install_now(i: &Inputs) -> Result<(), Blocked> {
     if attempts_exhausted(i.attempts) {
         return Err(Blocked::AttemptsExhausted);
     }
+    if i.attempts > 0 && i.since_attempt_ms < RETRY_BACKOFF_MS {
+        return Err(Blocked::RetryLater);
+    }
     if let Moment::Idle { locked, idle_ms } = i.moment {
         if !locked && idle_ms < IDLE_INSTALL_MS {
             return Err(Blocked::NotIdle);
@@ -247,8 +260,39 @@ pub fn can_install_now(i: &Inputs) -> Result<(), Blocked> {
 /// The "Restart and update" button (auto off, the user asked): the same safety checks, without
 /// the auto-update, idle and attempt conditions.
 pub fn can_install_on_request(i: &Inputs) -> Result<(), Blocked> {
-    let asked = Inputs { auto_update: true, auto_allowed: true, attempts: 0, since_hotkey_ms: u64::MAX, moment: Moment::Quit, window_open: false, ..*i };
+    let asked = Inputs { auto_update: true, auto_allowed: true, attempts: 0, since_attempt_ms: u64::MAX, since_hotkey_ms: u64::MAX, moment: Moment::Quit, window_open: false, ..*i };
     can_install_now(&asked)
+}
+
+/// The fresh feed read right before an install still offers exactly this file: not paused (the
+/// kill switch) and the same version and SHA-256. Otherwise the staged file is dropped.
+pub fn still_offered(m: &Manifest, staged: &Offer) -> bool {
+    !m.paused && m.version == staged.version && m.assets.get(&staged.asset_key).is_some_and(|a| a.sha256.eq_ignore_ascii_case(&staged.sha256))
+}
+
+/// CI, before publishing a feed: may `new` replace the feed that is published now (`current`,
+/// None when there is none yet)? The version only moves forward (the same version may be
+/// published again, to pause or unpause it) and the serial always goes up. `force` (the owner's
+/// explicit input) allows a lower version, for a deliberate rollback release.
+pub fn publish_allowed(current: Option<&Manifest>, new: &Manifest, force: bool) -> Result<(), String> {
+    let Some(cur) = current else { return Ok(()) };
+    if cur.channel != new.channel {
+        return Err(format!("the published feed is for {}, this one for {}", cur.channel, new.channel));
+    }
+    if new.serial <= cur.serial {
+        return Err(format!("serial {} is not above the published serial {}", new.serial, cur.serial));
+    }
+    let (Some(nv), Some(cv)) = (Version::parse(&new.version), Version::parse(&cur.version)) else {
+        return Err("a version in the feed does not parse".into());
+    };
+    let older = match (new.version_code, cur.version_code) {
+        (Some(n), Some(c)) => n < c,
+        _ => nv < cv,
+    };
+    if older && !force {
+        return Err(format!("{} is older than the published {}; refusing to roll the feed back (pass force to do it on purpose)", new.version, cur.version));
+    }
+    Ok(())
 }
 
 pub fn attempts_exhausted(attempts: u32) -> bool {
@@ -343,7 +387,54 @@ mod tests {
             test_copy: false,
             installed_copy: true,
             attempts: 0,
+            since_attempt_ms: u64::MAX,
         }
+    }
+
+    #[test]
+    fn a_failed_install_waits_hours_before_the_second_attempt() {
+        let i = |attempts, since_attempt_ms| can_install_now(&Inputs { attempts, since_attempt_ms, ..ok_inputs() });
+        assert_eq!(i(1, 60_000), Err(Blocked::RetryLater), "the relaunch after a rollback never retries at once");
+        assert_eq!(i(1, RETRY_BACKOFF_MS - 1), Err(Blocked::RetryLater));
+        assert_eq!(i(1, RETRY_BACKOFF_MS), Ok(()));
+        assert_eq!(i(0, 0), Ok(()), "a first attempt never waits");
+        let asked = Inputs { attempts: 1, since_attempt_ms: 0, auto_update: false, ..ok_inputs() };
+        assert_eq!(can_install_on_request(&asked), Ok(()), "the user pressed Restart and update");
+    }
+
+    #[test]
+    fn a_paused_or_changed_feed_withdraws_the_staged_file_before_install() {
+        let m = manifest("1.0.2");
+        let o = offer(&m, Version(1, 0, 0), ASSET_WINDOWS).unwrap();
+        assert!(still_offered(&m, &o));
+        let mut paused = m.clone();
+        paused.paused = true;
+        assert!(!still_offered(&paused, &o), "the kill switch stops a staged install");
+        assert!(!still_offered(&manifest("1.0.3"), &o), "a newer release replaces it");
+        let mut other = m.clone();
+        other.assets.get_mut(ASSET_WINDOWS).unwrap().sha256 = "b".repeat(64);
+        assert!(!still_offered(&other, &o), "a rebuilt file under the same version");
+    }
+
+    #[test]
+    fn the_feed_version_only_moves_forward_when_publishing() {
+        let feed = |v: &str, serial: u64| {
+            let mut m = manifest(v);
+            m.serial = serial;
+            m
+        };
+        assert_eq!(publish_allowed(None, &feed("1.0.0", 1), false), Ok(()), "the first feed");
+        assert_eq!(publish_allowed(Some(&feed("1.0.1", 10)), &feed("1.0.2", 11), false), Ok(()));
+        assert_eq!(publish_allowed(Some(&feed("1.0.1", 10)), &feed("1.0.1", 11), false), Ok(()), "same version again: pause or unpause");
+        assert!(publish_allowed(Some(&feed("1.0.2", 10)), &feed("1.0.1", 11), false).is_err(), "an old tag's job re-run");
+        assert_eq!(publish_allowed(Some(&feed("1.0.2", 10)), &feed("1.0.1", 11), true), Ok(()), "a deliberate rollback");
+        assert!(publish_allowed(Some(&feed("1.0.1", 10)), &feed("1.0.2", 10), true).is_err(), "the serial must go up, even forced");
+        let mut a = android_manifest(10002);
+        a.serial = 5;
+        let mut b = android_manifest(10001);
+        b.serial = 6;
+        assert!(publish_allowed(Some(&a), &b, false).is_err(), "Android compares versionCode");
+        assert!(publish_allowed(Some(&manifest("1.0.0")), &b, true).is_err(), "never across channels");
     }
 
     #[test]
