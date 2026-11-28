@@ -21,6 +21,11 @@ impl Version {
         if parts.next().is_some() {
             return None;
         }
+        // Android's versionCode is major*10000 + minor*100 + patch: a minor or patch of 100 would
+        // collide with the next major or minor, so it is never a valid Voxa version.
+        if v.1 > 99 || v.2 > 99 {
+            return None;
+        }
         Some(v)
     }
 
@@ -59,5 +64,13 @@ mod tests {
             assert_eq!(Version::parse(bad), None, "{bad:?}");
         }
         assert!(Version::parse("0.4.7").is_some());
+    }
+
+    #[test]
+    fn minor_or_patch_above_99_is_rejected_so_version_codes_never_collide() {
+        assert_eq!(Version::parse("1.100.0"), None);
+        assert_eq!(Version::parse("1.0.100"), None);
+        let top = Version::parse("1.99.99").unwrap();
+        assert!(top.android_code() < Version::parse("2.0.0").unwrap().android_code());
     }
 }
