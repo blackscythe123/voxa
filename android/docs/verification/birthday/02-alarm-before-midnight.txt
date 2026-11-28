@@ -1,0 +1,4 @@
+      tag=*walarm*:com.voxa.android.notify.BIRTHDAY
+      type=RTC_WAKEUP origWhen=2026-11-29 00:00:00.000 window=+10m0s0ms repeatInterval=0 count=0 flags=0x0
+      policyWhenElapsed: requester=+5h43m26s928ms app_standby=-13s479ms device_idle=-- battery_saver=-13s479ms
+      whenElapsed=+5h43m26s928ms maxWhenElapsed=+5h53m26s928ms
