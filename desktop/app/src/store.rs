@@ -574,7 +574,7 @@ mod tests {
         let day = 86_400_000u64;
         let now = 100 * day;
         let mk = |id: u64, status: Status| Entry { id, app: "A".into(), text: "t".into(), secs: 1.0, status, audio: None, started_in: None, via: None };
-        let mut h = History { path: std::env::temp_dir().join("voxa-prune-test.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("Sign in to send".into())), mk(3 * day, Status::Failed("x".into())), mk(99 * day, Status::Pasted)] };
+        let mut h = History { unreadable: false, path: std::env::temp_dir().join("voxa-prune-test.json"), entries: vec![mk(day, Status::Pasted), mk(2 * day, Status::Waiting("Sign in to send".into())), mk(3 * day, Status::Failed("x".into())), mk(99 * day, Status::Pasted)] };
         assert_eq!(h.prune(30, now), 1);
         let left: Vec<u64> = h.entries.iter().map(|e| e.id).collect();
         assert_eq!(left, vec![2 * day, 3 * day, 99 * day]);
