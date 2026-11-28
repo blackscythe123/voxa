@@ -2264,6 +2264,34 @@ impl Render for Home {
 mod tests {
     use super::*;
 
+    /// A warning showed as an empty box: "!" is not in Segoe Fluent Icons. Every character drawn
+    /// with the icon font is one of its private-use code points; marks like "!" are vectors.
+    /// Structural (reads the source): `icon(...)` gets a `'\u{E...}'` literal, an `I_` constant
+    /// or a variable, and every `I_` constant is in the private use area.
+    #[test]
+    fn the_icon_font_only_draws_its_own_code_points() {
+        let pua = |c: char| ('\u{E000}'..='\u{F8FF}').contains(&c);
+        for (k, c) in [("history", I_HISTORY), ("check", I_CHECK), ("retry", I_RETRY), ("sort", I_SORT), ("send", I_SEND), ("mic", I_MIC)] {
+            assert!(pua(c), "{k}");
+        }
+        let sources = [include_str!("home.rs"), include_str!("home/tour.rs")];
+        for src in sources {
+            let src = src.split("#[cfg(test)]").next().unwrap_or(src);
+            for (i, _) in src.match_indices("icon('") {
+                let rest = &src[i + 6..];
+                let lit = &rest[..rest.find('\'').expect("closing quote")];
+                let hex = lit.strip_prefix("\\u{").and_then(|h| h.strip_suffix('}')).unwrap_or_else(|| panic!("icon('{lit}') is not a code point"));
+                let c = char::from_u32(u32::from_str_radix(hex, 16).expect("hex")).expect("char");
+                assert!(pua(c), "icon('{lit}') is outside Segoe Fluent Icons' range");
+            }
+            for line in src.lines().filter(|l| l.starts_with("const I_")) {
+                let hex = line.split("\\u{").nth(1).and_then(|r| r.split('}').next()).expect("code point");
+                let c = char::from_u32(u32::from_str_radix(hex, 16).expect("hex")).expect("char");
+                assert!(pua(c), "{line}");
+            }
+        }
+    }
+
     #[test]
     fn shortcuts_need_ctrl_or_alt_and_a_real_key() {
         let m = |control, alt, shift| gpui::Modifiers { control, alt, shift, ..Default::default() };
