@@ -48,6 +48,12 @@ class KbColors(
 ) {
     fun alpha(color: Int, a: Float) = Color.argb((a * 255).toInt(), Color.red(color), Color.green(color), Color.blue(color))
 
+    /** Everything the panel is built from except the wash's opacity: equal keys need no new panel. */
+    val buildKey: List<Any> get() = listOf(
+        surface, photo, key, keyElevation, text, muted, stageMuted, keyText, accent, onAccent,
+        micRing, micGlow, bars, spinner, good, goodTitle, recording, press, dark,
+    )
+
     companion object {
         const val LIGHT_FG = 0xFFF2F2F0.toInt()
         const val DARK_FG = 0xFF141414.toInt()

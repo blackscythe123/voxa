@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.voxa.android.MainActivity
 import com.voxa.android.R
+import com.voxa.android.ime.Contrast
 import com.voxa.android.ime.KbColors
 import com.voxa.android.ime.KeyboardLook
 import com.voxa.android.ime.KeyboardPanel
@@ -105,14 +106,14 @@ fun KeyboardLookScreen(activity: MainActivity) {
     val cap = remember(grid, look.position, look.keyShapes, dark) {
         grid?.let { Photo.maxStrength(it, look.position, dark, look.keyShapes, aspect) } ?: 1f
     }
-    val colors = remember(look, dark, photoStamp) {
-        try {
-            KbColors.forLook(ctx, look, dark)
-        } catch (t: Throwable) {
-            KeyboardLook.fallback(ctx, "preview", t)
-            look = KeyboardLook.load(ctx)
-            KbColors.voxa(dark, look)
-        }
+    val built = remember(look, dark, photoStamp) { runCatching { KbColors.forLook(ctx, look, dark) } }
+    val colors = built.getOrElse { KbColors.voxa(dark, look) }
+    // The look can't be drawn (photo files gone or damaged): back to Voxa, outside composition.
+    LaunchedEffect(built) {
+        val t = built.exceptionOrNull() ?: return@LaunchedEffect
+        KeyboardLook.fallback(ctx, "preview", t)
+        look = KeyboardLook.load(ctx)
+        photoStamp++
     }
 
     // The preview's photo: the whole height (it can be dragged), soft or sharp.
@@ -160,11 +161,14 @@ fun KeyboardLookScreen(activity: MainActivity) {
         // The real keyboard panel, pinned. Touches go to the drag layer above it, not its keys.
         Box(Modifier.fillMaxWidth()) {
             var panelRef by remember { mutableStateOf<KeyboardPanel?>(null) }
-            key(colors) {
+            // A new panel only when something it is built from changed; dragging Photo strength
+            // only changes the wash, which the panel takes as it is.
+            key(colors.buildKey) {
                 AndroidView(
                     factory = { KeyboardPanel(it, colors).also { p -> panelRef = p } },
                     modifier = Modifier.fillMaxWidth(),
                     update = { p ->
+                        p.washAlpha = colors.washAlpha
                         p.setPhoto(if (colors.photo) previewPhoto else null)
                         p.demo(stage)
                     },
@@ -217,14 +221,14 @@ fun KeyboardLookScreen(activity: MainActivity) {
                 if (KeyboardLook.phoneColorsAvailable) {
                     val n = remember { Color(ctx.getColor(if (dark) android.R.color.system_neutral1_900 else android.R.color.system_neutral1_50)) }
                     val a = remember { Color(ctx.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)) }
-                    Swatch("Phone colours", look.type == KeyboardLook.PHONE, onClick = { update(look.copy(type = KeyboardLook.PHONE)) }) {
+                    Swatch("Phone colours", look.type == KeyboardLook.PHONE, outline = nearBase(n), onClick = { update(look.copy(type = KeyboardLook.PHONE)) }) {
                         Box(Modifier.fillMaxSize().background(n))
                         Box(Modifier.size(18.dp).clip(CircleShape).background(a))
                     }
                 }
                 for (p in KeyboardLook.presets) {
                     val on = look.type == KeyboardLook.COLOR && look.color == p.color
-                    Swatch(p.name, on, onClick = { update(look.copy(type = KeyboardLook.COLOR, color = p.color)) }) {
+                    Swatch(p.name, on, outline = nearBase(Color(p.color)), onClick = { update(look.copy(type = KeyboardLook.COLOR, color = p.color)) }) {
                         Box(Modifier.fillMaxSize().background(Color(p.color)))
                     }
                 }
@@ -345,9 +349,16 @@ private fun SectionLabel(text: String) {
     Text(text, Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 12.dp), style = Type.SBold, color = vx.text)
 }
 
-/** A round 56 dp swatch with its name under it; a sepia ring when chosen. */
+/** A swatch colour so close to the page that its edge would vanish (Paper on white, Black on dark). */
 @Composable
-private fun Swatch(label: String, selected: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun nearBase(color: Color): Boolean = Contrast.ratio(color.toArgbInt(), vx.base.toArgbInt()) < 3.0
+
+/**
+ * A round 56 dp swatch with its name under it; a sepia ring when chosen. [outline]: a 50 % text
+ * edge (3:1 or more on the page) instead of the faint hairline, for colours close to the page.
+ */
+@Composable
+private fun Swatch(label: String, selected: Boolean, outline: Boolean = false, onClick: () -> Unit, content: @Composable () -> Unit) {
     val c = vx
     Column(
         Modifier.widthIn(min = 72.dp).clip(RoundedCornerShape(12.dp)).clickable(role = Role.RadioButton, onClick = onClick)
@@ -356,7 +367,7 @@ private fun Swatch(label: String, selected: Boolean, onClick: () -> Unit, conten
     ) {
         Box(
             Modifier.size(60.dp).border(2.dp, if (selected) c.accent else Color.Transparent, CircleShape).padding(4.dp)
-                .clip(CircleShape).border(1.dp, c.hair, CircleShape),
+                .clip(CircleShape).border(1.dp, if (outline) c.text.copy(alpha = 0.5f) else c.hair, CircleShape),
             contentAlignment = Alignment.Center,
         ) { content() }
         Text(label, Modifier.padding(top = 4.dp), style = if (selected) Type.XSBold else Type.XS, color = if (selected) c.text else c.text56, maxLines = 1, softWrap = false)
@@ -405,7 +416,8 @@ private fun VSlider(value: Float, max: Float, label: String, onChange: (Float) -
             }
             .semantics {
                 contentDescription = label
-                progressBarRangeInfo = ProgressBarRangeInfo(value, 0f..1f)
+                // The real range: the thumb can't pass the stop.
+                progressBarRangeInfo = ProgressBarRangeInfo(value, 0f..maxOf(max, 0.01f))
                 setProgress { v -> change(v.coerceIn(0f, max)); done(); true }
             }
             .drawBehind {
@@ -415,7 +427,8 @@ private fun VSlider(value: Float, max: Float, label: String, onChange: (Float) -
                 val y = size.height / 2
                 drawRoundRect(c.text16, Offset(pad, y - h / 2), Size(w, h), CornerRadius(h / 2))
                 drawRoundRect(c.accent, Offset(pad, y - h / 2), Size(w * value, h), CornerRadius(h / 2))
-                if (max < 1f) drawCircle(c.text40, 3.dp.toPx(), Offset(pad + w * max, y))
+                // The stop: 72 % text is 5.2:1 on the track (40 % was 1.9:1), WCAG 1.4.11 wants 3:1.
+                if (max < 1f) drawCircle(c.text72, 3.dp.toPx(), Offset(pad + w * max, y))
                 drawCircle(c.accent, pad, Offset(pad + w * value, y))
             },
     )
