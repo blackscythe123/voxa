@@ -59,26 +59,6 @@ enum class Problem(val text: String) {
     Blocked("Couldn't reach ChatGPT"),
 }
 
-@Composable
-fun rememberProblem(activity: MainActivity): Pair<Problem?, Boolean> {
-    val app = activity.voxa
-    val tick = activity.tick.intValue
-    val session by app.session.collectAsState()
-    val online by app.online.collectAsState()
-    val blocked by app.blocked.collectAsState()
-    val mic = remember(tick) { app.micGranted() }
-    val enabled = remember(tick) { app.keyboardEnabled() }
-    val problem = when {
-        session == SessionState.EXPIRED -> Problem.SignedOut
-        !mic -> Problem.MicDenied
-        !enabled -> Problem.KeyboardOff
-        !online -> Problem.Offline
-        blocked -> Problem.Blocked
-        else -> null
-    }
-    return problem to (session == SessionState.UNKNOWN)
-}
-
 fun fix(activity: MainActivity, p: Problem) {
     when (p) {
         Problem.SignedOut -> activity.go(Route.SignIn)
@@ -95,7 +75,7 @@ fun HomeScreen(activity: MainActivity) {
     val app = activity.voxa
     val account by app.account.collectAsState()
     val version by app.historyVersion.collectAsState()
-    val (problem, checking) = rememberProblem(activity)
+    val problems = rememberProblems(activity)
     var recent by remember { mutableStateOf(emptyList<HistoryEntry>()) }
     var week by remember { mutableStateOf<WeekStats?>(null) }
     LaunchedEffect(version) {
@@ -105,21 +85,11 @@ fun HomeScreen(activity: MainActivity) {
             recent = app.core.history("").take(3)
         }
     }
-    val first = account?.name?.trim()?.split(' ')?.firstOrNull()?.takeIf { it.isNotEmpty() }
 
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 104.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(greeting() + (first?.let { ", $it" } ?: ""), style = Type.S, color = c.text56)
-                    Spacer(Modifier.height(4.dp))
-                    Readiness(problem, checking) { problem?.let { fix(activity, it) } }
-                }
-                Spacer(Modifier.width(16.dp))
-                Box(Modifier.clip(CircleShape).clickable { activity.go(Route.Tabbed(Tab.Settings)) }) {
-                    Avatar(account?.name?.ifEmpty { account?.email } ?: "", image = account?.image ?: "")
-                }
-            }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 104.dp)) {
+            // The doodle band, the greeting, and a notice only while something is wrong.
+            HomeHeader(activity, account, problems)
             Spacer(Modifier.height(24.dp))
             StatsCard(week)
             Spacer(Modifier.height(24.dp))
@@ -135,39 +105,6 @@ fun HomeScreen(activity: MainActivity) {
         }
         Fab("Try Voxa", R.drawable.ic_mic, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)) {
             activity.showSheet { PracticeSheet(activity) }
-        }
-    }
-}
-
-private fun greeting(): String = when (LocalTime.now().hour) {
-    in 5..11 -> "Good morning"
-    in 12..17 -> "Good afternoon"
-    else -> "Good evening"
-}
-
-/** "Ready to dictate" in green, or the real problem in amber (tap to fix it). */
-@Composable
-fun Readiness(problem: Problem?, checking: Boolean, onFix: () -> Unit) {
-    val c = vx
-    val (color, text) = when {
-        problem != null -> c.warn to problem.text
-        checking -> c.text56 to "Checking your sign-in"
-        else -> c.good to "Ready to dictate"
-    }
-    Row(
-        Modifier.clip(RoundedCornerShape(8.dp)).then(if (problem != null) Modifier.clickable(onClick = onFix) else Modifier),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(16.dp).drawBehind {
-                drawCircle(color.copy(alpha = 0.15f), radius = 8.dp.toPx())
-                drawCircle(color, radius = 4.dp.toPx())
-            },
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(text, style = Type.SBold, color = color)
-        if (problem != null && problem != Problem.Offline) {
-            Icon(painterResource(R.drawable.ic_chevron), null, Modifier.size(16.dp), tint = color)
         }
     }
 }
