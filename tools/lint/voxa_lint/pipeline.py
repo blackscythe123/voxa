@@ -32,6 +32,8 @@
                   dev flag lets placeholder keys or the debug key through, and the 6.0 MB budget
                   runs with --require-apk. (`gh release create` with --prerelease --latest=false is
                   release-latest, release.py.)
+  workflow-yaml   no workflow has an unquoted value with ": " (a YAML error: GitHub rejects the whole
+                  file and runs nothing; guardrails.yml had one, found 2026-11-28).
 """
 
 from __future__ import annotations
@@ -259,6 +261,36 @@ def check_android_ci(ctx: Ctx) -> list[Violation]:
     return out
 
 
+PLAIN_VALUE = re.compile(r"^(\s*)(?:-\s+)?[A-Za-z0-9_.-]+:\s+(.*)$")
+
+
+def check_workflow_yaml(ctx: Ctx) -> list[Violation]:
+    """A plain (unquoted) YAML value with ": " in it is a parse error, and GitHub then rejects the whole
+    workflow ("Invalid workflow file") without running a single job. Block scalars (run: |) are skipped."""
+    out = []
+    for rel in sorted(p.relative_to(ctx.root).as_posix() for p in (ctx.root / ".github/workflows").glob("*.y*ml")):
+        block = None  # indentation of the key that opened a block scalar
+        for i, ln in enumerate(_read(ctx, rel).splitlines(), 1):
+            indent = len(ln) - len(ln.lstrip())
+            if block is not None:
+                if not ln.strip() or indent > block:
+                    continue
+                block = None
+            m = PLAIN_VALUE.match(ln)
+            if not m or ln.lstrip().startswith("#"):
+                continue
+            value = re.split(r"\s#", m.group(2), maxsplit=1)[0].rstrip()
+            if re.fullmatch(r"[|>][-+0-9]*", value):
+                block = indent
+                continue
+            if not value or value[0] in "\"'[{&*!|>":
+                continue
+            if ": " in value or value.endswith(":"):
+                out.append(Violation("workflow-yaml", rel, i, f"the unquoted value {value[:60]!r} contains ': ', a YAML error: GitHub rejects the "
+                                     f"whole workflow and runs nothing. Quote it. Rule: every workflow parses {DOC}", key=f"{i}"))
+    return out
+
+
 def check(ctx: Ctx) -> list[Violation]:
     return (check_placeholder_guard(ctx) + check_android_signing(ctx) + check_feed_guard(ctx) + check_readme_links(ctx)
-            + check_runbook(ctx) + check_android_ci(ctx))
+            + check_runbook(ctx) + check_android_ci(ctx) + check_workflow_yaml(ctx))

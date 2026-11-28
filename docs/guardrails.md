@@ -367,6 +367,12 @@ receives the keystore sets `umask 077` before decoding it; an `if: always()` ste
 Fixture: `tools/lint/fixtures/bad/.github/workflows/android-release.yml` (11 cases, plus Good
 lines that must stay quiet).
 
+**Check** (`workflow-yaml`, `pipeline.py`). No workflow under `.github/workflows/` has an
+unquoted value containing `: ` (outside `run: |` block scalars). That is a YAML error: GitHub
+rejects the whole file as "Invalid workflow file" and runs no job. Found 2026-11-28 in
+`guardrails.yml` (a step name said `release: --release`), which would have silently disabled the
+Guardrails workflow; quote such values or reword them.
+
 Not checkable by a lint, verified only by the first real tag run: that the secrets are set, the
 NDK and cargo-ndk install, the Gradle build passes on Linux, and the approvals work.
 

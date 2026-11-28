@@ -1,0 +1,18 @@
+# Fixture for workflow-yaml: one Bad line (an unquoted value with ": ", which GitHub rejects as
+# invalid YAML and then runs nothing); every other line is Good and must stay quiet.
+name: guardrails
+on:
+  push:
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guardrails (a tag is a release: --release too)
+        run: python3 tools/lint/run.py
+      - name: "Quoted: fine"
+        run: |
+          echo "::error::a colon: inside a block scalar is fine"
+          x: y
+      - name: Expression
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: echo done # a comment: is not part of the value

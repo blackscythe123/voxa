@@ -100,3 +100,4 @@
 1 release-runbook docs/release-runbook.md
 1 release-runbook README.md
 11 release-android-ci .github/workflows/android-release.yml        # no tag trigger, secrets outside the environment, set -x, echo, GITHUB_ENV, inline, dev flag, no always() delete, no umask, no size check, keystore and K1 in one job
+1 workflow-yaml .github/workflows/guardrails.yml                    # an unquoted step name with ': '; quoted, block-scalar, expression and comment colons are fine

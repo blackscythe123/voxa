@@ -122,7 +122,7 @@ def main_self_test() -> int:
              "android-onboarding-permissions",
              "licences-stale", "licences-allowed", "licences-asset",
              "release-placeholder-guard", "release-android-signing", "release-feed-guard", "release-readme-links", "release-runbook",
-             "release-android-ci"}
+             "release-android-ci", "workflow-yaml"}
     for r in sorted(every - rules):
         ok = False
         print(f"FAIL rule {r} has no fixture proving it catches a violation")
