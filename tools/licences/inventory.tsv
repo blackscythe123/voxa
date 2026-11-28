@@ -1,0 +1,570 @@
+# Every library, font, model and native library Voxa ships: kind, name, version, licence (SPDX), apps.
+# Written by tools/licences/generate.py; never edit by hand. tools/lint checks each licence and the fingerprint.
+# fingerprint 6fa6b6228a12fb3d5acf614cd95ccbfd909b64ece6606a3f46d1d6c31b026981
+Rust crate	adler2	2.0.1	0BSD OR MIT OR Apache-2.0	windows,macos
+Rust crate	aho-corasick	1.1.5	Unlicense OR MIT	windows,macos
+Rust crate	aligned	0.4.3	MIT OR Apache-2.0	windows,macos
+Rust crate	aligned-vec	0.6.4	MIT	windows,macos
+Android library	androidx.activity:activity	1.9.3	Apache-2.0	android
+Android library	androidx.activity:activity-compose	1.9.3	Apache-2.0	android
+Android library	androidx.activity:activity-ktx	1.9.3	Apache-2.0	android
+Android library	androidx.annotation:annotation	1.8.1	Apache-2.0	android
+Android library	androidx.annotation:annotation-experimental	1.4.1	Apache-2.0	android
+Android library	androidx.annotation:annotation-jvm	1.8.1	Apache-2.0	android
+Android library	androidx.arch.core:core-common	2.2.0	Apache-2.0	android
+Android library	androidx.arch.core:core-runtime	2.2.0	Apache-2.0	android
+Android library	androidx.autofill:autofill	1.0.0	Apache-2.0	android
+Android library	androidx.collection:collection	1.4.4	Apache-2.0	android
+Android library	androidx.collection:collection-jvm	1.4.4	Apache-2.0	android
+Android library	androidx.collection:collection-ktx	1.4.4	Apache-2.0	android
+Android library	androidx.compose.animation:animation	1.7.6	Apache-2.0	android
+Android library	androidx.compose.animation:animation-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.animation:animation-core	1.7.6	Apache-2.0	android
+Android library	androidx.compose.animation:animation-core-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.foundation:foundation	1.7.6	Apache-2.0	android
+Android library	androidx.compose.foundation:foundation-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.foundation:foundation-layout	1.7.6	Apache-2.0	android
+Android library	androidx.compose.foundation:foundation-layout-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.material3:material3-android	1.3.1	Apache-2.0	android
+Android library	androidx.compose.material:material-icons-core	1.7.6	Apache-2.0	android
+Android library	androidx.compose.material:material-icons-core-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.material:material-ripple	1.7.6	Apache-2.0	android
+Android library	androidx.compose.material:material-ripple-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.runtime:runtime	1.7.6	Apache-2.0	android
+Android library	androidx.compose.runtime:runtime-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.runtime:runtime-saveable	1.7.6	Apache-2.0	android
+Android library	androidx.compose.runtime:runtime-saveable-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-geometry	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-geometry-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-graphics	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-graphics-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-text	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-text-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-unit	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-unit-android	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-util	1.7.6	Apache-2.0	android
+Android library	androidx.compose.ui:ui-util-android	1.7.6	Apache-2.0	android
+Android library	androidx.concurrent:concurrent-futures	1.1.0	Apache-2.0	android
+Android library	androidx.core:core	1.15.0	Apache-2.0	android
+Android library	androidx.core:core-ktx	1.15.0	Apache-2.0	android
+Android library	androidx.core:core-splashscreen	1.0.1	Apache-2.0	android
+Android library	androidx.customview:customview-poolingcontainer	1.0.0	Apache-2.0	android
+Android library	androidx.emoji2:emoji2	1.3.0	Apache-2.0	android
+Android library	androidx.graphics:graphics-path	1.0.1	Apache-2.0	android
+Android library	androidx.interpolator:interpolator	1.0.0	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-common	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-common-java8	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-common-jvm	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-livedata-core	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-process	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-runtime	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-runtime-android	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-runtime-compose	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-runtime-compose-android	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-runtime-ktx	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-runtime-ktx-android	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-viewmodel	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-viewmodel-android	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-viewmodel-ktx	2.8.3	Apache-2.0	android
+Android library	androidx.lifecycle:lifecycle-viewmodel-savedstate	2.8.3	Apache-2.0	android
+Android library	androidx.profileinstaller:profileinstaller	1.3.1	Apache-2.0	android
+Android library	androidx.savedstate:savedstate	1.2.1	Apache-2.0	android
+Android library	androidx.savedstate:savedstate-ktx	1.2.1	Apache-2.0	android
+Android library	androidx.startup:startup-runtime	1.1.1	Apache-2.0	android
+Android library	androidx.tracing:tracing	1.2.0	Apache-2.0	android
+Android library	androidx.versionedparcelable:versionedparcelable	1.1.1	Apache-2.0	android
+Rust crate	anyhow	1.0.104	MIT OR Apache-2.0	windows,macos,android
+Rust crate	arrayref	0.3.9	BSD-2-Clause	windows,macos
+Rust crate	arrayvec	0.7.8	MIT OR Apache-2.0	windows,macos
+Rust crate	as-slice	0.2.1	MIT OR Apache-2.0	windows,macos
+Rust crate	ash	0.38.0+1.3.281	MIT OR Apache-2.0	windows
+Rust crate	ash-window	0.13.0	MIT OR Apache-2.0	windows
+Rust crate	async-channel	1.9.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-channel	2.5.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-compression	0.4.52	MIT OR Apache-2.0	windows,macos
+Rust crate	async-executor	1.14.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-fs	2.2.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-global-executor	2.4.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-io	2.6.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-lock	3.5.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-net	2.0.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-process	2.5.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-signal	0.2.14	Apache-2.0 OR MIT	macos
+Rust crate	async-std	1.13.2	Apache-2.0 OR MIT	windows,macos
+Rust crate	async-task	4.7.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	async_zip	0.0.17	MIT	windows,macos
+Rust crate	atomic	0.5.3	Apache-2.0/MIT	windows,macos
+Rust crate	atomic-waker	1.1.2	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	av-scenechange	0.14.1	MIT	windows,macos
+Rust crate	av1-grain	0.2.5	BSD-2-Clause	windows,macos
+Rust crate	avif-serialize	0.8.9	BSD-3-Clause	windows,macos
+Rust crate	base64	0.22.1	MIT OR Apache-2.0	windows,macos,android
+Rust crate	base64	0.23.1	MIT OR Apache-2.0	windows,macos,android
+Rust crate	bit-set	0.8.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	bit-vec	0.8.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	bit_field	0.10.4	MIT OR Apache-2.0	windows,macos
+Rust crate	bitflags	1.3.2	MIT/Apache-2.0	windows,macos
+Rust crate	bitflags	2.13.2	MIT OR Apache-2.0	windows,macos,android
+Rust crate	bitstream-io	4.10.0	MIT/Apache-2.0	windows,macos
+Rust crate	blade-graphics	0.7.1	MIT	windows,macos
+Rust crate	blade-util	0.3.0	MIT	windows,macos
+Rust crate	block	0.1.6	MIT	macos
+Rust crate	block-buffer	0.10.4	MIT OR Apache-2.0	windows,macos
+Rust crate	block-buffer	0.12.1	MIT OR Apache-2.0	windows,macos
+Rust crate	block2	0.6.2	MIT	macos
+Rust crate	blocking	1.7.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	bstr	1.14.0	MIT OR Apache-2.0	windows,macos
+Rust crate	bytemuck	1.25.2	Zlib OR Apache-2.0 OR MIT	windows,macos
+Rust crate	byteorder	1.5.0	Unlicense OR MIT	macos
+Rust crate	byteorder-lite	0.1.0	Unlicense OR MIT	windows,macos
+Rust crate	bytes	1.12.2	MIT	windows,macos,android
+Rust crate	camino	1.2.6	MIT OR Apache-2.0	android
+Rust crate	cargo-platform	0.3.3	MIT OR Apache-2.0	android
+Rust crate	cargo_metadata	0.23.1	MIT	android
+Rust crate	cfg-if	1.0.5	MIT OR Apache-2.0	windows,macos,android
+Rust crate	cgl	0.3.2	MIT / Apache-2.0	macos
+Rust crate	chrono	0.4.45	MIT OR Apache-2.0	windows,macos
+Rust crate	cocoa	0.26.0	MIT OR Apache-2.0	macos
+Rust crate	cocoa-foundation	0.2.0	MIT OR Apache-2.0	macos
+Rust crate	codespan-reporting	0.12.0	Apache-2.0	windows,macos
+Rust crate	color_quant	1.1.0	MIT	windows,macos
+Android library	com.google.guava:listenablefuture	1.0	Apache-2.0	android
+Rust crate	command-fds	0.3.3	Apache-2.0	macos
+Rust crate	compression-codecs	0.4.48	MIT OR Apache-2.0	windows,macos
+Rust crate	compression-core	0.4.34	MIT OR Apache-2.0	windows,macos
+Rust crate	concurrent-queue	2.5.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	const-oid	0.10.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	cookie	0.18.2	MIT OR Apache-2.0	windows,macos
+Rust crate	core-foundation	0.10.0	MIT OR Apache-2.0	macos
+Rust crate	core-foundation	0.9.4	MIT OR Apache-2.0	macos
+Rust crate	core-foundation-sys	0.8.7	MIT OR Apache-2.0	macos
+Rust crate	core-graphics	0.24.0	MIT OR Apache-2.0	macos
+Rust crate	core-graphics	0.25.0	MIT OR Apache-2.0	macos
+Rust crate	core-graphics-types	0.1.3	MIT OR Apache-2.0	macos
+Rust crate	core-graphics-types	0.2.0	MIT OR Apache-2.0	macos
+Rust crate	core-graphics2	0.4.1	MIT OR Apache-2.0	macos
+Rust crate	core-text	21.0.0	MIT OR Apache-2.0	macos
+Rust crate	core-video	0.4.3	MIT OR Apache-2.0	macos
+Rust crate	core_detect	1.0.0	MIT/Apache-2.0	windows,macos
+Rust crate	core_maths	0.1.1	MIT	windows,macos
+Rust crate	coreaudio-rs	0.11.3	MIT/Apache-2.0	macos
+Rust crate	coreaudio-sys	0.2.18	MIT	macos
+Rust crate	cpal	0.15.3	Apache-2.0	windows,macos
+Rust crate	cpufeatures	0.2.17	MIT OR Apache-2.0	windows,macos
+Rust crate	cpufeatures	0.3.1	MIT OR Apache-2.0	windows,macos
+Rust crate	crc32fast	1.5.5	MIT OR Apache-2.0	windows,macos
+Rust crate	crossbeam-channel	0.5.17	MIT OR Apache-2.0	windows,macos
+Rust crate	crossbeam-deque	0.8.8	MIT OR Apache-2.0	windows,macos
+Rust crate	crossbeam-epoch	0.9.21	MIT OR Apache-2.0	windows,macos
+Rust crate	crossbeam-queue	0.3.14	MIT OR Apache-2.0	windows,macos
+Rust crate	crossbeam-utils	0.8.23	MIT OR Apache-2.0	windows,macos
+Rust crate	crypto-common	0.1.7	MIT OR Apache-2.0	windows,macos
+Rust crate	crypto-common	0.2.2	MIT OR Apache-2.0	windows,macos
+Rust crate	ctor	0.4.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	dasp_sample	0.11.0	MIT OR Apache-2.0	windows,macos
+Rust crate	data-url	0.3.2	MIT OR Apache-2.0	windows,macos
+Rust crate	deflate64	0.1.12	MIT	windows,macos
+Rust crate	deranged	0.5.9	MIT OR Apache-2.0	windows,macos
+Rust crate	digest	0.10.7	MIT OR Apache-2.0	windows,macos
+Rust crate	digest	0.11.3	MIT OR Apache-2.0	windows,macos
+Rust crate	dirs	4.0.0	MIT OR Apache-2.0	windows,macos
+Rust crate	dirs	5.0.1	MIT OR Apache-2.0	macos
+Rust crate	dirs	7.0.0	MIT OR Apache-2.0	macos
+Rust crate	dirs-sys	0.3.7	MIT OR Apache-2.0	windows,macos
+Rust crate	dirs-sys	0.4.1	MIT OR Apache-2.0	macos
+Rust crate	dirs-sys	0.5.0	MIT OR Apache-2.0	macos
+Rust crate	dispatch2	0.3.1	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	dpi	0.1.2	Apache-2.0 AND MIT	windows,macos
+Rust crate	dtor	0.0.6	Apache-2.0 OR MIT	windows,macos
+Rust crate	dunce	1.0.5	CC0-1.0 OR MIT-0 OR Apache-2.0	windows,macos
+Rust crate	dyn-clone	1.0.20	MIT OR Apache-2.0	windows,macos
+Rust crate	either	1.19.0	MIT OR Apache-2.0	windows,macos
+Rust crate	encoding_rs	0.8.44	(Apache-2.0 OR MIT) AND BSD-3-Clause	windows,macos
+Rust crate	equator	0.4.2	MIT	windows,macos
+Rust crate	equivalent	1.0.3	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	erased-serde	0.4.11	MIT OR Apache-2.0	windows,macos
+Rust crate	errno	0.3.15	MIT OR Apache-2.0	windows,macos,android
+Rust crate	etagere	0.2.15	MIT/Apache-2.0	windows,macos
+Rust crate	euclid	0.22.14	MIT OR Apache-2.0	windows,macos
+Rust crate	event-listener	2.5.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	event-listener	5.4.2	Apache-2.0 OR MIT	windows,macos
+Rust crate	event-listener-strategy	0.5.4	Apache-2.0 OR MIT	windows,macos
+Rust crate	exr	1.74.3	BSD-3-Clause	windows,macos
+Rust crate	fastrand	1.9.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	fastrand	2.5.0	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	fax	0.2.7	MIT	windows,macos
+Rust crate	fdeflate	0.3.7	MIT OR Apache-2.0	windows,macos
+Rust crate	filetime	0.2.30	MIT/Apache-2.0	windows,macos
+Rust crate	flate2	1.1.11	MIT OR Apache-2.0	windows,macos
+Rust crate	float-cmp	0.9.0	MIT	windows,macos
+Rust crate	float-ord	0.3.2	MIT / Apache-2.0	macos
+Rust crate	float_next_after	1.0.0	MIT	windows,macos
+Rust crate	flume	0.11.1	Apache-2.0/MIT	windows
+Rust crate	fnv	1.0.7	Apache-2.0 / MIT	windows,macos
+Rust crate	foldhash	0.1.5	Zlib	windows,macos
+Rust crate	foldhash	0.2.0	Zlib	windows,macos
+Rust crate	fontdb	0.23.0	MIT	windows,macos
+Rust crate	foreign-types	0.5.0	MIT/Apache-2.0	macos
+Rust crate	foreign-types-shared	0.3.1	MIT/Apache-2.0	macos
+Rust crate	form_urlencoded	1.2.3	MIT OR Apache-2.0	windows,macos,android
+Font	Fraunces font	1.000	OFL-1.1	windows,macos
+Rust crate	futf	0.1.5	MIT / Apache-2.0	windows
+Rust crate	futures	0.3.34	MIT OR Apache-2.0	windows,macos
+Rust crate	futures-channel	0.3.34	MIT OR Apache-2.0	windows,macos,android
+Rust crate	futures-core	0.3.34	MIT OR Apache-2.0	windows,macos,android
+Rust crate	futures-executor	0.3.34	MIT OR Apache-2.0	windows,macos
+Rust crate	futures-io	0.3.34	MIT OR Apache-2.0	windows,macos,android
+Rust crate	futures-lite	1.13.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	futures-lite	2.6.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	futures-sink	0.3.34	MIT OR Apache-2.0	windows,macos,android
+Rust crate	futures-task	0.3.34	MIT OR Apache-2.0	windows,macos,android
+Rust crate	futures-util	0.3.34	MIT OR Apache-2.0	windows,macos,android
+Rust crate	generic-array	0.14.7	MIT	windows,macos
+Rust crate	getrandom	0.2.17	MIT OR Apache-2.0	windows,macos,android
+Rust crate	getrandom	0.3.4	MIT OR Apache-2.0	windows
+Rust crate	getrandom	0.4.3	MIT OR Apache-2.0	windows,macos,android
+Rust crate	gif	0.14.2	MIT OR Apache-2.0	windows,macos
+Rust crate	global-hotkey	0.10.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	globset	0.4.21	Unlicense OR MIT	windows,macos
+Rust crate	gpu-alloc	0.6.2	MIT OR Apache-2.0	windows
+Rust crate	gpu-alloc-ash	0.7.1	MIT OR Apache-2.0	windows
+Rust crate	gpu-alloc-types	0.3.1	MIT OR Apache-2.0	windows
+Rust crate	gpui	0.2.2	Apache-2.0	windows,macos
+Rust crate	gpui_collections	0.2.2	Apache-2.0	windows,macos
+Rust crate	gpui_http_client	0.2.2	Apache-2.0	windows,macos
+Rust crate	gpui_media	0.2.2	Apache-2.0	macos
+Rust crate	gpui_refineable	0.2.2	Apache-2.0	windows,macos
+Rust crate	gpui_semantic_version	0.2.2	Apache-2.0	windows,macos
+Rust crate	gpui_sum_tree	0.2.2	Apache-2.0	windows,macos
+Rust crate	gpui_util	0.2.2	Apache-2.0	windows,macos
+Rust crate	grid	0.18.0	MIT	windows,macos
+Rust crate	h2	0.4.20	MIT	windows,macos
+Rust crate	half	2.7.1	MIT OR Apache-2.0	windows,macos
+Rust crate	hashbrown	0.15.5	MIT OR Apache-2.0	windows,macos
+Rust crate	hashbrown	0.17.2	MIT OR Apache-2.0	windows,macos,android
+Rust crate	heck	0.5.0	MIT OR Apache-2.0	android
+Rust crate	hexf-parse	0.2.1	CC0-1.0	windows,macos
+Rust crate	home	0.5.12	MIT OR Apache-2.0	windows,macos
+Rust crate	hound	3.5.1	Apache-2.0	windows,macos,android
+Rust crate	http	1.5.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	http-body	1.1.0	MIT	windows,macos,android
+Rust crate	http-body-util	0.1.5	MIT	windows,macos,android
+Rust crate	httparse	1.10.1	MIT OR Apache-2.0	windows,macos,android
+Rust crate	hybrid-array	0.4.15	MIT OR Apache-2.0	windows,macos
+Rust crate	hyper	1.12.0	MIT	windows,macos,android
+Rust crate	hyper-rustls	0.27.10	Apache-2.0 OR ISC OR MIT	windows,macos,android
+Rust crate	hyper-util	0.1.21	MIT	windows,macos,android
+Rust crate	iana-time-zone	0.1.65	MIT OR Apache-2.0	macos
+Rust crate	icu_collections	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	icu_locale_core	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	icu_normalizer	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	icu_normalizer_data	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	icu_properties	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	icu_properties_data	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	icu_provider	2.4.0	Unicode-3.0	windows,macos,android
+Rust crate	idna	1.1.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	idna_adapter	1.2.2	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	image	0.25.10	MIT OR Apache-2.0	windows,macos
+Rust crate	image-webp	0.2.4	MIT OR Apache-2.0	windows,macos
+Rust crate	imagesize	0.13.0	MIT	windows,macos
+Rust crate	imgref	1.12.3	CC0-1.0 OR Apache-2.0	windows,macos
+Rust crate	indexmap	2.14.2	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	inventory	0.3.25	MIT OR Apache-2.0	windows,macos
+Rust crate	io-surface	0.16.1	MIT OR Apache-2.0	macos
+Rust crate	ipnet	2.12.2	MIT OR Apache-2.0	windows,macos,android
+Rust crate	itertools	0.14.0	MIT OR Apache-2.0	windows,macos
+Rust crate	itoa	1.0.19	MIT OR Apache-2.0	windows,macos,android
+Rust crate	keyboard-types	0.8.3	MIT OR Apache-2.0	windows,macos
+Rust crate	kurbo	0.11.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	kv-log-macro	1.0.7	MIT OR Apache-2.0	windows,macos
+Rust crate	lazy_static	1.5.1	MIT OR Apache-2.0	macos
+Rust crate	leak	0.1.2	Apache-2.0 OR MIT	macos
+Rust crate	leaky-cow	0.1.1	MIT / Apache-2.0	macos
+Rust crate	lebe	0.5.3	BSD-3-Clause	windows,macos
+Rust crate	libc	0.2.191	MIT OR Apache-2.0	windows,macos,android
+Rust crate	libloading	0.8.9	ISC	windows,macos
+Rust crate	libm	0.2.16	MIT	windows,macos
+Rust crate	linux-raw-sys	0.12.1	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	android
+Rust crate	litemap	0.8.3	Unicode-3.0	windows,macos,android
+Rust crate	lock_api	0.4.14	MIT OR Apache-2.0	windows,macos
+Rust crate	log	0.4.35	MIT OR Apache-2.0	windows,macos,android
+Rust crate	loop9	0.1.5	MIT	windows,macos
+Rust crate	lyon	1.0.19	MIT OR Apache-2.0	windows,macos
+Rust crate	lyon_algorithms	1.0.22	MIT OR Apache-2.0	windows,macos
+Rust crate	lyon_geom	1.0.20	MIT OR Apache-2.0	windows,macos
+Rust crate	lyon_path	1.0.19	MIT OR Apache-2.0	windows,macos
+Rust crate	lyon_tessellation	1.0.23	MIT OR Apache-2.0	windows,macos
+Rust crate	mac	0.1.1	MIT/Apache-2.0	windows
+Rust crate	mach2	0.4.3	BSD-2-Clause OR MIT OR Apache-2.0	macos
+Rust crate	malloc_buf	0.0.6	MIT	macos
+Font	Manrope font	4.505	OFL-1.1	android
+Rust crate	matrixmultiply	0.3.11	MIT/Apache-2.0	windows,macos
+Rust crate	maybe-rayon	0.1.1	MIT	windows,macos
+Rust crate	memchr	2.8.3	Unlicense OR MIT	windows,macos,android
+Rust crate	memmap2	0.9.12	MIT OR Apache-2.0	windows,macos
+Rust crate	metal	0.29.0	MIT OR Apache-2.0	macos
+Rust crate	mime	0.3.18	MIT OR Apache-2.0	windows,macos,android
+Rust crate	mime_guess	2.0.5	MIT	windows,macos,android
+Rust crate	miniz_oxide	0.8.9	MIT OR Zlib OR Apache-2.0	windows,macos
+Rust crate	miniz_oxide	0.9.1	MIT OR Zlib OR Apache-2.0	windows,macos
+Rust crate	mint	0.5.9	MIT	windows,macos
+Rust crate	mio	1.2.5	MIT	windows,macos,android
+Rust crate	moxcms	0.8.1	BSD-3-Clause OR Apache-2.0	windows,macos
+Rust crate	muda	0.21.2	Apache-2.0 OR MIT	windows,macos
+Rust crate	multiversion	0.8.1	MIT OR Apache-2.0	windows,macos
+Rust crate	naga	25.0.1	MIT OR Apache-2.0	windows,macos
+Rust crate	nanorand	0.7.0	Zlib	windows
+Rust crate	ndarray	0.16.1	MIT OR Apache-2.0	windows,macos
+Android library	net.java.dev.jna:jna	5.17.0	Apache-2.0 OR LGPL-2.1-or-later	android
+Rust crate	new_debug_unreachable	1.0.6	MIT	windows,macos
+Rust crate	nix	0.29.0	MIT	macos
+Rust crate	nix	0.31.4	MIT	macos
+Rust crate	no_std_io2	0.9.4	Apache-2.0 OR MIT	windows,macos
+Rust crate	nom	8.0.0	MIT	windows,macos
+Rust crate	num-bigint	0.4.8	MIT OR Apache-2.0	windows,macos
+Rust crate	num-complex	0.4.6	MIT OR Apache-2.0	windows,macos
+Rust crate	num-conv	0.2.2	MIT OR Apache-2.0	windows,macos
+Rust crate	num-integer	0.1.47	MIT OR Apache-2.0	windows,macos
+Rust crate	num-rational	0.4.2	MIT OR Apache-2.0	windows,macos
+Rust crate	num-traits	0.2.19	MIT OR Apache-2.0	windows,macos
+Rust crate	num_cpus	1.17.0	MIT OR Apache-2.0	windows,macos
+Rust crate	objc	0.2.7	MIT	macos
+Rust crate	objc2	0.6.5	MIT	macos
+Rust crate	objc2-app-kit	0.3.2	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	objc2-core-foundation	0.3.2	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	objc2-core-graphics	0.3.2	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	objc2-encode	4.1.0	MIT	macos
+Rust crate	objc2-exception-helper	0.1.1	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	objc2-foundation	0.3.2	MIT	macos
+Rust crate	objc2-metal	0.3.2	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	objc2-quartz-core	0.3.2	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	objc2-web-kit	0.3.2	Zlib OR Apache-2.0 OR MIT	macos
+Rust crate	once_cell	1.21.4	MIT OR Apache-2.0	windows,macos,android
+Native library	ONNX Runtime	1.22.0	MIT	windows,macos
+Rust crate	option-ext	0.2.0	MPL-2.0	macos
+Android library	org.jetbrains.kotlin:kotlin-stdlib	2.2.21	Apache-2.0	android
+Android library	org.jetbrains.kotlin:kotlin-stdlib-common	2.2.21	Apache-2.0	android
+Android library	org.jetbrains.kotlinx:kotlinx-coroutines-android	1.9.0	Apache-2.0	android
+Android library	org.jetbrains.kotlinx:kotlinx-coroutines-core	1.9.0	Apache-2.0	android
+Android library	org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm	1.9.0	Apache-2.0	android
+Android library	org.jetbrains:annotations	23.0.0	Apache-2.0	android
+Rust crate	ort	2.0.0-rc.10	MIT OR Apache-2.0	windows,macos
+Rust crate	ort-sys	2.0.0-rc.10	MIT OR Apache-2.0	windows,macos
+Rust crate	parking	2.2.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	parking_lot	0.12.5	MIT OR Apache-2.0	windows,macos
+Rust crate	parking_lot_core	0.9.12	MIT OR Apache-2.0	windows,macos
+Rust crate	pathfinder_geometry	0.5.1	MIT/Apache-2.0	macos
+Rust crate	pathfinder_simd	0.5.6	MIT OR Apache-2.0	macos
+Rust crate	percent-encoding	2.3.2	MIT OR Apache-2.0	windows,macos,android
+Rust crate	pico-args	0.5.0	MIT	windows,macos
+Rust crate	pin-project	1.2.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	pin-project-lite	0.2.18	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	pin-utils	0.1.1	MIT OR Apache-2.0	windows,macos
+Rust crate	piper	0.2.5	MIT OR Apache-2.0	windows,macos
+Rust crate	png	0.17.16	MIT OR Apache-2.0	windows,macos
+Rust crate	png	0.18.1	MIT OR Apache-2.0	windows,macos
+Rust crate	polling	3.11.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	pollster	0.2.5	Apache-2.0/MIT	windows,macos
+Rust crate	postage	0.5.0	MIT	windows,macos
+Rust crate	potential_utf	0.1.6	Unicode-3.0	windows,macos,android
+Rust crate	powerfmt	0.2.1	MIT OR Apache-2.0	windows,macos
+Rust crate	ppv-lite86	0.2.21	MIT OR Apache-2.0	windows
+Rust crate	profiling	1.0.18	MIT OR Apache-2.0	windows,macos
+Rust crate	psm	0.1.32	MIT OR Apache-2.0	windows,macos
+Rust crate	pxfm	0.1.30	BSD-3-Clause OR Apache-2.0	windows,macos
+Rust crate	qoi	0.4.1	MIT/Apache-2.0	windows,macos
+Rust crate	quick-error	2.0.1	MIT/Apache-2.0	windows,macos
+Rust crate	rand	0.9.5	MIT OR Apache-2.0	windows
+Rust crate	rand_chacha	0.9.0	MIT OR Apache-2.0	windows
+Rust crate	rand_core	0.9.5	MIT OR Apache-2.0	windows
+Rust crate	rav1e	0.8.1	BSD-2-Clause	windows,macos
+Rust crate	ravif	0.13.0	BSD-3-Clause	windows,macos
+Rust crate	raw-window-handle	0.6.2	MIT OR Apache-2.0 OR Zlib	windows,macos
+Rust crate	rawpointer	0.2.1	MIT/Apache-2.0	windows,macos
+Rust crate	rayon	1.12.0	MIT OR Apache-2.0	windows,macos
+Rust crate	rayon-core	1.13.0	MIT OR Apache-2.0	windows,macos
+Rust crate	ref-cast	1.0.27	MIT OR Apache-2.0	windows,macos
+Rust crate	regex	1.13.2	MIT OR Apache-2.0	windows,macos
+Rust crate	regex-automata	0.4.19	MIT OR Apache-2.0	windows,macos
+Rust crate	regex-syntax	0.8.12	MIT OR Apache-2.0	windows,macos
+Rust crate	reqwest	0.12.28	MIT OR Apache-2.0	windows,macos,android
+Rust crate	resvg	0.45.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	rgb	0.8.53	MIT	windows,macos
+Rust crate	ring	0.17.14	Apache-2.0 AND ISC	windows,macos,android
+Rust crate	roxmltree	0.20.0	MIT OR Apache-2.0	windows,macos
+Rust crate	Rust standard library	1.100.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	rust-embed	8.14.0	MIT	windows,macos
+Rust crate	rust-embed-utils	8.14.0	MIT	windows,macos
+Rust crate	rustc-hash	1.1.0	Apache-2.0/MIT	windows,macos
+Rust crate	rustc-hash	2.1.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	rustix	0.38.44	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	macos
+Rust crate	rustix	1.1.6	Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT	windows,macos,android
+Rust crate	rustls	0.23.46	Apache-2.0 OR ISC OR MIT	windows,macos,android
+Rust crate	rustls-native-certs	0.8.5	Apache-2.0 OR ISC OR MIT	windows,macos
+Rust crate	rustls-pemfile	2.2.0	Apache-2.0 OR ISC OR MIT	windows,macos
+Rust crate	rustls-pki-types	1.16.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	rustls-webpki	0.103.17	ISC	windows,macos,android
+Rust crate	rustybuzz	0.20.1	MIT	windows,macos
+Rust crate	ryu	1.0.23	Apache-2.0 OR BSL-1.0	windows,macos,android
+Rust crate	same-file	1.0.6	Unlicense/MIT	windows,macos
+Rust crate	schannel	0.1.30	MIT	windows
+Rust crate	schemars	1.2.3	MIT	windows,macos
+Rust crate	scopeguard	1.2.0	MIT OR Apache-2.0	windows,macos
+Rust crate	seahash	4.1.0	MIT	windows,macos
+Rust crate	security-framework	3.7.0	MIT OR Apache-2.0	macos
+Rust crate	security-framework-sys	2.17.0	MIT OR Apache-2.0	macos
+Rust crate	semver	1.0.28	MIT OR Apache-2.0	android
+Rust crate	serde	1.0.229	MIT OR Apache-2.0	windows,macos,android
+Rust crate	serde_core	1.0.229	MIT OR Apache-2.0	windows,macos,android
+Rust crate	serde_fmt	1.1.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	serde_json	1.0.154	MIT OR Apache-2.0	windows,macos,android
+Rust crate	serde_json_lenient	0.2.4	MIT/Apache-2.0	windows,macos
+Rust crate	serde_urlencoded	0.7.1	MIT/Apache-2.0	windows,macos,android
+Rust crate	sha1_smol	1.0.1	BSD-3-Clause	windows,macos
+Rust crate	sha2	0.10.9	MIT OR Apache-2.0	windows,macos
+Rust crate	sha2	0.11.1	MIT OR Apache-2.0	windows,macos
+Rust crate	shlex	1.3.0	MIT OR Apache-2.0	windows,macos
+Rust crate	signal-hook-registry	1.4.8	MIT OR Apache-2.0	macos
+Model	Silero VAD model	5	MIT	windows,macos
+Rust crate	simd-adler32	0.3.10	MIT	windows,macos
+Rust crate	simdutf8	0.1.5	MIT OR Apache-2.0	windows,macos
+Rust crate	simplecss	0.2.2	Apache-2.0 OR MIT	windows,macos
+Rust crate	siphasher	1.0.4	MIT OR Apache-2.0	windows,macos
+Rust crate	slab	0.4.12	MIT	windows,macos,android
+Rust crate	slotmap	1.1.1	Zlib	windows,macos
+Rust crate	smallvec	1.16.6	MIT OR Apache-2.0	windows,macos,android
+Rust crate	smallvec	2.0.0-alpha.10	MIT OR Apache-2.0	windows,macos
+Rust crate	smol	2.0.2	Apache-2.0 OR MIT	windows,macos
+Rust crate	socket2	0.6.5	MIT OR Apache-2.0	windows,macos,android
+Rust crate	spin	0.9.9	MIT	windows
+Rust crate	spirv	0.3.0+sdk-1.3.268.0	Apache-2.0	windows
+Rust crate	stable_deref_trait	1.2.1	MIT OR Apache-2.0	windows,macos,android
+Rust crate	stacker	0.1.25	MIT OR Apache-2.0	windows,macos
+Rust crate	stacksafe	0.1.4	Apache-2.0	windows,macos
+Rust crate	static_assertions	1.1.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	strict-num	0.1.1	MIT	windows,macos
+Rust crate	strum	0.26.3	MIT	windows,macos
+Rust crate	strum	0.27.2	MIT	windows,macos
+Rust crate	subtle	2.6.1	BSD-3-Clause	windows,macos,android
+Rust crate	svg_fmt	0.4.5	MIT/Apache-2.0	windows,macos
+Rust crate	svgtypes	0.15.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	sync_wrapper	1.0.2	Apache-2.0	windows,macos,android
+Rust crate	system-configuration	0.6.1	MIT OR Apache-2.0	macos
+Rust crate	system-configuration-sys	0.6.0	MIT OR Apache-2.0	macos
+Rust crate	taffy	0.9.0	MIT	windows,macos
+Rust crate	take-until	0.2.0	MIT	windows,macos
+Rust crate	tao	0.37.3	Apache-2.0	windows,macos
+Rust crate	target-features	0.1.6	MIT OR Apache-2.0	windows,macos
+Rust crate	tempfile	3.27.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	tendril	0.4.3	MIT/Apache-2.0	windows
+Rust crate	termcolor	1.4.1	Unlicense OR MIT	windows,macos
+Rust crate	thiserror	1.0.69	MIT OR Apache-2.0	windows,macos
+Rust crate	thiserror	2.0.21	MIT OR Apache-2.0	windows,macos,android
+Rust crate	tiff	0.11.3	MIT	windows,macos
+Rust crate	time	0.3.55	MIT OR Apache-2.0	windows,macos
+Rust crate	time-core	0.1.9	MIT OR Apache-2.0	windows,macos
+Rust crate	tiny-skia	0.11.4	BSD-3-Clause	windows,macos
+Rust crate	tiny-skia-path	0.11.4	BSD-3-Clause	windows,macos
+Rust crate	tinystr	0.8.5	Unicode-3.0	windows,macos,android
+Rust crate	tinyvec	1.13.3	Zlib OR Apache-2.0 OR MIT	windows,macos
+Rust crate	tokio	1.54.1	MIT	windows,macos,android
+Rust crate	tokio-rustls	0.26.6	MIT OR Apache-2.0	windows,macos,android
+Rust crate	tokio-socks	0.5.3	MIT	windows,macos
+Rust crate	tokio-util	0.7.20	MIT	windows,macos
+Rust crate	tower	0.5.3	MIT	windows,macos,android
+Rust crate	tower-http	0.6.11	MIT	windows,macos,android
+Rust crate	tower-layer	0.3.3	MIT	windows,macos,android
+Rust crate	tower-service	0.3.3	MIT	windows,macos,android
+Rust crate	tracing	0.1.44	MIT	windows,macos,android
+Rust crate	tracing-core	0.1.36	MIT	windows,macos,android
+Rust crate	tray-icon	0.26.1	MIT OR Apache-2.0	windows,macos
+Rust crate	try-lock	0.2.5	MIT	windows,macos,android
+Rust crate	ttf-parser	0.25.1	MIT OR Apache-2.0	windows,macos
+Rust crate	typeid	1.0.3	MIT OR Apache-2.0	windows,macos
+Rust crate	typenum	1.20.1	MIT OR Apache-2.0	windows,macos
+Rust crate	unicase	2.10.0	MIT OR Apache-2.0	windows,macos,android
+Rust crate	unicode-bidi	0.3.18	MIT OR Apache-2.0	windows,macos
+Rust crate	unicode-bidi-mirroring	0.4.0	MIT/Apache-2.0	windows,macos
+Rust crate	unicode-ccc	0.4.0	MIT/Apache-2.0	windows,macos
+Rust crate	unicode-ident	1.0.27	(MIT OR Apache-2.0) AND Unicode-3.0	windows,macos
+Rust crate	unicode-properties	0.1.5	(MIT OR Apache-2.0) AND Unicode-3.0	windows,macos
+Rust crate	unicode-script	0.5.9	MIT OR Apache-2.0	windows,macos
+Rust crate	unicode-segmentation	1.13.3	MIT OR Apache-2.0	windows,macos
+Rust crate	unicode-vo	0.1.0	MIT/Apache-2.0	windows,macos
+Rust crate	unicode-width	0.2.3	MIT OR Apache-2.0	windows,macos
+Rust crate	uniffi	0.32.2	MPL-2.0	android
+Rust crate	uniffi_core	0.32.2	MPL-2.0	android
+Rust crate	uniffi_pipeline	0.32.2	MPL-2.0	android
+Rust crate	untrusted	0.9.0	ISC	windows,macos,android
+Rust crate	url	2.5.9	MIT OR Apache-2.0	windows,macos,android
+Rust crate	usvg	0.45.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	utf-8	0.7.6	MIT OR Apache-2.0	windows
+Rust crate	utf8_iter	1.1.0	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	utf_types	1.0.0	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	uuid	1.29.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	v_frame	0.3.9	BSD-2-Clause	windows,macos
+Rust crate	value-bag	1.14.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	value-bag-serde1	1.14.1	Apache-2.0 OR MIT	windows,macos
+Rust crate	waker-fn	1.2.0	Apache-2.0 OR MIT	windows,macos
+Rust crate	walkdir	2.5.1	Unlicense/MIT	windows,macos
+Rust crate	want	0.3.2	MIT	windows,macos,android
+Rust crate	webpki-roots	1.0.12	CDLA-Permissive-2.0	windows,macos,android
+Rust crate	webview2-com	0.39.1	MIT	windows
+Rust crate	webview2-com-sys	0.39.1	MIT	windows
+Rust crate	weezl	0.1.12	MIT OR Apache-2.0	windows,macos
+Rust crate	which	6.0.3	MIT	windows,macos
+Rust crate	winapi	0.3.9	MIT/Apache-2.0	windows
+Rust crate	winapi-util	0.1.11	Unlicense OR MIT	windows
+Rust crate	windows	0.54.0	MIT OR Apache-2.0	windows
+Rust crate	windows	0.61.3	MIT OR Apache-2.0	windows
+Rust crate	windows	0.62.2	MIT OR Apache-2.0	windows
+Rust crate	windows-collections	0.2.0	MIT OR Apache-2.0	windows
+Rust crate	windows-collections	0.3.2	MIT OR Apache-2.0	windows
+Rust crate	windows-core	0.54.0	MIT OR Apache-2.0	windows
+Rust crate	windows-core	0.61.2	MIT OR Apache-2.0	windows
+Rust crate	windows-core	0.62.2	MIT OR Apache-2.0	windows
+Rust crate	windows-future	0.2.1	MIT OR Apache-2.0	windows
+Rust crate	windows-future	0.3.2	MIT OR Apache-2.0	windows
+Rust crate	windows-link	0.1.3	MIT OR Apache-2.0	windows
+Rust crate	windows-link	0.2.1	MIT OR Apache-2.0	windows
+Rust crate	windows-numerics	0.2.0	MIT OR Apache-2.0	windows
+Rust crate	windows-numerics	0.3.1	MIT OR Apache-2.0	windows
+Rust crate	windows-registry	0.4.0	MIT OR Apache-2.0	windows
+Rust crate	windows-registry	0.5.3	MIT OR Apache-2.0	windows
+Rust crate	windows-result	0.1.2	MIT OR Apache-2.0	windows
+Rust crate	windows-result	0.3.4	MIT OR Apache-2.0	windows
+Rust crate	windows-result	0.4.1	MIT OR Apache-2.0	windows
+Rust crate	windows-strings	0.3.1	MIT OR Apache-2.0	windows
+Rust crate	windows-strings	0.4.2	MIT OR Apache-2.0	windows
+Rust crate	windows-strings	0.5.1	MIT OR Apache-2.0	windows
+Rust crate	windows-sys	0.59.0	MIT OR Apache-2.0	windows
+Rust crate	windows-sys	0.61.2	MIT OR Apache-2.0	windows
+Rust crate	windows-targets	0.52.6	MIT OR Apache-2.0	windows
+Rust crate	windows-targets	0.53.5	MIT OR Apache-2.0	windows
+Rust crate	windows-threading	0.1.0	MIT OR Apache-2.0	windows
+Rust crate	windows-threading	0.2.1	MIT OR Apache-2.0	windows
+Rust crate	windows-version	0.1.7	MIT OR Apache-2.0	windows
+Rust crate	windows_x86_64_msvc	0.52.6	MIT OR Apache-2.0	windows
+Rust crate	windows_x86_64_msvc	0.53.1	MIT OR Apache-2.0	windows
+Rust crate	winreg	0.55.0	MIT	windows
+Rust crate	winsafe	0.0.19	MIT	windows
+Rust crate	writeable	0.6.4	Unicode-3.0	windows,macos,android
+Rust crate	wry	0.57.3	Apache-2.0 OR MIT	windows,macos
+Rust crate	xattr	0.2.3	MIT/Apache-2.0	macos
+Rust crate	xmlwriter	0.1.0	MIT	windows,macos
+Rust crate	y4m	0.8.0	MIT	windows,macos
+Rust crate	yoke	0.8.4	Unicode-3.0	windows,macos,android
+Rust crate	zed-async-tar	0.5.0-zed	MIT/Apache-2.0	windows,macos
+Rust crate	zed-font-kit	0.14.1-zed	MIT OR Apache-2.0	macos
+Rust crate	zed-reqwest	0.12.15-zed	MIT OR Apache-2.0	windows,macos
+Rust crate	zerocopy	0.8.64	BSD-2-Clause OR Apache-2.0 OR MIT	windows,macos
+Rust crate	zerofrom	0.1.8	Unicode-3.0	windows,macos,android
+Rust crate	zeroize	1.9.2	Apache-2.0 OR MIT	windows,macos,android
+Rust crate	zerotrie	0.2.5	Unicode-3.0	windows,macos,android
+Rust crate	zerovec	0.11.9	Unicode-3.0	windows,macos,android
+Rust crate	zmij	1.0.23	MIT	windows,macos,android
+Rust crate	zune-core	0.5.3	MIT OR Apache-2.0 OR Zlib	windows,macos
+Rust crate	zune-inflate	0.2.54	MIT OR Apache-2.0 OR Zlib	windows,macos
+Rust crate	zune-jpeg	0.5.15	MIT OR Apache-2.0 OR Zlib	windows,macos
